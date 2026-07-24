@@ -1,0 +1,133 @@
+{
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 2,
+    "intent_strategies": {},
+    "max_script_length": 100,
+    "max_parallel_scripts": 3
+  },
+  "field_aliases": {
+    "_comment": "套餐字段别名（按优先级从高到低列出），ScriptStep 按此映射取值，无需硬编码字段名",
+    "pkg_name": [
+      "offerName",
+      "package_name",
+      "productName",
+      "name"
+    ],
+    "pkg_fee": [
+      "initFee",
+      "monthly_fee",
+      "price",
+      "fee"
+    ],
+    "pkg_flow": [
+      "offerFlow",
+      "data_quota",
+      "dataGB",
+      "flow"
+    ],
+    "pkg_voice": [
+      "offerVoice",
+      "voice_quota",
+      "voiceMinutes",
+      "voice"
+    ]
+  },
+  "script_templates_v2": [
+    {
+      "province": "beijing",
+      "intent": "套餐推荐",
+      "template_name": "套餐推荐",
+      "scene": "",
+      "stage": "",
+      "product_id": "",
+      "template_content": "您好！您当前套餐为{cur_brief}，根据您近6个月的通信消费和使用情况{usage_line}。我为您推荐{pkg_brief}套餐，{diff_str}，您只需在现有月均消费的基础上少许增加，即可享受更多权益。",
+      "prompt_template": "你是移动套餐营销推荐坐席。\n请基于以下用户信息和话术模板生成个性化套餐营销推荐话术：\n\n话术模板：{template_content}\n\n直接输出话术文本，不需要前缀，口语化；营销推荐话术贴合用户痛点，字数{max_length}字以内。",
+      "linked_apis": [],
+      "status": "online",
+      "created_by": "import",
+      "created_at": "2026-04-25 21:02:51",
+      "template_id": "tpl_beijing_1777122171257_d6d0ec",
+      "linked_vars": [
+        "current_package",
+        "usage",
+        "user_info",
+        "pkg_brief",
+        "diff_str"
+      ],
+      "script_requirement": "直接输出话术文本，不需要前缀，口语化，亲切；营销推荐话术贴合用户痛点；话术模板中需要的数据必须展示，同时可在话术模板基础上结合用户情况生成个性化的话术，但不出现饱和度数据、资源减少的数据；结合字数100字以内。",
+      "updated_by": "admin"
+    },
+    {
+      "province": "beijing",
+      "intent": "套餐推荐",
+      "template_name": "套餐推荐",
+      "scene": "套餐升级",
+      "stage": "切入环节",
+      "product_id": "111602052881",
+      "template_content": "您好，您当前当前为xx，优惠期增加x元，享受xx",
+      "prompt_template": "你是移动套餐营销推荐坐席。\n请基于以下用户信息和话术模板生成个性化套餐营销推荐话术：\n\n话术模板：{template_content}\n\n直接输出话术文本，不需要前缀，口语化；营销推荐话术贴合用户痛点，字数{max_length}字以内。",
+      "linked_apis": [],
+      "status": "offline",
+      "created_by": "import",
+      "created_at": "2026-04-25 21:02:51",
+      "template_id": "tpl_beijing_1777122171282_4d16ab",
+      "linked_vars": [
+        "current_package",
+        "pkg_brief"
+      ],
+      "script_requirement": "直接输出话术文本，不需要前缀，口语化；面向营销切入环节，直接表面优化期的差异值，不需要做过多内容介绍。\n进行价格差异计算，计算规则如下：\n优惠后实际月费 = 目标套餐标价 - 每月固定优惠\n每月价格差异 = 优惠后实际月费 - 原套餐月费\n必须套用公式精确计算，禁止估算、禁止错算、禁止自定义价格",
+      "updated_by": "admin"
+    },
+    {
+      "province": "beijing",
+      "intent": "套餐推荐",
+      "template_name": "套餐推荐",
+      "scene": "",
+      "stage": "推荐环节",
+      "product_id": "111602052881",
+      "template_content": "根据您近6个月使用习惯语音xx分钟，优先推荐xx套餐，每月xx元，就能享受 xxGB 流量、xx分钟通话，还有 xxM 高速宽带和 IPTV / 移动高清基础会员，刚好覆盖您xx 的需求。",
+      "prompt_template": "你是移动套餐营销推荐坐席。\n请基于以下用户信息和话术模板生成个性化套餐营销推荐话术：\n\n话术模板：{template_content}\n\n直接输出话术文本，不需要前缀，口语化；营销推荐话术贴合用户痛点，字数{max_length}字以内。",
+      "linked_apis": [],
+      "status": "offline",
+      "created_by": "import",
+      "created_at": "2026-04-25 21:02:51",
+      "template_id": "tpl_beijing_1777122171310_a483bc",
+      "linked_vars": [
+        "current_package",
+        "usage",
+        "user_info",
+        "pkg_brief"
+      ],
+      "script_requirement": "直接输出话术文本，不需要前缀，口语化；营销推荐话术贴合用户痛点。用于营销环节，话术要体现出当前套餐与用户的起融合度；语气要贴合坐席、亲切；一切用户信息根据提供的信息来，不要编制用户需求、数据信息、及信息没有提供的权益等；宽带数据要准确是1000M、饱和度数据不展示给用户；\n计算当前套餐与目标套餐在价格上的差异，目标套餐的涉及分段计费，具体信息从套餐描述中获取"
+    },
+    {
+      "province": "beijing",
+      "intent": "套餐推荐",
+      "template_name": "套餐推荐",
+      "scene": "流量超套",
+      "stage": "切入环节",
+      "product_id": "111602052882",
+      "template_content": "您好，看到您当前语音/流量不够用，结合您近三个月使用数据，语音/流量xx，我们现在有xx套餐，很适合您的情况，给您简单介绍下。",
+      "prompt_template": "你是移动套餐营销推荐坐席。\n请基于以下用户信息和话术模板生成个性化套餐营销推荐话术：\n\n话术模板：{template_content}\n\n直接输出话术文本，不需要前缀，口语化；营销推荐话术贴合用户痛点，字数{max_length}字以内。",
+      "linked_apis": [],
+      "status": "offline",
+      "created_by": "import",
+      "created_at": "2026-04-25 21:02:51",
+      "template_id": "tpl_beijing_1777122171347_96a57f",
+      "linked_vars": [
+        "cur_brief",
+        "pkg_brief",
+        "diff_str",
+        "usage_line",
+        "user_tags"
+      ],
+      "script_requirement": "直接输出话术文本，不需要前缀，口语化；营销推荐话术贴合用户痛点，字数50字以内。",
+      "updated_by": "admin"
+    },
+    {
+      "template_id": "tpl_beijing_1777122171380_706dfe",
+      "status": "offline"
+    }
+  ]
+}

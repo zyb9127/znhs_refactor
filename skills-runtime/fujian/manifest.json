@@ -1,0 +1,14 @@
+{
+  "province_code": "fujian",
+  "province_name": "福建",
+  "enabled": true,
+  "version": "1.0.0",
+  "intents": {
+    "套餐推荐": {
+      "name": "套餐推荐",
+      "version": "1.0.0",
+      "enabled": true,
+      "description": "福建套餐智能推荐"
+    }
+  }
+}

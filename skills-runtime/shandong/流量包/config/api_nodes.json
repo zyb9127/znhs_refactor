@@ -1,0 +1,33 @@
+{
+  "main_api": {
+    "enabled": true,
+    "_comment": "山东流量包接口",
+    "url": "",
+    "method": "POST",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "timeout": 30,
+    "max_retries": 2,
+    "mock_mode": false,
+    "created_by": "auto_config_agent",
+    "created_at": "2026-07-21 17:09",
+    "source_type": "direct",
+    "direct_mode": "passthrough",
+    "passthrough_fields": [
+      "lastedMonth",
+      "3MonthsOutFlowFee",
+      "flowStandard"
+    ],
+    "request_template": {},
+    "response_extract": {},
+    "field_transform": {},
+    "mock_response": {
+      "lastedMonth": "6",
+      "3MonthsOutFlowFee": "35",
+      "flowStandard": "5"
+    },
+    "updated_by": "admin",
+    "updated_at": "2026-07-22 15:53:34"
+  }
+}

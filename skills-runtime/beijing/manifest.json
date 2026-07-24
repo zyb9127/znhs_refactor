@@ -1,0 +1,28 @@
+{
+  "province_code": "beijing",
+  "province_name": "北京",
+  "enabled": true,
+  "version": "1.0.0",
+  "intents": {
+    "套餐推荐": {
+      "name": "套餐推荐",
+      "version": "1.0.0",
+      "enabled": true,
+      "description": "基于用户画像和北京营销推荐接口，生成个性化套餐推荐话术"
+    },
+    "套餐升档": {
+      "name": "营销推荐",
+      "version": "1.0.0",
+      "enabled": true,
+      "description": "北京套餐升档推荐接口 — 获取用户当前套餐、推荐套餐列表及用量标签"
+    },
+    "等等": {
+      "name": "等等",
+      "version": "1.0.0",
+      "enabled": true,
+      "description": "等等",
+      "created_by": "auto_config_agent",
+      "created_at": "2026-07-20 16:40"
+    }
+  }
+}

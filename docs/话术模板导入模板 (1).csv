@@ -1,0 +1,2 @@
+模板名称,应用环节,应用场景,产品ID,话术内容,关联变量(用|分隔),状态(online/offline)
+A,推荐环节,套餐升级,prod001,您好，根据您的用量{usage}，推荐办理{pkg_brief}。,pkg_brief|usage,online

@@ -1,0 +1,24 @@
+{
+  "script_templates_v2": [
+    {
+      "province": "shandong",
+      "intent": "营销推荐",
+      "template_name": "营销推荐",
+      "template_content": "您好，根据您的用量{usage}，推荐办理{pkg_brief}。",
+      "product_id": "prod001",
+      "scene": "套餐升级",
+      "stage": "推荐环节",
+      "linked_vars": [
+        "pkg_brief",
+        "usage"
+      ],
+      "script_requirement": "结合【上下文数据】中的当前套餐、历史用量与用户标签，先点出最突出的用户痛点，再用推荐套餐对应字段的真实值说明如何解决；只讲有数据支撑的卖点，口语化、可直接对客播报，150字以内，结尾自然引导办理。",
+      "prompt_template": "",
+      "linked_apis": [],
+      "status": "online",
+      "created_by": "admin",
+      "template_id": "tpl_shandong_1784256818309_521ddb",
+      "created_at": "2026-07-17 10:53:38"
+    }
+  ]
+}

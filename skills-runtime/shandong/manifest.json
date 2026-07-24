@@ -1,0 +1,30 @@
+{
+  "province_code": "shandong",
+  "province_name": "山东",
+  "enabled": true,
+  "version": "1.0.0",
+  "intents": {
+    "营销推荐": {
+      "name": "营销推荐",
+      "version": "1.0.0",
+      "enabled": true,
+      "description": "山东营销智能推荐"
+    },
+    "流量包": {
+      "name": "流量包",
+      "version": "1.0.0",
+      "enabled": true,
+      "description": "流量包",
+      "created_by": "auto_config_agent",
+      "created_at": "2026-07-21 17:09"
+    },
+    "套餐升档": {
+      "name": "套餐升档",
+      "version": "1.0.0",
+      "enabled": true,
+      "description": "套餐升档",
+      "created_by": "auto_config_agent",
+      "created_at": "2026-07-21 17:12"
+    }
+  }
+}

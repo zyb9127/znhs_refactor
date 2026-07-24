@@ -1,0 +1,31 @@
+{
+  "$id": "api_nodes.schema.json",
+  "title": "接口节点配置 api_nodes.json",
+  "description": "顶层为 {节点名: 节点配置} 的动态映射（下划线开头的节点名被忽略），节点结构见 $defs/api_node（内置校验器对 additionalProperties 仅作提示不报错）。字段依据 steps/data_step.py 的读取逻辑。",
+  "type": "object",
+  "additionalProperties": {"$ref": "#/$defs/api_node"},
+  "$defs": {
+    "api_node": {
+      "type": "object",
+      "properties": {
+        "enabled":         {"type": "boolean", "description": "节点开关，默认 true"},
+        "source_type":     {"type": "string", "enum": ["api", "direct"], "description": "api=发 HTTP 请求（默认）；direct=以 ctx.extra_info 为数据源不调接口"},
+        "url":             {"type": "string", "description": "接口地址，参与缓存 key"},
+        "mock_mode":       {"type": "boolean", "description": "mock 开关，参与缓存 key"},
+        "timeout_seconds": {"type": "number", "description": "单接口超时秒数，默认 10"},
+        "request_template": {
+          "type": "object",
+          "description": "请求体模板；占位符优先级：固定参数({{PHONE}}/{{INTENT}}/{{CALL_ID}}/{{PROVINCE}}/{{TOP_N}}) < {{extra_data.x.y}} < ctx.extra_vars"
+        },
+        "response_extract": {
+          "type": "object",
+          "description": "第 1 步：{槽位名: 点分路径}，从原始响应取值到中间槽位；路径空或 $result 取整个响应；槽位名属于 7 大标准域时自动透传"
+        },
+        "field_transform": {
+          "type": "object",
+          "description": "第 2 步：{目标路径: 规则}，规则字段 from/type(passthrough|filter_include|include|filter_exclude|exclude|constant)/include_keys/exclude_keys/unit_convert/field_rename/value"
+        }
+      }
+    }
+  }
+}

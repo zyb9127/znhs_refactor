@@ -1,0 +1,96 @@
+{
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 3,
+    "intent_strategies": {},
+    "max_script_length": 100,
+    "max_parallel_scripts": 3
+  },
+  "field_aliases": {
+    "_comment": "套餐字段别名（按优先级列出）",
+    "pkg_name": [
+      "offerName",
+      "package_name",
+      "productName",
+      "name"
+    ],
+    "pkg_fee": [
+      "initFee",
+      "monthly_fee",
+      "price",
+      "fee"
+    ],
+    "pkg_flow": [
+      "offerFlow",
+      "data_quota",
+      "dataGB",
+      "flow"
+    ],
+    "pkg_voice": [
+      "offerVoice",
+      "voice_quota",
+      "voiceMinutes",
+      "voice"
+    ]
+  },
+  "script_templates_v2": [
+    {
+      "template_id": "tpl_beijing_upgrade_default",
+      "template_name": "套餐升档默认话术",
+      "intent": "套餐升档",
+      "province": "beijing",
+      "product_id": "",
+      "scene": "套餐升档",
+      "stage": "套餐升档",
+      "template_content": "您好！根据您近3个月平均使用{{data_usage_gb}}GB流量、{{voice_usage_min}}分钟通话，您目前套餐流量使用率已达{{flow_sat}}，为您推荐{{pkg_brief}}套餐，月租{{pkg_fee}}元，流量提升至{{pkg_flow}}GB，{{diff_str}}，更多实惠等您体验。",
+      "linked_vars": [
+        "cur_brief",
+        "pkg_brief",
+        "diff_str",
+        "usage_line",
+        "data_usage_gb",
+        "voice_usage_min",
+        "flow_sat"
+      ],
+      "script_requirement": "直接输出话术文本，不需要前缀，口语化；套餐升档推荐话术贴合用户流量/语音痛点，字数100字以内。",
+      "status": "offline",
+      "created_by": "system"
+    },
+    {
+      "template_id": "tpl_beijing_upgrade_5g",
+      "template_name": "套餐升档",
+      "intent": "套餐升档",
+      "province": "beijing",
+      "product_id": "111601000462",
+      "scene": "套餐升档",
+      "stage": "5G推广",
+      "template_content": "您好，您现在使用的是{{cur_brief}}，近期流量使用率{{flow_sat}}，已接近上限。为您推荐{{pkg_brief}}，月租仅需{{pkg_fee}}元，流量翻倍，5G极速体验，{{diff_str}}，活动期间办理还有专属优惠哦！",
+      "linked_vars": [
+        "cur_brief",
+        "pkg_brief",
+        "diff_str",
+        "usage_line",
+        "user_tags"
+      ],
+      "script_requirement": "突出5G体验和流量升级优势，语气热情，字数80字以内。",
+      "status": "online",
+      "created_by": "system",
+      "linked_apis": []
+    },
+    {
+      "province": "beijing",
+      "intent": "套餐升档",
+      "template_name": "套餐推荐",
+      "scene": "",
+      "stage": "",
+      "product_id": "",
+      "template_content": "您好！您当前套餐为xx，根据您近几个月的通信消费和使用情况xx。我为您推荐xx套餐，{diff_str}，您只需在现有月均消费的基础上少许增加，即可享受更多权益。",
+      "prompt_template": "你是移动套餐营销推荐坐席。\n请基于以下用户信息和话术模板生成个性化套餐营销推荐话术：\n\n话术模板：{template_content}\n\n直接输出话术文本，不需要前缀，口语化；营销推荐话术贴合用户痛点，字数{max_length}字以内。",
+      "linked_apis": [],
+      "status": "offline",
+      "created_by": "import",
+      "created_at": "2026-04-24 14:10:02",
+      "template_id": "tpl_beijing_1777011002861_ccf5b8"
+    }
+  ]
+}

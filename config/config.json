@@ -1,0 +1,64 @@
+{
+  "_comment": "应用级配置 - 仅保留端口、日志、数据库、缓存等，LLM/API 等业务配置见 agents_config.json",
+  "app": {
+    "name": "营销话术推荐智能体",
+    "version": "3.0.0",
+    "description": "基于3智能体协同架构的营销话术推荐系统",
+    "host": "127.0.0.1",
+    "port": 8000,
+    "debug": true,
+    "_comment_environment": "运行环境（可被环境变量 LINGYUN_ENV 覆盖）：development=本地开发(mock/跳过ES/关鉴权/前缀/znhs-gray)；gray=灰度(真实接口+强制鉴权+前缀/znhs-gray)；production=生产(真实接口+强制鉴权+前缀/znhs)；production_noauth=保持生产行为但关闭鉴权(真实接口/ES/Redis/LLM host/前缀/znhs-gray，仅受控测试用，勿长期用于正式生产)。详见 docs/环境配置模式说明.md",
+    "environment": "development"
+  },
+  "database": {
+    "_comment": "数据库配置（可选）",
+    "type": "mysql",
+    "host": "localhost",
+    "port": 3306,
+    "username": "root",
+    "password": "password",
+    "database": "marketing_agent",
+    "pool_size": 10
+  },
+  "redis": {
+    "_comment": "Redis缓存配置（可选，用于用户画像缓存）",
+    "host": "localhost",
+    "port": 6379,
+    "db": 0,
+    "password": "",
+    "expire_time": 3600
+  },
+  "logging": {
+    "level": "DEBUG",
+    "format": "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+    "rotation": "100 MB",
+    "retention": "30 days",
+    "log_dir": "logs"
+  },
+  "cache": {
+    "_comment": "用户画像内存缓存配置",
+    "enabled": true,
+    "ttl": 3600,
+    "max_size": 10000
+  },
+  "elasticsearch": {
+    "_comment": "ES 配置存储（znhs-agent 专属 index，不影响其他服务）",
+    "hosts": [],
+    "username": "",
+    "password": "",
+    "index_configs": "znhs-agent-skill-configs",
+    "index_meta": "znhs-agent-skill-config-meta",
+    "max_versions": 5
+  },
+  "redis_bus": {
+    "_comment": "Redis 配置总线（znhs:agent: 前缀隔离，不影响其他服务）",
+    "_comment_sync": "多实例配置同步方式：sync_mode=pubsub|poll|hybrid（默认 hybrid，Pub/Sub 低延迟 + ES 定时轮询自愈兜底）；poll_interval_seconds 为 ES 轮询间隔秒数（默认 300 即 5 分钟，仅 poll/hybrid 生效）",
+    "sync_mode": "hybrid",
+    "poll_interval_seconds": 300,
+    "cluster_nodes": [],
+    "password": "",
+    "key_prefix": "znhs:agent:cfg:",
+    "cache_ttl": 7200,
+    "pubsub_channel": "znhs:agent:config:changed"
+  }
+}

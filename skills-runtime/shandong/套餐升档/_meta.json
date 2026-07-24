@@ -1,0 +1,24 @@
+{
+  "skill_id": "shandong-套餐升档",
+  "name": "shandong-套餐升档",
+  "description": "套餐升档",
+  "version": "1.0.0",
+  "status": "published",
+  "type": "scenario",
+  "province": "shandong",
+  "scenario_id": "套餐升档",
+  "config_files": [
+    "api_nodes.json",
+    "biz_config.json"
+  ],
+  "required_plugins": [
+    "plugins.package_diff",
+    "plugins.unit_converter"
+  ],
+  "author": "admin",
+  "created_by": "auto_config_agent",
+  "created_at": "2026-07-21 17:12",
+  "updated_at": "2026-07-21 17:12",
+  "openclaw_compatible": true,
+  "published_at": "2026-07-22 16:35"
+}

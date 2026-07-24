@@ -1,0 +1,39 @@
+{
+  "$id": "biz_config.schema.json",
+  "title": "业务配置 biz_config.json",
+  "description": "宽松校验：只约束已知 key 的类型，不禁止额外字段（现网配置存在杂字段）。字段依据 steps/script_step.py 与 core/pipeline.py 的读取逻辑。",
+  "type": "object",
+  "properties": {
+    "strategy": {
+      "type": "object",
+      "description": "策略与生成参数",
+      "properties": {
+        "default_strategy":     {"type": "string", "description": "推荐策略名，默认 direct"},
+        "max_script_length":    {"type": "integer", "description": "单条话术最大长度，默认 100"},
+        "max_parallel_scripts": {"type": "integer", "description": "话术生成并发数（历史字段）"},
+        "llm_max_concurrency":  {"type": "integer", "description": "LLM 调用并发信号量上限；缺省不限流"}
+      }
+    },
+    "field_aliases": {
+      "type": "object",
+      "description": "产品字段别名表：{标准字段名: [候选字段名...]}，如 product_id -> [offerId, product_id, package_id, offer_id]"
+    },
+    "script_templates_v2": {
+      "type": "array",
+      "description": "新格式话术模板列表，单条结构见 template.schema.json",
+      "items": {"type": "object"}
+    },
+    "script_templates": {
+      "type": "object",
+      "description": "旧格式模板：{意图: {template_content: ...}}，作为兜底"
+    },
+    "prompts": {
+      "type": "object",
+      "description": "Prompt 模板：首选 package_recommendation.user_prompt_template，否则取第一个 key"
+    },
+    "pipeline": {
+      "type": "object",
+      "description": "可选组件化管道定义，结构见 pipeline.schema.json"
+    }
+  }
+}

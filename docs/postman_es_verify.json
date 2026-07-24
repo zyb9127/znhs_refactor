@@ -1,0 +1,380 @@
+{
+  "info": {
+    "name": "znhs-agent ES 数据验证",
+    "_postman_id": "znhs-es-verify-001",
+    "description": "验证 ES 中是否存有 api_nodes / biz_config / skill_meta 配置数据。\n\n地址：http://172.19.89.131:9211（三节点任选一个即可）\n索引：znhs-agent-skill-configs（数据）/ znhs-agent-skill-config-meta（版本指针）\n鉴权：Basic developer / DXgK&7CY\n\n建议按序执行：\n  1. 集群健康检查\n  2. 查看所有索引\n  3. 数据索引文档总数\n  4. match_all 遍历（最多20条，看有无数据）\n  5. 按 config_type 分桶统计\n  6. 查看所有 api_nodes 记录\n  7. 查看所有 biz_config 记录\n  8. 查看所有 skill_meta 记录\n  9. 版本指针索引总数\n  10. 查看版本指针\n  11. 按省份+意图精确查 api_nodes（示例：beijing/套餐推荐）\n  12. 按省份+意图精确查 biz_config（示例：beijing/套餐推荐）",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "ES_HOST",      "value": "http://172.19.89.131:9211"},
+    {"key": "IDX_CONFIGS",  "value": "znhs-agent-skill-configs"},
+    {"key": "IDX_META",     "value": "znhs-agent-skill-config-meta"},
+    {"key": "AUTH",         "value": "ZGV2ZWxvcGVyOkRYZ0smN0NZ"}
+  ],
+  "auth": {
+    "type": "basic",
+    "basic": [
+      {"key": "username", "value": "developer", "type": "string"},
+      {"key": "password", "value": "DXgK&7CY",  "type": "string"}
+    ]
+  },
+  "item": [
+    {
+      "name": "1. 集群健康检查",
+      "request": {
+        "method": "GET",
+        "url": "{{ES_HOST}}/_cluster/health?pretty"
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('集群状态正常', () => {",
+            "  pm.response.to.have.status(200);",
+            "  const body = pm.response.json();",
+            "  pm.expect(body.status).to.be.oneOf(['green','yellow'], '集群状态应为 green 或 yellow');",
+            "});",
+            "console.log('集群状态:', pm.response.json().status);"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "2. 查看所有索引（确认 znhs 索引存在）",
+      "request": {
+        "method": "GET",
+        "url": "{{ES_HOST}}/_cat/indices?v&pretty"
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('znhs-agent-skill-configs 索引存在', () => {",
+            "  pm.expect(pm.response.text()).to.include('znhs-agent-skill-configs');",
+            "});",
+            "console.log(pm.response.text());"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "3. 数据索引文档总数",
+      "request": {
+        "method": "GET",
+        "url": "{{ES_HOST}}/{{IDX_CONFIGS}}/_count?pretty"
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('能查到文档总数', () => {",
+            "  pm.response.to.have.status(200);",
+            "  const body = pm.response.json();",
+            "  console.log('znhs-agent-skill-configs 文档总数:', body.count);",
+            "  pm.expect(body.count).to.be.a('number');",
+            "  if (body.count === 0) {",
+            "    console.warn('⚠️ 索引为空，ES 中没有任何技能包配置！');",
+            "  } else {",
+            "    console.log('✅ ES 中有配置数据，共', body.count, '个版本文档');",
+            "  }",
+            "});"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "4. match_all 遍历（前20条，看数据结构）",
+      "request": {
+        "method": "GET",
+        "url": "{{ES_HOST}}/{{IDX_CONFIGS}}/_search?pretty",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": { \"match_all\": {} },\n  \"size\": 20,\n  \"_source\": [\"province\", \"intent\", \"config_type\", \"version\", \"status\", \"published_at\", \"published_by\"]\n}"
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('match_all 查询成功', () => {",
+            "  pm.response.to.have.status(200);",
+            "  const body = pm.response.json();",
+            "  const total = body.hits.total.value || body.hits.total;",
+            "  console.log('命中文档总数:', total);",
+            "  const hits = body.hits.hits || [];",
+            "  const skills = {};",
+            "  hits.forEach(h => {",
+            "    const s = h._source;",
+            "    const key = s.province + ':' + s.intent;",
+            "    if (!skills[key]) skills[key] = [];",
+            "    skills[key].push(s.config_type + ' v' + s.version + ' [' + s.status + ']');",
+            "  });",
+            "  console.log('技能包列表（前20条）:');",
+            "  Object.entries(skills).forEach(([k,v]) => console.log(' ', k, '->', v.join(', ')));",
+            "  if (total === 0) {",
+            "    console.warn('⚠️ 没有找到任何已发布的技能包配置');",
+            "  }",
+            "});"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "5. 按 config_type 分桶统计",
+      "request": {
+        "method": "GET",
+        "url": "{{ES_HOST}}/{{IDX_CONFIGS}}/_search?pretty",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"size\": 0,\n  \"aggs\": {\n    \"by_type\": {\n      \"terms\": { \"field\": \"config_type\", \"size\": 20 }\n    },\n    \"by_status\": {\n      \"terms\": { \"field\": \"status\", \"size\": 10 }\n    },\n    \"by_province\": {\n      \"terms\": { \"field\": \"province\", \"size\": 50 }\n    }\n  }\n}"
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('聚合统计成功', () => {",
+            "  pm.response.to.have.status(200);",
+            "  const aggs = pm.response.json().aggregations || {};",
+            "  const types   = (aggs.by_type   || {}).buckets || [];",
+            "  const statuses = (aggs.by_status  || {}).buckets || [];",
+            "  const provs    = (aggs.by_province || {}).buckets || [];",
+            "  console.log('=== 配置类型分布 ===');",
+            "  types.forEach(b => console.log(' ', b.key, ':', b.doc_count, '个版本'));",
+            "  const typeKeys = types.map(b => b.key);",
+            "  const hasApiNodes  = typeKeys.includes('api_nodes');",
+            "  const hasBizConfig = typeKeys.includes('biz_config');",
+            "  console.log(hasApiNodes  ? '✅ api_nodes 存在'  : '❌ api_nodes 不存在！');",
+            "  console.log(hasBizConfig ? '✅ biz_config 存在' : '❌ biz_config 不存在！');",
+            "  console.log('=== 状态分布 ===');",
+            "  statuses.forEach(b => console.log(' ', b.key, ':', b.doc_count));",
+            "  console.log('=== 省份分布 ===');",
+            "  provs.forEach(b => console.log(' ', b.key, ':', b.doc_count));",
+            "});"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "6. 查询所有 api_nodes（接口配置，published 状态）",
+      "request": {
+        "method": "GET",
+        "url": "{{ES_HOST}}/{{IDX_CONFIGS}}/_search?pretty",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": {\n    \"bool\": {\n      \"must\": [\n        { \"term\": { \"config_type\": \"api_nodes\" } },\n        { \"term\": { \"status\":      \"published\"  } }\n      ]\n    }\n  },\n  \"size\": 50,\n  \"_source\": [\"province\", \"intent\", \"config_type\", \"version\", \"status\", \"published_at\", \"data\"]\n}"
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('api_nodes 查询成功', () => {",
+            "  pm.response.to.have.status(200);",
+            "  const hits = pm.response.json().hits.hits || [];",
+            "  console.log('=== api_nodes published 列表 ===');",
+            "  hits.forEach(h => {",
+            "    const s = h._source;",
+            "    const nodeKeys = s.data ? Object.keys(s.data) : [];",
+            "    console.log(` ${s.province}/${s.intent} v${s.version} | 接口节点: [${nodeKeys.join(', ')}]`);",
+            "  });",
+            "  if (hits.length === 0) console.warn('⚠️ ES 中没有 api_nodes 配置');",
+            "  else console.log('✅ 共', hits.length, '个技能包有 api_nodes 配置');",
+            "});"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "7. 查询所有 biz_config（话术模板配置，published 状态）",
+      "request": {
+        "method": "GET",
+        "url": "{{ES_HOST}}/{{IDX_CONFIGS}}/_search?pretty",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": {\n    \"bool\": {\n      \"must\": [\n        { \"term\": { \"config_type\": \"biz_config\" } },\n        { \"term\": { \"status\":      \"published\"  } }\n      ]\n    }\n  },\n  \"size\": 50,\n  \"_source\": [\"province\", \"intent\", \"config_type\", \"version\", \"status\", \"published_at\", \"data\"]\n}"
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('biz_config 查询成功', () => {",
+            "  pm.response.to.have.status(200);",
+            "  const hits = pm.response.json().hits.hits || [];",
+            "  console.log('=== biz_config published 列表 ===');",
+            "  hits.forEach(h => {",
+            "    const s = h._source;",
+            "    const tpls = ((s.data || {}).script_templates_v2 || []).length;",
+            "    const topN = ((s.data || {}).strategy || {}).top_n || 0;",
+            "    console.log(` ${s.province}/${s.intent} v${s.version} | 话术模板数: ${tpls} | top_n: ${topN}`);",
+            "  });",
+            "  if (hits.length === 0) console.warn('⚠️ ES 中没有 biz_config 配置');",
+            "  else console.log('✅ 共', hits.length, '个技能包有 biz_config 配置');",
+            "});"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "8. 查询所有 skill_meta（结构化信息，published 状态）",
+      "request": {
+        "method": "GET",
+        "url": "{{ES_HOST}}/{{IDX_CONFIGS}}/_search?pretty",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": {\n    \"bool\": {\n      \"must\": [\n        { \"term\": { \"config_type\": \"skill_meta\" } },\n        { \"term\": { \"status\":      \"published\"  } }\n      ]\n    }\n  },\n  \"size\": 50,\n  \"_source\": [\"province\", \"intent\", \"version\", \"status\", \"published_at\", \"data\"]\n}"
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('skill_meta 查询成功', () => {",
+            "  pm.response.to.have.status(200);",
+            "  const hits = pm.response.json().hits.hits || [];",
+            "  console.log('=== skill_meta published 列表 ===');",
+            "  hits.forEach(h => {",
+            "    const s = h._source;",
+            "    const d = s.data || {};",
+            "    console.log(` ${s.province}/${s.intent} v${s.version} | 名称: ${d.skill_name} | 状态: ${d.status}`);",
+            "  });",
+            "  if (hits.length === 0) {",
+            "    console.warn('⚠️ 没有 skill_meta（需重启服务触发存量迁移，或 POST /api/skill-meta/sync）');",
+            "  } else {",
+            "    console.log('✅ 共', hits.length, '个技能包有 skill_meta');",
+            "  }",
+            "});"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "9. 版本指针索引文档总数",
+      "request": {
+        "method": "GET",
+        "url": "{{ES_HOST}}/{{IDX_META}}/_count?pretty"
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('meta 索引可访问', () => {",
+            "  pm.response.to.have.status(200);",
+            "  const count = pm.response.json().count;",
+            "  console.log('znhs-agent-skill-config-meta 指针文档总数:', count);",
+            "});"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "10. 查看版本指针（meta 索引，前20条）",
+      "request": {
+        "method": "GET",
+        "url": "{{ES_HOST}}/{{IDX_META}}/_search?pretty",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": { \"match_all\": {} },\n  \"size\": 20\n}"
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('meta 版本指针查询', () => {",
+            "  pm.response.to.have.status(200);",
+            "  const hits = pm.response.json().hits.hits || [];",
+            "  console.log('=== 版本指针列表 ===');",
+            "  hits.forEach(h => {",
+            "    console.log(` ${h._id} -> published_version: ${h._source.published_version}, archived: [${(h._source.versions||[]).join(',')}]`);",
+            "  });",
+            "  if (hits.length === 0) console.warn('⚠️ meta 索引为空，说明从未通过 SkillManager 发布过配置');",
+            "});"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "11. 精确查 api_nodes（beijing/套餐推荐）",
+      "request": {
+        "method": "GET",
+        "url": "{{ES_HOST}}/{{IDX_CONFIGS}}/_search?pretty",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": {\n    \"bool\": {\n      \"must\": [\n        { \"term\": { \"province\":    \"beijing\"   } },\n        { \"term\": { \"intent\":      \"套餐推荐\"  } },\n        { \"term\": { \"config_type\": \"api_nodes\" } },\n        { \"term\": { \"status\":      \"published\" } }\n      ]\n    }\n  },\n  \"size\": 5\n}"
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('beijing/套餐推荐 api_nodes 查询', () => {",
+            "  pm.response.to.have.status(200);",
+            "  const hits = pm.response.json().hits.hits || [];",
+            "  if (hits.length > 0) {",
+            "    const d = hits[0]._source.data || {};",
+            "    console.log('✅ 找到 api_nodes，接口节点:', Object.keys(d));",
+            "    console.log('最新版本:', hits[0]._source.version);",
+            "  } else {",
+            "    console.warn('⚠️ beijing/套餐推荐 没有 api_nodes（可换其他省份/意图试试）');",
+            "  }",
+            "});"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "12. 精确查 biz_config（beijing/套餐推荐）",
+      "request": {
+        "method": "GET",
+        "url": "{{ES_HOST}}/{{IDX_CONFIGS}}/_search?pretty",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": {\n    \"bool\": {\n      \"must\": [\n        { \"term\": { \"province\":    \"beijing\"    } },\n        { \"term\": { \"intent\":      \"套餐推荐\"   } },\n        { \"term\": { \"config_type\": \"biz_config\" } },\n        { \"term\": { \"status\":      \"published\"  } }\n      ]\n    }\n  },\n  \"size\": 5\n}"
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "pm.test('beijing/套餐推荐 biz_config 查询', () => {",
+            "  pm.response.to.have.status(200);",
+            "  const hits = pm.response.json().hits.hits || [];",
+            "  if (hits.length > 0) {",
+            "    const d = hits[0]._source.data || {};",
+            "    const tpls = (d.script_templates_v2 || []);",
+            "    console.log('✅ 找到 biz_config');",
+            "    console.log('  话术模板数:', tpls.length);",
+            "    tpls.slice(0,3).forEach(t => console.log('  -', t.template_id, t.template_name));",
+            "    console.log('  strategy:', JSON.stringify(d.strategy));",
+            "  } else {",
+            "    console.warn('⚠️ beijing/套餐推荐 没有 biz_config（可换其他省份/意图试试）');",
+            "  }",
+            "});"
+          ]
+        }
+      }]
+    }
+  ]
+}

@@ -1,0 +1,1917 @@
+请搭建一个营销推荐智能体
+一、具体流程
+ 1、用户意图：推荐套餐 
+ 2、根据用户意图查询用户个人信息，包括：当前用户套餐信息、近半年历史用量、用户标签信息；  —— “个人信息融合智能体”自主调用查询接口，输入参数用户手机号；
+ 3、形成用户画像信息； ——“个人信息融合智能体”自主执行；
+ 4、查询营销推荐套餐清单，含具体套餐信息；  —— “用户营销话术推荐”智能体自主调用查询接口；
+ 5、结合用户画像 和 营销套餐信息，生成推荐最优套餐；  —— “用户营销话术推荐”智能体自主生成；
+ 6、匹配用户意图的话术模板； —— “用户营销话术推荐”智能体自主查询匹配；
+ 7、结合话术模板，并结合用户画像，结合推荐的营销套餐信息，生成用户个性化的套餐推荐话术，体现符合用户特征和需求的话术；—— “用户营销话术推荐”智能体自主生成；
+
+ 二、技术架构
+   1、前端可以配置话术模板；用户意图：话术模板，需生成用户套餐推荐的意图和话术体系；
+   2、前端可以配置接口调用（针对不同的省份）；
+   3、话术生成通过大模型生成；
+   4、智能体架构可以考虑采用Cluade Agent Skills，或者langchain1.1主流的框架
+   5、设计架构需要方便能力和场景拓展，可以适配不同场景的用户意图体系；
+   6、架构设计考虑多智能体协同；
+
+
+一、前端可以实现
+1、接口配置：支持修改、删除、增加
+2、话术配置：支持修改、删除、增加
+3、意图对应的工作流也可以配置；
+
+1、主动挖掘商机：爱家套餐，更高的结算金额，
+2、当前最新套餐的资费的比对；
+3、
+
+
+
+可以实现3个智能体
+（1）用户融合信息智能体：查询用户订购、用量、用户标签，形成用户通信画像；
+（2）推荐策略智能体：用户通信画像匹配推荐策略，形成推荐产品和特征；
+（3）话术生成智能体：用户意图匹配话术模板、通信画像、推荐产品和特征，生成推荐话术；
+（4）三个智能体需要协同，同一个用户，用户融合信息智能体调用一次，推荐策略智能体、话术生成智能体可以根据不同的参数多次调用；
+
+新的智能体可以前端配置
+1、基于主流agent框架（langchain1.0）完成工作流配置和智能体协同能力构建。
+2、按照不同省份配置上述三个智能体，以支撑个性化需求；
+3、架构设计需要灵活，可快速适配个性化需求；
+
+
+需要前端优化调整
+1、前端支持根据不同省份对3个智能体进行配置；
+2、配置包括
+   1、分省的话术模板配置
+   2、分省的接口调用配置；
+   3、分省可以对3个智能体内部工作流进行配置；
+   4、分省可以对3个智能体的协同进行配置；
+
+
+
+设计优化：
+1、工作流中的配置流程中，例如：用户融合信息智能体工作流中的查询用户标签query_tags，这个配置是否有分省的实现函数。
+2、不同的省话术模板和一个配置文件；
+
+
+
+本地测试前端打包，为和灰度一样，用gray
+1.npm run build:gray  ——>生成dist
+2.config/config.json 文件中environment为"development"
+
+启动main.py
+访问：http://localhost:8000/znhs-gray/SkillManager
+
+白屏
+
+
+自动配置智能体发布功能优化
+1、http://localhost:8000/znhs-gray/SkillManager ，页面需要优化，列表宽度可以自适应拉伸；
+2、点了发布按钮的skill可被调度到；
+3、点了回滚按钮的，可以选择回滚到之前的skill;
+4、skill的状态需要优化，方便维护，例如：编辑中、已发布；可参考业内的设计
+5、已发布的skill不能直接删除；需要有一定的安全机制；
+
+
+SKILL 管理的优化
+1、每个skill点编辑后，对接口的配置tab，可复用接口配置页面http://localhost:8000/znhs-gray/InterfaceMapper的查看、编辑、智能映射的配置页面的功能
+2、每个skill点编辑后，对话术模板的配置tab，可复用话术模板配置页面http://localhost:8000/znhs-gray/TemplateConfig的查看、编辑的配置页面的功能
+3、一键配置除了导入配置，克隆配置，新增按照流程一步步配置的tab，作为首选项；
+
+
+
+每个skill的话术模板编辑的页面需要优化，更方便人去编辑，自适应大小，支持翻页（每 20 条）；同时支持导入，复用术模板配置页面http://localhost:8000/znhs-gray/TemplateConfig的导入；
+
+每个skill的接口编辑的页面需要优化，更方便人去编辑，自适应大小；
+
+每个skill管理的接口编辑的页面需要优化，支持翻页（每 20 条）；
+
+
+每个skill管理，点编辑的弹窗，可以鼠标拉宽，同时上下可自适应滚动条；
+skill管理的 ，接口编辑功能完全接口配置页面http://localhost:8000/znhs-gray/InterfaceMapper的查看、编辑、智能映射的配置页面的功能
+
+例如：
+份	接口名称	接口描述	接口状态	映射规则	创建人	创建时间	操作
+北京	北京测试接口_api	营销推荐话术获取接口	
+extracttransform	interface_mapper_agent	2026-05-06 10:55	
+查看
+|
+编辑
+|
+智能映射
+|
+删除
+
+
+
+skill管理优化
+1、选skill->点编辑
+2、话术模版tab
+3、点编辑或添加模版的页面，完全复用话术模板配置页面http://localhost:8000/znhs-gray/TemplateConfig的编辑和添加页面的；
+4、同时优化页面布局，让更加自适应宽度和长度，更好操作，更美观；
+
+
+skill管理优化
+1、选skill->点编辑
+2、接口模版tab
+3、点编辑或添加模版的页面，完全复用接口模板配置页面http://localhost:8000/znhs-gray/MappingConfig的编辑和添加页面的；
+4、同时优化页面布局，让更加自适应宽度和长度，更好操作，更美观；
+
+
+
+skill管理优化
+1、选skill->点编辑
+2、接口模版tab
+3、
+映射规则
+extract
+transform
+
+
+skill管理优化
+页面的描述上很多是英文的，整体修改成中文的，方便用户理解
+例如：
+映射规则
+extract
+transform
+需要改成中文的描述
+
+
+请结合接口测试到话术模板槽位的设计文档
+优化skill管理中的接口和话术的配置交互
+更方便和理解如何从接口编辑 到 话术模板编辑的逻辑关系；可以请清晰的映射和勾选；更完美的实现contex 工程
+
+
+上传的接口文档到话术槽位的映射主要参考模块interface_mapper
+请针对模块interface_mapper，优化skill管理中：
+1、接口配置
+2、话术模板
+3、数据流映射
+三个 tab 的前端交互映射逻辑，让更逻辑更清晰，更好进行配置；但是不需要修改后端都算法代码；
+
+
+skill管理优化
+创建skill取消克隆 和 附件导入，只保留步骤创建；
+步骤创建的功能优化逻辑，参考skill管理编辑里的接口配置和话术模板配置，以及数据流映射、
+
+
+数据流映射tab页面需要优化。
+不光只能查看，也能在页面完成三个维度的配置关联
+① 接口节点 产出哪些标准域 + 字段
+② 标准数据域 resource_context 的 7 大固定域
+③ 话术模板 linked_vars 消费哪些标准域
+三个维度的配置关联，并保存到skill文件；
+
+
+@营销话术智能体/znhs ，给出项目详细的从接口响应出参的， 如何映射到② 标准数据域 resource_context 的 7 大固定域， 再到话术模板关联② 标准数据域 resource_context 的 7 大固定域
+
+
+数据流映射中接口节点的页面太复杂，无法理解如何映射到② 标准数据域 resource_context 的 7 大固定域
+
+请重新设计页面，让更好理解逻辑
+
+
+① 接口节点 产出哪些标准域 + 字段
+北京测试接口_api
+营销推荐话术获取接口
+历史用量
+usage
+保留字段
+→ data_usage
+来自 raw_tags
+近3月流量饱和度
+近6月平均流量饱和度
+近3月平均流量(MB）⚖
+近6月平均流量(MB）⚖
+近3月平均流量饱和度
+保留字段
+→ voice_usage
+来自 raw_tags
+近3月语音饱和度
+近6月平均语音饱和度
+近3月平均语音饱和度
+近3月平均主叫时长⚖
+近6月平均主叫时长⚖
+保留字段
+→ consumption
+来自 raw_tags
+近6月平均折后收入
+近3月平均折后收入
+近3月平均月消费
+近6月平均月消费
+用户标签
+tags
+排除字段
+来自 raw_tags
+排除：
+近3月流量饱和度
+近6月平均流量饱和度
+近3月平均流量(MB）
+近6月平均流量(MB）
+近3月平均流量饱和度
+近3月语音饱和度
++8
+当前套餐
+current_package
+响应提取
+来自 bean.mainoffer
+推荐产品
+recommended_packages
+响应提取
+来自 bean.recommend_results
+⚙ 产出标准域：
+被 0 个模板引用
+
+
+响应提取中的字段：
+来自 bean.mainoffer
+仅做响应路径提取，未配置字段映射
+
+不能直接理解什么是响应提取
+bean.mainoffer是哪来的
+
+
+保留字段
+→ data_usage
+来自 raw_tags
+近3月流量饱和度
+近6月平均流量饱和度
+近3月平均流量(MB）⚖
+近6月平均流量(MB）⚖
+近3月平均流量饱和度
+保留字段
+→ voice_usage
+来自 raw_tags
+近3月语音饱和度
+近6月平均语音饱和度
+近3月平均语音饱和度
+近3月平均主叫时长⚖
+近6月平均主叫时长⚖
+
+
+字段没有来源的说明
+
+
+② 标准数据域 resource_context 的 7 大固定域
+这个需要有个单独的配置查看菜单，放到skill管理中
+
+
+
+
+第 ③ 步 · 出参映射（输出）
+有三个文本框，例如：
+1、粘贴接口成功响应 JSON 样例，点击「智能分析」自动生成响应提取规则与字段转换规则。
+2、响应提取规则（response_extract）
+3、字段转换规则（field_transform）
+
+这三个框不能直接看出相关逻辑，需要优化重新设计，更好理解输入与输出的要求与格式
+
+
+
+点击智能分析按钮报错，因为这个是调用内网大模型
+NFO:     127.0.0.1:52940 - "GET /znhs-gray/api/auto-config/skills?province=&intent= HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52940 - "GET /znhs-gray/api/interfaces?province=beijing HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52940 - "GET /znhs-gray/api/auto-config/skills/beijing/%E5%A5%97%E9%A4%90%E6%8E%A8%E8%8D%90/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52972 - "GET /znhs-gray/api/interfaces/beijing/%E5%A5%97%E9%A4%90%E6%8E%A8%E8%8D%90/%E5%8C%97%E4%BA%AC%E6%B5%8B%E8%AF%95%E6%8E%A5%E5%8F%A3_api HTTP/1.1" 200 OK
+2026-06-08 15:00:32 | INFO     | services.llm_service:generate:158 - [LLM] 准备请求 env=development stage=auto_map prompt_len=3345 max_tokens=2000 temperature=0.1
+2026-06-08 15:00:32 | INFO     | services.llm_service:generate:188 - 🤖 调用大模型: auto_map (尝试 1/3)
+2026-06-08 15:00:37,796 INFO httpx HTTP Request: POST http://172.26.216.231:8001/v1/chat/completions "HTTP/1.1 502 Bad Gateway"
+2026-06-08 15:00:37 | ERROR    | services.llm_service:generate:198 - ❌ 大模型API返回错误状态码: HTTP 502: 
+2026-06-08 15:00:37 | ERROR    | services.llm_service:generate:237 - ❌ 大模型调用失败 (尝试 1/3): HTTP 502: 
+2026-06-08 15:00:37 | INFO     | services.llm_service:_wait_before_retry:290 - ⏳ 等待 1 秒后重试...
+2026-06-08 15:00:38 | INFO     | services.llm_service:generate:188 - 🤖 调用大模型: auto_map (尝试 2/3)
+
+需要优化修改：
+在本地开发环境调用大模型完成智能分析，需要修改大模型调用地址，参考项目“通话时长压降—比赛“调用deepseek大模型的代码
+
+deepseek的配置如下
+
+    "deepseek": {
+      "api_base": "https://api.deepseek.com",
+      "model": "deepseek-v4-flash",
+      "api_key": "sk-a14aba74e5eb48d484d379d8afc27ed7"
+    },
+
+
+
+目前用对外提供服务的方式有两种
+
+| 模式 | 适用场景 | 核心区别 |
+|------|---------|---------|
+| **模式一：直传模式** | 调用方（CTI/坐席系统）已持有用户和产品信息，直接传入，服务不再调外部接口 | 使用 `extra_info` 传入所有已知信息 |
+| **模式二：接口查询模式** | 服务内部调用外部数据接口（用量/推荐/标签等），获取数据后再生成话术 | 使用 `extra_data` 传入接口所需的补充参数 |
+
+目前的接口配置是是针对 接口查询模式；
+
+针对直传模式，目前没有交互配置页面，需要补充：
+1、尽量和接口查询模式复用融合，可以根据不同的模式选择进行切换；
+2、直传模式，也可以映射到 7 个固定域进行配置；
+3、并分析直传模式，是否还有其他的需要优化点，并进行开发，让交互更简单，更清晰
+
+请整体分析上述逻辑，并进行优化
+
+
+目前的skillmanage 页面里面的 skill备份和历史版本的功能可以删除，简化相关流程，skill只有唯一版本，方便后续移植；
+请优化相关前端和后端
+
+
+
+znhs_refactor是对znhs的重构，请分析重构后是否执行有风险，能正常完成es 和redis的读取，并正常完成数据迁移；
+
+
+代码刚重新更新了，请确认下面的需求
+
+在生产环境模式下，目前多实例更新，是不是通过kafka或者redis通知实现？
+如果是的话
+1、可以改成定时读取Es更新的方式，这个定时读取的时间间隔可以在配置文件中进行配置，例如5分钟；
+2、同时，kafka  redis、定时轮询更新多实例配置的两个方法，也可以通过配置文件进行配置选择；
+3、并一定要确保多实例配置下发和配置同步的稳定性，因为生产环境都需要从es读取最新的配置；
+
+
+npm run build:artifact:gray
+npm run build:artifact:pro
+分别有什么区别？
+
+
+
+
+在生产环境中 "environment": "；production_noauth"
+{
+  "_comment": "应用级配置 - 仅保留端口、日志、数据库、缓存等，LLM/API 等业务配置见 agents_config.json",
+  "app": {
+    "name": "营销话术推荐智能体",
+    "version": "3.0.0",
+    "description": "基于3智能体协同架构的营销话术推荐系统",
+    "host": "127.0.0.1",
+    "port": 8000,
+    "debug": true,
+    "_comment_environment": "运行环境（可被环境变量 LINGYUN_ENV 覆盖）：development=本地开发(mock/跳过ES/关鉴权/前缀/znhs-gray)；gray=灰度(真实接口+强制鉴权+前缀/znhs-gray)；production=生产(真实接口+强制鉴权+前缀/znhs)；production_noauth=保持生产行为但关闭鉴权(真实接口/ES/Redis/LLM host/前缀/znhs-gray，仅受控测试用，勿长期用于正式生产)。详见 docs/环境配置模式说明.md",
+    "environment": "；production_noauth"
+  },
+
+但是报错如下：
+
+bash: python3: command not found
+root@znjl-script-refinement-test-85dffbffc7-jj5q9:~/znhs# python3 main.py
+2026-07-06 11:24:19.325 | INFO     | utils.config_loader:_load_app_config:47 - ✔ 成功加载配置文件: /root/znhs/config/config.json
+2026-07-06 11:24:19.325 | INFO     | utils.config_loader:_load_agents_config:60 - ✔ 成功加载 LLM 网关配置: /root/znhs/config/agents_config.json
+2026-07-06 11:24:19 | WARNING  | utils.env_config:get_environment:66 - ⚠ 无效的运行环境 '; production_noauth'（需为 ('development', 'gray', 'production', 'production_noauth')），回退到 'development'
+2026-07-06 11:24:20 | INFO     | __main__:<module>:216 - ⬆ 灰度 API 别名: /gray → /znhs-gray
+2026-07-06 11:24:20 | INFO     | __main__:<module>:234 - 📦 灰度前端 assets 已挂载: /znhs-gray/assets → /root/znhs/frontend/dist-gray/asset
+2026-07-06 11:24:20 | INFO     | __main__:<module>:242 - 📦 灰度前端 static 已挂载: /znhs-gray/static → /root/znhs/frontend/dist-gra
+2026-07-06 11:24:20 | INFO     | __main__:<module>:251 - 📦 生产前端 assets 已挂载: /znhs/assets → /root/znhs/frontend/dist-prod/asset
+2026-07-06 11:24:20 | INFO     | __main__:<module>:259 - 📦 生产前端 static 已挂载: /znhs/static → /root/znhs/frontend/dist-pro
+2026-07-06 11:24:23 | INFO     | __main__:<module>:289 - 📋 管理路由已挂载: /znhs-gray/api/... 和 /znhs/api/...
+2026-07-06 11:24:23 | INFO     | __main__:<module>:295 - 🖥 灰度前端 SPA 路由已注册: /znhs-gray
+2026-07-06 11:24:23 | INFO     | __main__:<module>:300 - 🖥 生产前端 SPA 路由已注册: /znhs
+INFO:     Will watch for changes in these directories: ['/root/znhs']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [16] using StatReload
+2026-07-06 11:24:27.723 | INFO     | utils.config_loader:_load_app_config:47 - ✔ 成功加载配置文件: /root/znhs/config/config.json
+2026-07-06 11:24:27.723 | INFO     | utils.config_loader:_load_agents_config:60 - ✔ 成功加载 LLM 网关配置: /root/znhs/config/agents_config.json
+2026-07-06 11:24:27 | WARNING  | utils.env_config:get_environment:66 - ⚠ 无效的运行环境 '; production_noauth'（需为 ('development', 'gray', 'production', 'production_noauth')），回退到 'development'
+2026-07-06 11:24:27 | INFO     | __mp_main__:<module>:216 - ⬆ 灰度 API 别名: /gray → /znhs-gray
+2026-07-06 11:24:27 | INFO     | __mp_main__:<module>:234 - 📦 灰度前端 assets 已挂载: /znhs-gray/assets → /root/znhs/frontend/dist-gray/asset
+2026-07-06 11:24:27 | INFO     | __mp_main__:<module>:242 - 📦 灰度前端 static 已挂载: /znhs-gray/static → /root/znhs/frontend/dist-gra
+2026-07-06 11:24:27 | INFO     | __mp_main__:<module>:251 - 📦 生产前端 assets 已挂载: /znhs/assets → /root/znhs/frontend/dist-prod/asset
+2026-07-06 11:24:27 | INFO     | __mp_main__:<module>:259 - 📦 生产前端 static 已挂载: /znhs/static → /root/znhs/frontend/dist-pro
+2026-07-06 11:24:33 | WARNING  | utils.env_config:get_environment:66 - ⚠ 无效的运行环境 '; production_noauth'（需为 ('development', 'gray', 'production', 'production_noauth')），回退到 'development'
+2026-07-06 11:24:33 | INFO     | main:<module>:216 - ⬆ 灰度 API 别名: /gray → /znhs-gray
+2026-07-06 11:24:33 | INFO     | main:<module>:234 - 📦 灰度前端 assets 已挂载: /znhs-gray/assets → /root/znhs/frontend/dist-gray/asset
+2026-07-06 11:24:33 | INFO     | main:<module>:242 - 📦 灰度前端 static 已挂载: /znhs-gray/static → /root/znhs/frontend/dist-gra
+2026-07-06 11:24:33 | INFO     | main:<module>:251 - 📦 生产前端 assets 已挂载: /znhs/assets → /root/znhs/frontend/dist-prod/asset
+2026-07-06 11:24:33 | INFO     | main:<module>:259 - 📦 生产前端 static 已挂载: /znhs/static → /root/znhs/frontend/dist-pro
+2026-07-06 11:24:33 | INFO     | main:<module>:289 - 📋 管理路由已挂载: /znhs-gray/api/... 和 /znhs/api/...
+2026-07-06 11:24:34 | INFO     | main:<module>:295 - 🖥 灰度前端 SPA 路由已注册: /znhs-gray
+2026-07-06 11:24:34 | INFO     | main:<module>:300 - 🖥 生产前端 SPA 路由已注册: /znhs
+INFO:     Started server process [81]
+INFO:     Waiting for application startup.
+2026-07-06 11:24:34.873 | INFO     | main:lifespan:92 - ⚙ 启动环境: DEVELOPMENT 前缀: /znhs-gray 鉴权: Fals
+2026-07-06 11:24:34.918 | WARNING  | services.es_config_store:ensure_indices:117 - [ESConfigStore] elasticsearch PUT http://172.19.89.150:9211/znhs-agent-skill-configs [status:500 request:0.061s]
+2026-07-06 11:24:34.918 | INFO     | services.es_config_store:ensure_indices:117 - [ESConfigStore] index 已就绪 (ES 6.x 兼容模式): znhs-agent-skill-configs
+2026-07-06 11:24:34.998 | WARNING  | services.es_config_store:ensure_indices:117 - [ESConfigStore] elasticsearch PUT http://172.19.89.150:9211/znhs-agent-skill-config-meta [status:400 request:0.052s]
+2026-07-06 11:24:35.029 | INFO     | services.es_config_store:ensure_indices:117 - [ESConfigStore] index 已就绪 (ES 6.x 兼容模式): znhs-agent-skill-config-met
+2026-07-06 11:24:35 | INFO     | services.es_config_store:init:69 - [ESConfigStore] ES 初始化完成
+
+
+2026-07-06 11:24:34.918 | WARNING  | services.es_config_store:ensure_indices:117 - [ESConfigStore] elasticsearch PUT http://172.19.89.131:9211/znhs-agent-skill-configs [status:400 request:0.044s]
+2026-07-06 11:24:34.918 | INFO     | services.es_config_store:ensure_indices:117 - [ESConfigStore] index 已就绪 (ES 6.x 兼容模式): znhs-agent-skill-configs
+2026-07-06 11:24:34.998 | WARNING  | services.es_config_store:ensure_indices:117 - [ESConfigStore] elasticsearch PUT http://172.19.89.150:9211/znhs-agent-skill-config-meta [status:500 request:0.052s]
+2026-07-06 11:24:35.029 | INFO     | services.es_config_store:ensure_indices:117 - [ESConfigStore] index 已就绪 (ES 6.x 兼容模式): znhs-agent-skill-config-met
+2026-07-06 11:24:35 | INFO     | services.es_config_store:init:69 - [ESConfigStore] ES 初始化完成
+2026-07-06 11:24:35.855 | INFO     | services.redis_config_bus:init_cluster:100 - [RedisConfigBus] 已连接 Redis Cluster (6 节点)
+2026-07-06 11:24:35.855 | INFO     | elasticsearch GET http://172.19.89.127:9211/znhs-agent-skill-config-meta/_doc/beijing%E5%8C%97%E4%BA%AC%E9%97%A0%E6%81%A13Abiz_config [status:404 request:0.022s]
+2026-07-06 11:24:35.877 | INFO     | elasticsearch GET http://172.19.89.126:9211/znhs-agent-skill-config-meta/_doc/beijing%E5%8C%97%E4%BA%AC%E9%97%A0%E6%81%A13Abiz_config [status:404 request:0.021s]
+2026-07-06 11:24:35 | INFO     | utils.skill_runtime.load_package:142 - [SkillLoader] ✔ 加载技能包: beijing:套餐升档 v1.0.0
+2026-07-06 11:24:35.951 | INFO     | elasticsearch GET http://172.19.89.150:9211/znhs-agent-skill-config-meta/_doc/beijing%E5%8C%97%E4%BA%AC%E9%97%A0%E6%81%A13Abiz_config [status:404 request:0.026s]
+2026-07-06 11:24:35.973 | INFO     | utils.skill_runtime.load_package:142 - [SkillLoader] ✔ 加载技能包: beijing:套餐推荐 v1.0.0
+2026-07-06 11:24:36.198 | INFO     | elasticsearch GET http://172.19.89.150:9211/znhs-agent-skill-config-meta/_doc/beijing%E5%8C%97%E4%BA%AC%E9%97%A0%E6%81%A13Abiz_config [status:404 request:0.025s]
+2026-07-06 11:24:36 | INFO     | utils.skill_runtime.load_package:142 - [SkillLoader] ✔ 加载技能包: beijing:营销推荐 v1.0.0
+2026-07-06 11:24:36.369 | INFO     | elasticsearch GET http://172.19.89.127:9211/znhs-agent-skill-config-meta/_doc/fujian%E7%A6%8F%E5%BB%BA%E6%81%A0%E6%88%903Abiz_config [status:404 request:0.021s]
+2026-07-06 11:24:36.391 | INFO     | elasticsearch GET http://172.19.89.126:9211/znhs-agent-skill-config-meta/_doc/fujian%E7%A6%8F%E5%BB%BA%E6%81%A0%E6%88%903Abiz_config [status:404 request:0.021s]
+2026-07-06 11:24:36 | INFO     | utils.skill_runtime.load_package:142 - [SkillLoader] ✔ 加载技能包: fujian:套餐推荐 v1.0.0
+2026-07-06 11:24:36.457 | INFO     | elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-config-meta/_doc/guangdong%E5%B9%BF%E4%B8%9C%E6%B1%A0%E6%8E%A83Abiz_config [status:404 request:0.020s]
+2026-07-06 11:24:36 | INFO     | utils.skill_runtime.load_package:142 - [SkillLoader] ✔ 加载技能包: guangdong:套餐推荐 v1.0.0
+2026-07-06 11:24:36.599 | INFO     | elasticsearch GET http://172.19.89.150:9211/znhs-agent-skill-config-meta/_doc/guangdong%E5%B9%BF%E4%B8%9C%E6%B1%A0%E6%8E%A83Abiz_config [status:404 request:0.026s]
+2026-07-06 11:24:36 | INFO     | utils.skill_runtime.load_package:142 - [SkillLoader] ✔ 加载技能包: guangdong:营销活动 v1.0.0
+2026-07-06 11:24:36.763 | INFO     | elasticsearch GET http://172.19.89.126:9211/znhs-agent-skill-config-meta/_doc/liaoning%E8%BE%BD%E5%AE%81%E6%8E%A8%E8%8D%AF3Abiz_config [status:404 request:0.021s]
+2026-07-06 11:24:36.786 | INFO     | elasticsearch GET http://172.19.89.126:9211/znhs-agent-skill-config-meta/_doc/liaoning%E8%BE%BD%E5%AE%81%E6%8E%A8%E8%8D%AF3Abiz_config [status:404 request:0.022s]
+2026-07-06 11:24:36 | INFO     | utils.skill_runtime.load_package:142 - [SkillLoader] ✔ 加载技能包: liaoning:套餐推荐 v1.0.0
+2026-07-06 11:24:36.856 | INFO     | elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-config-meta/_doc/shandong%E5%B1%B1%E4%B8%9C%E6%8E%A8%E8%8D%AF3Abiz_config [status:404 request:0.025s]
+2026-07-06 11:24:36.876 | INFO     | elasticsearch GET http://172.19.89.142:9211/znhs-agent-skill-config-meta/_doc/shandong%E5%B1%B1%E4%B8%9C%E6%8E%A8%E8%8D%AF3Abiz_config [status:404 request:0.021s]
+2026-07-06 11:24:36 | INFO     | utils.skill_runtime.load_package:142 - [SkillLoader] ✔ 加载技能包: shandong:套餐推荐 v1.0.0
+2026-07-06 11:24:36.947 | INFO     | elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-config-meta/_doc/shandong%E5%B1%B1%E4%B8%9C%E6%8E%A8%E8%8D%AF3Abiz_config [status:404 request:0.025s]
+2026-07-06 11:24:36 | INFO     | utils.skill_runtime.load_package:142 - [SkillLoader] ✔ 加载技能包: shandong:营销推荐 v1.0.0
+2026-07-06 11:24:36 | INFO     | utils.lifespan:114 - ✔ 已加载技能包: 9
+
+
+
+2026-07-06 11:24:36 | INFO     | main:lifespan:114 - ✔ 已加载技能包: 9
+2026-07-06 11:24:36 | INFO     | services.redis_config_bus:subscribe:212 - [RedisConfigBus] Pub/Sub 订阅线程已启动, Channel=znhs:agent:config:changed
+2026-07-06 11:24:37.024 | WARNING  | elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-config-meta/_search [status:404 request:0.022s]
+2026-07-06 11:24:37 | ERROR    | services.es_config_store:get_all_published_versions:337 - [ESConfigStore] get_all_published_versions 失败: NotFoundError (404, 'index_not_found_exception', 'no such index', znhs-agent-skill-config-meta, index_or_alias)
+2026-07-06 11:24:37 | INFO     | services.config_poller:start_config_sync:399 - [ConfigPoller] 已启动定时轮询(基线 0 项, 轮询间隔 300s)
+2026-07-06 11:24:37 | INFO     | utils.sllm_runtime:get_client:54 - ✔ 创建共享 httpx.AsyncClient (连接池 max=20)
+2026-07-06 11:24:37 | INFO     | llm.service:warmup:69 - ✔ LLM 连接池预热完成
+2026-07-06 11:24:37.632 | INFO     | <BrokerConnection node_id=bootstrap-0 host=kafka-ly-zxfz-svc.zjjpt-kafka.svc.ly.armdual.hpc:9092 <connecting> [IPv6 ('2409:808e:49a0:360::33c', 9092, 0, 0)]>
+2026-07-06 11:24:37.633 | INFO     | kafka.conn Probing node bootstrap-0 broker version
+2026-07-06 11:24:37.704 | INFO     | <BrokerConnection node_id=bootstrap-0 host=kafka-ly-zxfz-svc.zjjpt-kafka.svc.ly.armdual.hpc:9092 <connecting> [IPv6 ('2409:808e:49a0:360::33c', 9092, 0, 0)]>: Connection complete.
+2026-07-06 11:24:37 | INFO     | kafka.conn Broker version identified as 2.4.0
+2026-07-06 11:24:37 | INFO     | kafka.conn Set configuration api_version=(2, 4, 0) to skip auto check_version requests on startup
+2026-07-06 11:24:37 | INFO     | services.kafka_service:init_producer:83 - [Kafka] 操作日志生产者已连接: kafka-ly-zxfz-svc.zjjpt-kafka.svc.ly.armdual.hpc:9092
+2026-07-06 11:24:37.816 | INFO     | <BrokerConnection node_id=bootstrap-0 host=kafka-ly-zxfz-svc.zjjpt-kafka.svc.ly.armdual.hpc:9092 <connecting> [IPv6 ('2409:808e:49a0:21f', 9092, 0, 0)]>
+2026-07-06 11:24:37.816 | INFO     | kafka.conn Probing node bootstrap-0 broker version
+2026-07-06 11:24:37.898 | INFO     | <BrokerConnection node_id=bootstrap-0 host=kafka-ly-zxfz-svc.zjjpt-kafka.svc.ly.armdual.hpc:9092 <connecting> [IPv6 ('2409:808e:49a0:21f', 9092, 0, 0)]>: Connection complete.
+2026-07-06 11:24:38.003 | INFO     | kafka.conn Set configuration api_version=(2, 4, 0) to skip auto check_version requests on startup
+2026-07-06 11:24:38.004 | INFO     | kafka.consumer Subscription state Updated subscribed topics to: ('topic_lingyun_logout_gray',)
+2026-07-06 11:24:38 | INFO     | services.kafka_service:consume_loop:205 - [Kafka] 退出登录消费循环已启动
+2026-07-06 11:24:38 | INFO     | services.kafka_service:start:170 - [Kafka] 退出登录消费者已启动, Topic=topic_lingyun_logout_gray, Group=group_lingyun_logout_marketing-agent
+Application startup complete.
+2026-07-06 11:24:38.009 | INFO     | kafka.cluster Group coordinator for group group_lingyun_logout_marketing-agent is BrokerMetadata(nodeid='coordinator-2', host='2409:808e:49a0:360::33c', port=9092, rack=None)
+2026-07-06 11:24:38.010 | INFO     | kafka.coordinator Discovered coordinator coordinator-2 for group group_lingyun_logout_marketing-agent
+2026-07-06 11:24:38.011 | INFO     | kafka.coordinator Starting new heartbeat thread
+2026-07-06 11:24:38.011 | INFO     | kafka.coordinator consumer Revoking previously assigned partitions set() for group group_lingyun_logout_marketing-agent
+2026-07-06 11:24:38.038 | INFO     | <BrokerConnection node_id=coordinator-2 host=2409:808e:49a0:360::33c:9092 <connecting> [IPv6 ('2409:808e:49a0:360::33c', 9092, 0, 0)]>: Connection complete.
+2026-07-06 11:24:38.113 | INFO     | <BrokerConnection node_id=bootstrap-0 host=kafka-ly-zxfz-svc.zjjpt-kafka.svc.ly.armdual.hpc:9092 <connected> [IPv6 ('2409:808e:49a0:0, 0, 0)]>: Closing connection.
+2026-07-06 11:24:38.213 | INFO     | kafka.coordinator (Re-)joining group group_lingyun_logout_marketing-agent with generation 99
+2026-07-06 11:24:38.213 | INFO     | kafka.consumer subscription state Updated partition assignment: [TopicPartition(topic='topic_lingyun_logout_gray', partition=2), TopicPartition(topic='topic_lingyun_logout_gray', partition=3)]
+2026-07-06 11:24:38.640 | INFO     | kafka.coordinator consumer Setting newly assigned partitions [TopicPartition(topic='topic_lingyun_logout_gray', partition=2), TopicPartition(topic='lingyun_logout_gray', partition=3)] for group group_lingyun_logout_marketing-agent
+2026-07-06 11:24:38.641 | INFO     | <BrokerConnection node_id=3 host=2409:808e:49a0:313::9092 <connecting> [IPv6 ('2409:808e:49a0:313', 9092, 0, 0)]>: connecting to 2409:808e:49a0:313::9092 (2409:808e:49a0:313), 9092. 0, 0)
+2026-07-06 11:24:38.616 | INFO     | <BrokerConnection node_id=3 host=2409:808e:49a0:313::9092 <connecting> [IPv6 ('2409:808e:49a0:313', 9092, 0, 0)]
+2026-07-06 11:24:38.617 | INFO     | <BrokerConnection node_id=2 host=2409:808e:49a0:360::33c:9092 <connecting> [IPv6 ('2409:808e:49a0:360::33c', 9092, 0, 0)]
+
+
+2026-07-06 11:24:38.003 | INFO     | kafka.conn Set configuration api_version=(2, 4, 0) to skip auto check_version requests on startup
+2026-07-06 11:24:38.004 | INFO     | kafka.consumer.subscription_state Updating subscribed topics to: ('topic_lingyun_logout_gray',)
+2026-07-06 11:24:38 | INFO     | services.kafka_service:consume_loop:205 - [Kafka] 退出登录消费循环已启动
+2026-07-06 11:24:38 | INFO     | services.kafka_service:start:170 - [Kafka] 退出登录消费者已启动, Topic=topic_lingyun_logout_gray, Group=group_lingyun_logout_marketing-agent
+INFO:     Application startup complete.
+2026-07-06 11:24:38.009 | INFO     | kafka.cluster Group coordinator for group group_lingyun_logout_marketing-agent is BrokerMetadata(nodeid='coordinator-2', host='2409:808e:49a0:360::33c', port=9092, rack=None)
+2026-07-06 11:24:38.009 | INFO     | kafka.coordinator Discovered coordinator coordinator-2 for group group_lingyun_logout_marketing-agent
+2026-07-06 11:24:38.009 | INFO     | kafka.coordinator Starting new heartbeat thread
+2026-07-06 11:24:38.010 | INFO     | kafka.coordinator.consumer Revoking previously assigned partitions set() for group group_lingyun_logout_marketing-agent
+2026-07-06 11:24:38.011 | INFO     | <BrokerConnection node_id=coordinator-2 host=2409:808e:49a0:360::33c:9092 <connecting> [IPv6 ('2409:808e:49a0:360::33c', 9092, 0, 0)]>: connecting to 2409:808e:49a0:360::33c (2409:808e:49a0:360::33c, 9092. 0, 0)
+2026-07-06 11:24:38.112 | INFO     | <BrokerConnection node_id=coordinator-2 host=2409:808e:49a0:360::33c:9092 <connecting> [IPv6 ('2409:808e:49a0:360::33c', 9092, 0, 0)]>: Connection complete.
+2026-07-06 11:24:38.113 | INFO     | <BrokerConnection node_id=bootstrap-0 host=kafka-ly-zxfz-svc.zjjpt-kafka.svc.ly.armdual.hpc:9092 <connected> [IPv6 ('2409:808e:49a0:21f', 9092, 0, 0)]>: Closing connection.
+2026-07-06 11:24:38.213 | INFO     | kafka.coordinator (Re-)joining group group_lingyun_logout_marketing-agent
+2026-07-06 11:24:38.213 | INFO     | kafka.consumer.subscription_state Successfully joined group group_lingyun_logout_marketing-agent with generation 99
+2026-07-06 11:24:40.614 | INFO     | kafka.consumer.subscription_state Updated partition assignment: [TopicPartition(topic='topic_lingyun_logout_gray', partition=2), TopicPartition(topic='topic_lingyun_logout_gray', partition=3)]
+2026-07-06 11:24:40.614 | INFO     | kafka.coordinator.consumer Setting newly assigned partitions [TopicPartition(topic='topic_lingyun_logout_gray', partition=2), TopicPartition(topic='lingyun_logout_gray', partition=3)] for group group_lingyun_logout_marketing-agent
+2026-07-06 11:24:40.616 | INFO     | <BrokerConnection node_id=2 host=2409:808e:49a0:360::33c:9092 <connecting> [IPv6 ('2409:808e:49a0:360::33c', 9092, 0, 0)]>: connecting to 2409:808e:49a0:360::33c (2409:808e:49a0:360::33c, 9092. 0, 0)
+2026-07-06 11:24:40.616 | INFO     | <BrokerConnection node_id=3 host=2409:808e:49a0:313::9092 <connecting> [IPv6 ('2409:808e:49a0:313', 9092, 0, 0)]: connecting to 2409:808e:49a0:313::9092 (2409:808e:49a0:313, 9092. 0, 0)
+2026-07-06 11:24:40.617 | INFO     | <BrokerConnection node_id=3 host=2409:808e:49a0:313::9092 <connecting> [IPv6 ('2409:808e:49a0:313', 9092, 0, 0)]: Connection complete.
+2026-07-06 11:24:40.617 | INFO     | <BrokerConnection node_id=2 host=2409:808e:49a0:360::33c:9092 <connecting> [IPv6 ('2409:808e:49a0:360::33c', 9092, 0, 0)]: Connection complete.
+2026-07-06 11:29:37.066 | WARNING  | elasticsearch GET http://172.19.89.150:9211/znhs-agent-skill-config-meta/_search [status:404 request:0.030s]
+2026-07-06 11:29:37 | ERROR    | services.es_config_store:get_all_published_versions:337 - [ESConfigStore] get_all_published_versions 失败: NotFoundError (404, 'index_not_found_exception', 'no such index', znhs-agent-skill-config-meta, index_or_alias)
+2026-07-06 11:29:37.869 | INFO     | <BrokerConnection node_id=2 host=2409:808e:49a0:360::33c:9092 <connecting> [IPv6 ('2409:808e:49a0:360::33c', 9092, 0, 0)]>: connecting to 2409:808e:49a0:360::33c (2409:808e:49a0:360::33c, 9092. 0, 0)
+2026-07-06 11:29:37.869 | INFO     | <BrokerConnection node_id=2 host=2409:808e:49a0:360::33c:9092 <connecting> [IPv6 ('2409:808e:49a0:360::33c', 9092, 0, 0)]>: Connection complete.
+2026-07-06 11:29:37.869 | INFO     | <BrokerConnection node_id=bootstrap-0 host=kafka-ly-zxfz-svc.zjjpt-kafka.svc.ly.armdual.hpc:9092 <connected> [IPv6 ('2409:808e:49a0:360::33c', 9092, 0, 0)]>: Closing connection.
+2026-07-06 11:29:38.062 | INFO     | <BrokerConnection node_id=1 host=2409:808e:49a0:136::9092 <connecting> [IPv6 ('2409:808e:49a0:136', 9092, 0, 0)]>: connecting to 2409:808e:49a0:136::9092 (2409:808e:49a0:136, 9092. 0, 0)
+2026-07-06 11:29:38.063 | INFO     | <BrokerConnection node_id=1 host=2409:808e:49a0:136::9092 <connecting> [IPv6 ('2409:808e:49a0:136', 9092, 0, 0)]: Connection complete.
+2026-07-06 11:34:37.222 | WARNING  | elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-config-meta/_search [status:404 request:0.089s]
+2026-07-06 11:34:37 | ERROR    | services.es_config_store:get_all_published_versions:337 - [ESConfigStore] get_all_published_versions 失败: NotFoundError (404, 'index_not_found_exception', 'no such index', znhs-agent-skill-config-meta, index_or_alias)
+
+
+
+请分析上述问题，并解决
+
+
+
+
+
+生产环境部署报错：
+一、启动main.py，报错日志如下：
+
+
+INFO:     Started server process [14]
+INFO:     Waiting for application startup.
+2026-07-06 11:56:37 | INFO     | main:lifespan:92 - ⚙ 启动环境: PRODUCTION_NOAUTH 前缀: /znhs-gray 鉴权: Fals
+2026-07-06 11:56:37.801 | WARNING  | elasticsearch PUT http://172.19.89.150:9211/znhs-agent-skill-configs [status:500 request:0.057s]
+2026-07-06 11:56:37.843 | INFO     | elasticsearch PUT http://172.19.89.126:9211/znhs-agent-skill-configs [status:400 request:0.041s]
+2026-07-06 11:56:37 | WARNING  | services.es_config_store:_create_ok:120 - [ESConfigStore] 创建 index znhs-agent-skill-configs 失败 (ES 6.x 兼容模式): ['root_cause': [['type': 'index_already_exists_exception', 'reason': 'index [znhs-agent-skill-configs/xgxnyxlRQ-OD0KNasEZGZw] already exists', 'index_uuid': 'xgxnyxlRQ-OD0KNasEZGZw', 'index': 'znhs-agent-skill-configs']], 'type': 'index_already_exists_exception', 'reason': 'index [znhs-agent-skill-configs/xgxnyxlRQ-OD0KNasEZGZw] already exists', 'index_uuid': 'xgxnyxlRQ-OD0KNasEZGZw', 'index': 'znhs-agent-skill-configs']
+2026-07-06 11:56:37 | ERROR    | services.es_config_store:_ensure_indices:135 - [ESConfigStore] index znhs-agent-skill-configs 创建失败，后续读写将持续报错
+ES 账号是否有建索引权限，或手动创建该 index。
+2026-07-06 11:56:37.896 | WARNING  | elasticsearch PUT http://172.19.89.131:9211/znhs-agent-skill-config-meta [status:500 request:0.052s]
+2026-07-06 11:56:37.924 | INFO     | elasticsearch PUT http://172.19.89.150:9211/znhs-agent-skill-config-meta [status:400 request:0.028s]
+2026-07-06 11:56:37 | WARNING  | services.es_config_store:_create_ok:120 - [ESConfigStore] 创建 index znhs-agent-skill-config-meta 失败 (ES 6.x 兼容模式):
+['root_cause': [['type': 'invalid_type_name_exception', 'reason': 'mapping type name [_doc] can't start with \'_\'']], 'type': 'invalid_type_name_exception',
+'reason': 'mapping type name [_doc] can't start with \'_\'']
+2026-07-06 11:56:37 | ERROR    | services.es_config_store:_ensure_indices:135 - [ESConfigStore] index znhs-agent-skill-config-meta 创建失败，后续读写将持续报错
+ES 账号是否有建索引权限，或手动创建该 index。
+2026-07-06 11:56:37 | INFO     | services.es_config_store:init:69 - [ESConfigStore] ES 初始化完成
+2026-07-06 11:56:38 | INFO     | services.redis_config_bus:init_cluster:100 - [RedisConfigBus] 已连接 Redis Cluster (6 节点)
+2026-07-06 11:56:38.497 | INFO     | elasticsearch GET http://172.19.89.126:9211/znhs-agent-skill-config-meta/_doc/beijing%E5%8C%97%E4%BA%AC%E9%97%A0%E6%81%A13Abiz_config [status:404 request:0.020s]
+2026-07-06 11:56:38.519 | INFO     | elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-config-meta/_doc/beijing%E5%8C%97%E4%BA%AC%E9%97%A0%E6%81%A13Abiz_config [status:404 request:0.022s]
+2026-07-06 11:56:38 | INFO     | utils.skill_runtime:load_package:143 - [SkillLoader] ✔ 加载技能包: beijing:套餐升档 v1.0.0
+2026-07-06 11:56:38.584 | INFO     | elasticsearch GET http://172.19.89.150:9211/znhs-agent-skill-config-meta/_doc/beijing%E5%8C%97%E4%BA%AC%E9%97%A0%E6%8E%A83Abiz_config [status:404 request:0.024s]
+2026-07-06 11:56:38.604 | INFO     | elasticsearch GET http://172.19.89.126:9211/znhs-agent-skill-config-meta/_doc/beijing%E5%8C%97%E4%BA%AC%E9%97%A0%E6%8E%A83Abiz_config [status:404 request:0.020s]
+2026-07-06 11:56:38 | INFO     | utils.skill_runtime:load_package:143 - [SkillLoader] ✔ 加载技能包: beijing:套餐推荐 v1.0.0
+2026-07-06 11:56:38.773 | INFO     | elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-config-meta/_doc/beijing%E5%8C%97%E4%BA%AC%E9%97%A0%E8%90%A8%E8%8D%90%3Aapi_nodes [status:404 request:0.021s]
+2026-07-06 11:56:38.798 | INFO     | elasticsearch GET http://172.19.89.150:9211/znhs-agent-skill-config-meta/_doc/beijing%E5%8C%97%E4%BA%AC%E9%97%A0%E8%90%A8%E8%8D%90%3Abiz_config [status:404 request:0.024s]
+
+
+
+二、访问skillmanager报错，http://xxxxxxx:8000/znhs-gray/SkillManager，如下：
+
+GET http://restapi.ly4.zxfz.llm.cmos:20070/znhs-gray/assets/_plugin-vue_export-helper-gN193nCH.js
+net::ERR_ABORTED 401 (Unauthorized)
+来源：SkillManager:8
+
+GET http://restapi.ly4.zxfz.llm.cmos:20070/znhs-gray/assets/index-BQ2rQ8Pv.js
+net::ERR_ABORTED 401 (Unauthorized)
+来源：SkillManager:7
+
+GET http://restapi.ly4.zxfz.llm.cmos:20070/znhs-gray/assets/index-BYzmBLdH.css
+net::ERR_ABORTED 401 (Unauthorized)
+来源：SkillManager:9
+
+GET http://restapi.ly4.zxfz.llm.cmos:20070/favicon.ico
+503 (Service Temporarily Unavailable)
+来源：favicon.ico:1
+
+
+
+
+
+
+浏览器控制台原始请求日志
+访问地址：http://restapi.ly4.zxfz.llm.cmos:20070/znhs-gray/SkillManager
+
+
+模式是：    "environment": "；production_noauth"
+
+按理是不需要鉴权，但是还是有有鉴权的问题，请分析
+
+plaintext
+GET http://restapi.ly4.zxfz.llm.cmos:20070/znhs-gray/assets/_plugin-vue_export-helper-gN193nCH.js
+net::ERR_ABORTED 401 (Unauthorized)
+来源：SkillManager:8
+
+GET http://restapi.ly4.zxfz.llm.cmos:20070/znhs-gray/assets/index-BYzmBLdH.css
+net::ERR_ABORTED 401 (Unauthorized)
+来源：SkillManager:9
+
+GET http://restapi.ly4.zxfz.llm.cmos:20070/znhs-gray/assets/index-BQ2rQ8Pv.js
+net::ERR_ABORTED 401 (Unauthorized)
+来源：SkillManager:7
+
+GET http://restapi.ly4.zxfz.llm.cmos:20070/favicon.ico
+503 (Service Temporarily Unavailable)
+来源：favicon.ico:1
+
+
+
+当前存在问题
+1、生产环境部署的服务，设置的模式是：    "environment": "；production_noauth"
+2、存在问题，发现还是读取的本地配置，没有显示从 ES 读取的配置，请检查代码是否有问题；（如何发现问题，可以加强日志的功能，和前端打印日志的能力，方便排查问题）
+3、可以参考项目：znhs_xy_old，它的production配置模式下是调用的ES，但是没有轮询；
+
+
+
+
+
+当前存在问题
+1、生产环境部署的服务，设置的模式是：    "environment": "；production_noauth"
+2、访问skillmanage前端页面感觉还是读取的skill-runtime里面的配置；
+3、请检查是不是正常从ES 查询到配置后，缓存到内存，前端页面可以正常显示；
+4、同时，ES 读取的配置内容数据，和项目代码解析显示的格式一致；
+5、也可以对比参照下面的代码
+项目znhs_xy_old中的原 URL 正常可以查询到话术模板和接口配置；
+http://localhost:8000/znhs-gray/TemplateConfig
+http://localhost:8000/znhs-gray/MappingConfig
+
+
+
+生产环境的日志如下：
+
+root@znjl-script-refinement-test-84b54cc4d5-btw2z:~/znhs# python3 main.py
+2026-07-06 18:55:31.112 | INFO     | utils.config_loader:_load_app_config:47 - ✔ 成功加载配置文件: /root/znhs/config/config.json
+2026-07-06 18:55:31.113 | INFO     | utils.config_loader:_load_agents_config:60 - ✔ 成功加载 LLM 网关配置: /root/znhs/config/agents_config.json
+2026-07-06 18:55:31 | WARNING  | utils.env_config:load_env_specific_config:96 - ⚠ production_noauth 环境: 保持生产行为 (真实接口 / ES/Redis / LLM host 路由 /znhs-gray，但已关闭灵运鉴权。请仅在受控测试场景使用，切勿长期用于正式生产!
+2026-07-06 18:55:31 | INFO     | __main__:<module>:216 - ⬆ 灰度 API 别名: /gray → /znhs-gray
+2026-07-06 18:55:31 | INFO     | __main__:<module>:234 - 📦 灰度前端 assets 已挂载: /znhs-gray/assets → /root/znhs/frontend/dist-gray/asset
+2026-07-06 18:55:31 | INFO     | __main__:<module>:242 - 📦 灰度前端 static 已挂载: /znhs-gray/static → /root/znhs/frontend/dist-gra
+2026-07-06 18:55:31 | INFO     | __main__:<module>:251 - 📦 生产前端 assets 已挂载: /znhs/assets → /root/znhs/frontend/dist-prod/asset
+2026-07-06 18:55:31 | INFO     | __main__:<module>:259 - 📦 生产前端 static 已挂载: /znhs/static → /root/znhs/frontend/dist-pro
+2026-07-06 18:55:31 | INFO     | __main__:<module>:289 - 📋 管理路由已挂载: /znhs-gray/api/... 和 /znhs/api/...
+2026-07-06 18:55:31 | INFO     | __main__:<module>:295 - 🖥 灰度前端 SPA 路由已注册: /znhs-gray
+2026-07-06 18:55:31 | INFO     | __main__:<module>:300 - 🖥 生产前端 SPA 路由已注册: /znhs
+2026-07-06 18:55:31 | WARNING  | utils.env_config:load_env_specific_config:96 - ⚠ production_noauth 环境: 保持生产行为 (真实接口 / ES/Redis / LLM host 路由 /znhs-gray，但已关闭灵运鉴权。请仅在受控测试场景使用，切勿长期用于正式生产!
+2026-07-06 18:55:31 | INFO     | __main__:<module>:216 - ⬆ 灰度 API 别名: /gray → /znhs-gray
+2026-07-06 18:55:31 | INFO     | __main__:<module>:234 - 📦 灰度前端 assets 已挂载: /znhs-gray/assets → /root/znhs/frontend/dist-gray/asset
+2026-07-06 18:55:31 | INFO     | __main__:<module>:242 - 📦 灰度前端 static 已挂载: /znhs-gray/static → /root/znhs/frontend/dist-gra
+2026-07-06 18:55:31 | INFO     | __main__:<module>:251 - 📦 生产前端 assets 已挂载: /znhs/assets → /root/znhs/frontend/dist-prod/asset
+2026-07-06 18:55:31 | INFO     | __main__:<module>:259 - 📦 生产前端 static 已挂载: /znhs/static → /root/znhs/frontend/dist-pro
+2026-07-06 18:55:31 | INFO     | __main__:<module>:289 - 📋 管理路由已挂载: /znhs-gray/api/... 和 /znhs/api/...
+2026-07-06 18:55:31 | INFO     | __main__:<module>:295 - 🖥 灰度前端 SPA 路由已注册: /znhs-gray
+2026-07-06 18:55:31 | INFO     | __main__:<module>:300 - 🖥 生产前端 SPA 路由已注册: /znhs
+INFO:     Started server process [14]
+INFO:     Waiting for application startup.
+2026-07-06 18:55:35 | INFO     | main:lifespan:92 - ⚙ 启动环境: PRODUCTION_NOAUTH 前缀: /znhs-gray 鉴权: Fals
+2026-07-06 18:55:35.659 | WARNING  | elasticsearch GET http://172.19.89.126:9211/ [status:403 request:0.050s]
+2026-07-06 18:55:35 | WARNING  | services.es_config_store:_detect_doc_type:98 - [ESConfigStore] 无法探测 ES 版本 (按 7.x 处理，异常再回退): AuthorizationException(403, 'security_exception', 'action [cluster:monitor/main] is unauthorized for user [developer]')
+2026-07-06 18:55:35.721 | WARNING  | elasticsearch PUT http://172.19.89.150:9211/znhs-agent-skill-configs [status:500 request:0.061s]
+2026-07-06 18:55:35.760 | INFO     | elasticsearch PUT http://172.19.89.91:9211/znhs-agent-skill-configs [status:400 request:0.039s]
+2026-07-06 18:55:35 | INFO     | services.es_config_store:_ensure_indices:208 - [ESConfigStore] index 已存在: znhs-agent-skill-configs
+2026-07-06 18:55:35.788 | INFO     | elasticsearch GET http://172.19.89.127:9211/znhs-agent-skill-configs/_mapping [status:200 request:0.027s]
+2026-07-06 18:55:35.823 | WARNING  | elasticsearch PUT http://172.19.89.150:9211/znhs-agent-skill-config-meta [status:500 request:0.020s]
+2026-07-06 18:55:35.843 | INFO     | elasticsearch PUT http://172.19.89.126:9211/znhs-agent-skill-config-meta [status:400 request:0.027s]
+2026-07-06 18:55:35 | INFO     | services.es_config_store:_ensure_indices:208 - [ESConfigStore] index 已存在: znhs-agent-skill-config-meta
+2026-07-06 18:55:35.871 | INFO     | elasticsearch GET http://172.19.89.126:9211/znhs-agent-skill-config-meta/_mapping [status:200 request:0.027s]
+2026-07-06 18:55:35 | INFO     | services.es_config_store:_resolve_existing_doc_type:131 - [ESConfigStore] index znhs-agent-skill-config-meta 实际 type='doc'，覆盖 doc_type (原='None')
+2026-07-06 18:55:35 | INFO     | services.es_config_store:init:70 - [ESConfigStore] ES 初始化完成
+2026-07-06 18:55:35 | INFO     | services.redis_config_bus:init_cluster:100 - [RedisConfigBus] 已连接 Redis Cluster (6 节点)
+2026-07-06 18:55:36.431 | INFO     | elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-config-meta/_doc/beijing%E5%8C%97%E4%BA%AC%E9%97%A0%E6%81%A13Aaapi_nodes [status:404 request:0.026s]
+2026-07-06 18:55:36.496 | WARNING  | elasticsearch GET http://172.19.89.150:9211/znhs-agent-skill-configs/_search [status:400 request:0.064s]
+2026-07-06 18:55:36 | ERROR    | services.es_config_store:_search_published_data:510 - [ESConfigStore] _search_published_data 失败: RequestError (400, 'search_phase_execution_exception', 'No mapping found for [version] in order to sort on')
+2026-07-06 18:55:36.524 | INFO     | elasticsearch GET http://172.19.89.126:9211/znhs-agent-skill-config-meta/_doc/beijing%E5%8C%97%E4%BA%AC%E9%97%A0%E6%81%A13Abiz_config [status:404 request:0.026s]
+
+2026-07-06 18:55:37.321 | WARNING  | elasticsearch GET http://172.19.89.150:9211/znhs-agent-skill-configs/_search [status:400 request:0.040s]
+2026-07-06 18:55:37 | ERROR    | services.es_config_store:_search_published_data:510 - [ESConfigStore] _search_published_data 失败: RequestError (400, 'search_phase_execution_exception', 'No mapping found for [version] in order to sort on')
+2026-07-06 18:55:37 | INFO     | utils.skill_runtime.load_config_from_external:221 - [SkillLoader] Redis/ES 均无 liaoning/套餐推荐 的已发布配置, fallback 本地文件 (首次通过管理页保存/发布后才会写入 ES)
+2026-07-06 18:55:37 | INFO     | utils.skill_runtime.load_package:150 - [SkillLoader] ✔ 加载技能包: liaoning:套餐推荐 v1.0.0 [配置来源: local]
+2026-07-06 18:55:37.383 | INFO     | elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-config-meta/_doc/shandong%E5%B1%B1%E4%B8%9C%E6%8E%A8%E8%8D%90%3Aaapi_nodes [status:404 request:0.026s]
+2026-07-06 18:55:37.428 | WARNING  | elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-configs/_search [status:400 request:0.044s]
+2026-07-06 18:55:37 | ERROR    | services.es_config_store:_search_published_data:510 - [ESConfigStore] _search_published_data 失败: RequestError (400, 'search_phase_execution_exception', 'No mapping found for [version] in order to sort on')
+2026-07-06 18:55:37.447 | INFO     | elasticsearch GET http://172.19.89.150:9211/znhs-agent-skill-config-meta/_doc/shandong%E5%B1%B1%E4%B8%9C%E6%8E%A8%E8%8D%90%3Abiz_config [status:404 request:0.018s]
+2026-07-06 18:55:37.488 | WARNING  | elasticsearch GET http://172.19.89.126:9211/znhs-agent-skill-configs/_search [status:400 request:0.048s]
+2026-07-06 18:55:37 | ERROR    | services.es_config_store:_search_published_data:510 - [ESConfigStore] _search_published_data 失败: RequestError (400, 'search_phase_execution_exception', 'No mapping found for [version] in order to sort on')
+2026-07-06 18:55:37 | INFO     | utils.skill_runtime.load_config_from_external:221 - [SkillLoader] Redis/ES 均无 shandong/套餐推荐 的已发布配置, fallback 本地文件 (首次通过管理页保存/发布后才会写入 ES)
+2026-07-06 18:55:37 | INFO     | utils.skill_runtime.load_package:150 - [SkillLoader] ✔ 加载技能包: shandong:套餐推荐 v1.0.0 [配置来源: local]
+2026-07-06 18:55:37 | WARNING  | utils.skill_runtime.load_all:168 - [SkillLoader] ⚠ 生产模式下所有技能包均来自本地文件——说明 ES 中尚无任何已发布配置 (或 ES/Redis 不可用)。请检查启动日志中 [ESConfigStore] 的 index 状态，并确认是否通过 SkillManager 页面保存/发布过配置。
+2026-07-06 18:55:37 | INFO     | main:lifespan:114 - ✔ 已加载技能包: 6
+2026-07-06 18:55:37 | INFO     | services.redis_config_bus:start_subscriber:212 - [RedisConfigBus] Pub/Sub 订阅线程已启动, Channel=znhs:agent:config:changed
+2026-07-06 18:55:37.528 | INFO     | elasticsearch GET http://172.19.89.126:9211/znhs-agent-skill-config-meta/_search [status:400 request:0.025s]
+2026-07-06 18:55:37 | INFO     | services.config_poller:start_config_sync:399 - [ConfigPoller] 已启动定时轮询(基线 0 项, 轮询间隔 300s)
+2026-07-06 18:55:37 | INFO     | utils.sllm_runtime:get_client:54 - ✔ 创建共享 httpx.AsyncClient (连接池 max=20)
+2026-07-06 18:55:37 | INFO     | llm.service:warmup:69 - ✔ LLM 连接池预热完成
+2026-07-06 18:55:37.834 | INFO     | <BrokerConnection node_id=bootstrap-0 host=kafka-ly-zxfz-svc.zjjpt-kafka.svc.ly.armdual.hpc:9092 <connecting> [IPv6 ('2409:808e:49a0:313::313', 9092, 0, 0)]>: connecting to kafka-ly-zxfz-svc.zjjpt-kafka.svc.ly.armdual.hpc:9092 ('2409:808e:49a0:313::313', 9092, 0, 0)
+2026-07-06 18:55:37.834 | INFO     | kafka.conn Probing node bootstrap-0 broker version
+2026-07-06 18:55:37.840 | INFO     | <BrokerConnection node_id=bootstrap-0 host=kafka-ly-zxfz-svc.zjjpt-kafka.svc.ly.armdual.hpc:9092 <connecting> [IPv6 ('2409:808e:49a0:313::313', 9092, 0, 0)]>: Connection complete.
+2026-07-06 18:55:37 | INFO     | kafka.conn Broker version identified as 2.4.0
+2026-07-06 18:55:37 | INFO     | kafka.conn Set configuration api_version=(2, 4, 0) to skip auto check_version requests on startup
+2026-07-06 18:55:37 | INFO     | services.kafka_service:init_producer:84 - [Kafka] 操作日志生产者已连接: kafka-ly-zxfz-svc.zjjpt-kafka.svc.ly.armdual.hpc:9092
+2026-07-06 18:55:37.951 | INFO     | <BrokerConnection node_id=bootstrap-0 host=kafka-ly-zxfz-svc.zjjpt-kafka.svc.ly.armdual.hpc:9092 <connecting> [IPv6 ('2409:808e:49a0:21f', 9092, 0, 0)]>: connecting to kafka-ly-zxfz-svc.zjjpt-kafka.svc.ly.armdual.hpc:9092 ('2409:808e:49a0:21f', 9092, 0, 0)
+2026-07-06 18:55:37.951 | INFO     | kafka.conn Probing node bootstrap-0 broker version
+2026-07-06 18:55:37.952 | INFO     | <BrokerConnection node_id=bootstrap-0 host=kafka-ly-zxfz-svc.zjjpt-kafka.svc.ly.armdual.hpc:9092 <connecting> [IPv6 ('2409:808e:49a0:21f', 9092, 0, 0)]>: Connection complete.
+2026-07-06 18:55:38 | INFO     | kafka.conn Broker version identified as 2.4.0
+2026-07-06 18:55:38 | INFO     | kafka.conn Set configuration api_version=(2, 4, 0) to skip auto check_version requests on startup
+2026-07-06 18:55:38.056 | INFO     | kafka.consumer.subscription_state Updating subscribed topics to: ('topic_lingyun_logout_gray',)
+2026-07-06 18:55:38 | INFO     | services.kafka_service:consume_loop:206 - [Kafka] 退出登录消费循环已启动
+
+
+2026-07-06 18:55:35 | INFO     | services.es_config_store:init:70 - [ESConfigStore] ES 初始化完成
+2026-07-06 18:55:35 | INFO     | services.redis_config_bus:init_cluster:100 - [RedisConfigBus] 已连接 Redis Cluster (6 节点)
+2026-07-06 18:55:36.431 | INFO     | elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-config-meta/_doc/beijing%E5%8C%97%E4%BA%AC%E9%97%A0%E6%81%A13Aaapi_nodes [status:404 request:0.026s]
+2026-07-06 18:55:36.496 | WARNING  | elasticsearch GET http://172.19.89.150:9211/znhs-agent-skill-configs/_search [status:400 request:0.064s]
+2026-07-06 18:55:36 | ERROR    | services.es_config_store:_search_published_data:510 - [ESConfigStore] _search_published_data 失败: RequestError (400, 'search_phase_execution_exception', 'No mapping found for [version] in order to sort on')
+2026-07-06 18:55:36.524 | INFO     | elasticsearch GET http://172.19.89.126:9211/znhs-agent-skill-config-meta/_doc/beijing%E5%8C%97%E4%BA%AC%E9%97%A0%E6%81%A13Abiz_config [status:404 request:0.026s]
+2026-07-06 18:55:36.569 | WARNING  | elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-configs/_search [status:400 request:0.044s]
+2026-07-06 18:55:36 | ERROR    | services.es_config_store:_search_published_data:510 - [ESConfigStore] _search_published_data 失败: RequestError (400, 'search_phase_execution_exception', 'No mapping found for [version] in order to sort on')
+2026-07-06 18:55:36 | INFO     | utils.skill_runtime.load_config_from_external:221 - [SkillLoader] Redis/ES 均无 beijing/套餐升档 的已发布配置, fallback 本地文件 (首次通过管理页保存/发布后才会写入 ES)
+2026-07-06 18:55:36 | INFO     | utils.skill_runtime.load_package:150 - [SkillLoader] ✔ 加载技能包: beijing:套餐升档 v1.0.0 [配置来源: local]
+2026-07-06 18:55:36.622 | INFO     | elasticsearch GET http://172.19.89.126:9211/znhs-agent-skill-config-meta/_doc/beijing%E5%8C%97%E4%BA%AC%E9%97%A0%E6%8E%A83Aaapi_nodes [status:404 request:0.018s]
+2026-07-06 18:55:36.665 | WARNING  | elasticsearch GET http://172.19.89.126:9211/znhs-agent-skill-configs/_search [status:400 request:0.043s]
+2026-07-06 18:55:36 | ERROR    | services.es_config_store:_search_published_data:510 - [ESConfigStore] _search_published_data 失败: RequestError (400, 'search_phase_execution_exception', 'No mapping found for [version] in order to sort on')
+2026-07-06 18:55:36.729 | INFO     | elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-config-meta/_doc/beijing%E5%8C%97%E4%BA%AC%E9%97%A0%E6%83%A83Abiz_config [status:404 request:0.025s]
+2026-07-06 18:55:36.736 | WARNING  | elasticsearch GET http://172.19.89.150:9211/znhs-agent-skill-configs/_search [status:400 request:0.037s]
+2026-07-06 18:55:36 | ERROR    | services.es_config_store:_search_published_data:510 - [ESConfigStore] _search_published_data 失败: RequestError (400, 'search_phase_execution_exception', 'No mapping found for [version] in order to sort on')
+2026-07-06 18:55:36 | INFO     | utils.skill_runtime.load_config_from_external:221 - [SkillLoader] Redis/ES 均无 beijing/套餐推荐 的已发布配置, fallback 本地文件 (首次通过管理页保存/发布后才会写入 ES)
+2026-07-06 18:55:36 | INFO     | utils.skill_runtime.load_package:150 - [SkillLoader] ✔ 加载技能包: beijing:套餐推荐 v1.0.0 [配置来源: local]
+2026-07-06 18:55:36.797 | INFO     | elasticsearch GET http://172.19.89.126:9211/znhs-agent-skill-config-meta/_doc/fujian%E7%A6%8F%E5%BB%BA%E6%81%A0%E6%88%903Aaapi_nodes [status:404 request:0.044s]
+2026-07-06 18:55:36.804 | WARNING  | elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-configs/_search [status:400 request:0.043s]
+2026-07-06 18:55:36 | ERROR    | services.es_config_store:_search_published_data:510 - [ESConfigStore] _search_published_data 失败: RequestError (400, 'search_phase_execution_exception', 'No mapping found for [version] in order to sort on')
+2026-07-06 18:55:36.915 | INFO     | elasticsearch GET http://172.19.89.126:9211/znhs-agent-skill-config-meta/_doc/fujian%E7%A6%8F%E5%BB%BA%E6%81%A0%E6%88%903Abiz_config [status:404 request:0.018s]
+2026-07-06 18:55:36.915 | WARNING  | elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-configs/_search [status:400 request:0.055s]
+2026-07-06 18:55:36 | ERROR    | services.es_config_store:_search_published_data:510 - [ESConfigStore] _search_published_data 失败: RequestError (400, 'search_phase_execution_exception', 'No mapping found for [version] in order to sort on')
+2026-07-06 18:55:36 | INFO     | utils.skill_runtime.load_config_from_external:221 - [SkillLoader] Redis/ES 均无 fujian/套餐推荐 的已发布配置, fallback 本地文件 (首次通过管理页保存/发布后才会写入 ES)
+2026-07-06 18:55:36 | INFO     | utils.skill_runtime.load_package:150 - [SkillLoader] ✔ 加载技能包: fujian:套餐推荐 v1.0.0 [配置来源: local]
+2026-07-06 18:55:37.026 | INFO     | elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-config-meta/_doc/guangdong%E5%B9%BF%E4%B8%9C%E6%B1%A0%E6%8E%A83Aaapi_nodes [status:404 request:0.026s]
+2026-07-06 18:55:37.079 | WARNING  | elasticsearch GET http://172.19.89.150:9211/znhs-agent-skill-configs/_search [status:400 request:0.036s]
+2026-07-06 18:55:37 | ERROR    | services.es_config_store:_search_published_data:510 - [ESConfigStore] _search_published_data 失败: RequestError (400, 'search_phase_execution_exception', 'No mapping found for [version] in order to sort on')
+2026-07-06 18:55:37.154 | INFO     | elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-config-meta/_doc/guangdong%E5%B9%BF%E4%B8%9C%E6%B1%A0%E6%8E%A83Abiz_config [status:404 request:0.046s]
+2026-07-06 18:55:37 | WARNING  | elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-configs/_search [status:400 request:0.046s]
+2026-07-06 18:55:37 | ERROR    | services.es_config_store:_search_published_data:510 - [ESConfigStore] _search_published_data 失败: RequestError (400, 'search_phase_execution_exception', 'No mapping found for [version] in order to sort on')
+2026-07-06 18:55:37 | INFO     | utils.skill_runtime.load_config_from_external:221 - [SkillLoader] Redis/ES 均无 guangdong/套餐推荐 的已发布配置, fallback 本地文件
+
+
+
+请确认，现在查询 ES 或者缓存查询的配置，是全部展示skill，不是根据关键词检索的某个skill
+
+
+列表(名称/数量/状态):AutoConfigAgent list_skills 直接读本地文件,永远不查 ES。
+这个需要确认，在模式是：    "environment": "；production_noauth"下，只能读 ES查询；
+同时，可以需要：我把列表接口也改成反映 ES/缓存的生效状态(而不是纯读本地文件)吗?如果你希望列表页也能一眼看出每个技能的配置来源(es/redis/local),我可以给 list_skills 加上来源标识。
+
+增强项目的日志记录功能，方便查询问题；
+
+
+请确认下，znhs_xy_old项目中 ES 里面查询的是下面配置文件格式的信息，如：
+api_nodes.json
+biz_config.json
+是否还有_meta.json？
+是否可以查询到skill相关结构化的信息，
+
+
+如果当前 ES 中不能查询到skill的信息的话，或者只能查询到话术模板和接口信息；
+
+在znhs_refactor项目中，通过 ES无法查询到skill的列表信息。
+目前看因为原 ES 没有相关skill信息，原来的代码ES只存放接口和话术模板配置，这样的话skillmanage页面只能读取本地的skill
+所以请给出基于ES中的现有的接口和话术模板配置，根据匹配关系，先将存量的api_nodes.json、biz_config.json的关联关系自动创建skill的结构化信息（按省、意图等等），并存到ES中。
+
+后续skill信息可以在skillmanage中正常显示
+
+
+在skillmanage页面中，实现 ES 或者 Redis 的同步后，增加全部配置一键导出功能；
+同时确认，对 SKILL 的接口和话术模板的编辑修改，修改保存后也可以存到es中
+
+
+
+
+请按照下面的优化建议优化skillmanage的前端，但是不要修改数据格式，影响现网的服务
+
+
+## 营销话术智能体 7 月研发验收标准
+
+---
+
+### 任务一：配置下发与配置同步稳定性优化（解决现网 Bug）
+
+#### 核心问题背景
+多实例 ES 配置读取 + Redis/Pub-Sub 同步链路存在不稳定情形：环境变量解析异常（分号前缀）、ES doc_type 不兼容、meta 指针缺失时回退本地文件等。
+
+---
+
+#### 验收标准（行为级）
+
+| 编号 | 标准描述 | 验收方式 |
+|---|---|---|
+| S1-1 | 服务以任意合法 `environment` 值启动（含 `production_noauth`），启动日志无"无效运行环境"警告 | 查启动日志关键字 |
+| S1-2 | 生产/灰度环境启动后，`[SkillLoader]` 日志中**不出现** `⚠️ 生产模式下所有技能包均来自本地文件` | 查运行日志 |
+| S1-3 | SkillManager 列表在 ES 有数据时，页面技能包数量 ≥ ES 中已发布 `api_nodes` 的技能包数量 | 对比 Postman 查询结果与页面 |
+| S1-4 | 单实例发布/修改配置后，**5 分钟内**（轮询间隔内）所有其他实例的 `skill_registry` 自动刷新到最新版本 | 多实例部署验证，查各实例日志 `[ConfigPoller] 检测到变更` |
+| S1-5 | ES 节点临时不可用（任一节点下线）时，服务不崩溃，降级读 Redis 或本地文件，**响应码 200**，日志记录 WARNING 而非 ERROR | 摘除一个 ES 节点后压测 |
+| S1-6 | 配置发布（Save）后立即调用 `/api/config-source` 诊断接口，`config_source` 显示 `es` 或 `redis`，不为 `local` | 接口验证 |
+
+#### 量化指标
+
+| 指标 | 目标值 | 测量方法 |
+|---|---|---|
+| 配置同步延迟（Redis Pub/Sub 正常时） | **< 3 秒** | 发布后 watch 各实例 `loaded_at` 变化时间差 |
+| 配置同步延迟（仅轮询兜底时） | **≤ poll_interval_seconds（默认 300 秒）** | 关闭 Redis 后测量最大延迟 |
+| ES 查询失败后服务可用率 | **100%**（降级不中断） | 注入故障后持续压测 60 分钟，success_rate = 接口成功数 / 总请求数 |
+| 启动时 ES 连接成功率 | **≥ 99%**（3 节点任一可用即可） | 随机关停 1-2 节点时重启服务 10 次 |
+| 配置发布成功率（ES 可用时） | **100%** | 连续发布 20 次，ES 写入全部成功 |
+
+---
+
+### 任务二：话术 Context 工程优化（入参→固定映射域→槽位关联匹配逻辑优化）
+
+#### 核心问题背景
+当前链路：接口出参 `response_extract` → `resource_context` 7 大固定域 → 话术模板 `linked_vars` 槽位消费。现存问题：槽位与域的关联规则不清晰，匹配逻辑存在空值穿透、优先级混乱等问题。
+
+---
+
+#### 验收标准（行为级）
+
+| 编号 | 标准描述 | 验收方式 |
+|---|---|---|
+| S2-1 | 接口出参字段经 `response_extract` → 7 大固定域映射后，**无字段丢失**（配置了映射的字段全部出现在 `resource_context`） | 单元测试 / 日志验证 |
+| S2-2 | 话术模板 `linked_vars` 中声明的槽位变量，**全部能从对应固定域中解析到值**（含多层 JSON Path 取值） | 构造标准测试用例验证 |
+| S2-3 | 槽位值为 `None` / 空字符串时，话术生成**不报错**，按配置的默认值或占位符填充 | 构造空值测试用例 |
+| S2-4 | 同一槽位变量在多个固定域中均有值时，**优先级规则明确可配置**（如 `user_info` > `domain_ext`），不出现随机覆盖 | 配置优先级后验证 |
+| S2-5 | 7 大固定域名称和字段结构在 SkillManager 「数据流映射」Tab 中可视化展示，运营人员无需看代码即可理解映射关系 | 人工走查 UI |
+| S2-6 | 修改槽位关联配置后，**不重启服务**即可生效（热重载 or 保存即生效） | 修改保存后直接调用推荐接口验证 |
+
+#### 量化指标
+
+| 指标 | 目标值 | 测量方法 |
+|---|---|---|
+| 槽位填充成功率（标准测试集） | **≥ 95%**（测试集 ≥ 20 条真实话术请求） | 跑自动化测试用例，统计槽位非空比例 |
+| 空值穿透导致话术生成失败率 | **0%**（有默认值兜底） | 构造全量空值入参，验证服务正常返回 |
+| 映射逻辑变更后热生效时间 | **< 10 秒** | 保存配置到下一条请求生效的时间差 |
+| 话术模板匹配准确率（意图对应模板命中） | **≥ 90%**（标准测试集，含边界意图） | 构造 ≥ 30 条多意图测试用例，统计命中率 |
+| 接口出参→固定域映射覆盖率 | **100%**（配置了映射规则的字段） | 核查配置 vs 实际 context 字段 |
+
+---
+
+
+
+请完成skillmanage的上述优化，并可以同步分析是否优化前端，并确保不影响现网的配置的稳定性，并不影响现在的话术和接口的数据格式。
+
+
+
+
+优化skillmanage的整体 UI，要求
+按照这份前端交互规范全局重构SkillManager后台页面，统一全页面交互行为：
+1. 所有接口请求增加loading加载、按钮防重复点击锁、300ms防抖；ES异常统一提供刷新重试；
+2. 全局替换所有零散提示，统一封装$msg工具区分成功/警告/错误三类反馈；高危操作增加二次确认弹窗；
+3. 统一三段式页面布局PageHeader+PageFilter+PageContent，规范筛选、表格分页、操作按钮顺序；
+4. 表单弹窗标准化，增加JSON校验、保存本地/发布上线双操作，发布动作二次确认；
+5. 表格使用统一EsStatusTag状态标签，hover展示ES异常详情，默认按version倒序排序；
+6. 封装日志侧边抽屉组件，分层展示ERROR/WARN/INFO日志，支持复制、刷新、暂停滚动；
+7. 路由、静态资源自动区分/znhs-gray灰度、/znhs生产前缀，适配PRODUCTION_NOAUTH免鉴权逻辑，401、503异常统一兜底页面；
+8. 全局统一空状态组件，处理ES索引缺失、无线上配置场景；
+9. 删除所有负面交互：无加载反馈、无确认高危操作、遮罩关闭弹窗、硬编码路径、零散自定义提示；
+10. 灰度与生产环境交互逻辑完全一致，仅增加顶部环境提示条，不做两套差异化页面。
+
+
+并不改动和营销后端服务，数据的结构，不影响现网的更新
+
+
+
+
+广东的接口如下，它是直传模式。
+
+{ 
+    "callId": "20260305123xx", 
+    "intent": "营销活动",     #固定值
+    "phone": "15010470528", 
+    "topN": 1, 
+    "province":"200",  
+    "extra_info": {
+        "current_package":{
+           "package_name":"",    # 当前套餐名称
+           "actual_price":"",        # 当前套餐实付价格
+           "voice_minutes":"",     # 当前套餐语音
+           "baseFlow":""            # 当前套餐套内流量    
+         },
+        "final_recommendations": {
+            "recommend_package_name": "",    # 推荐套餐名称
+            "recommend_original_price": "",       # 推荐套餐原始价格
+            "recommend_actual_price": "",         # 推荐套餐实付价格
+            "recommend_discount_amount": "",   # 推荐套餐减免/价格
+            "recommend_base_flow": "",            # 推荐套餐套内流量
+            "recommend_bonus_flow": "",          # 推荐套餐赠送流量
+            "recommend_total_flow": "",            #  推荐套餐总流量
+            "recommend_voice_minutes": "",      #  推荐套餐语音
+            "recommend_preferential_period": ""   #推荐套餐优惠期
+        },
+      "diff":{
+           "diff_actual_price":"",     # 实际价格差异
+           "base_flow_diff":"",        # 套内流量差异
+           "base_flow_diff":"",       # 赠送流量差异
+           "voice_minutes_diff":""  # 套内语音差异    
+      }
+    }
+    }, 
+    "batch_contexts": [
+            {  
+              "product_id": "xx",      # 产品名称  xx流量、套餐xx
+              "stage": "个人市场",    # 固定值  个人市场  or  家庭市场 
+               "scence": "开口话术"  # 固定值
+            }  
+    ]
+ } 
+
+说明：
+1."batch_contexts"字段替换原extra_contexts字段
+2. 如推荐产品为家庭市场，"extra_info"字段传空值，示例：  "extra_info"：{}
+3. 给出extra_info具体参数示例，确认与话术模板匹配对应关系
+
+
+
+话术模板对应的是
+顺便跟您讲一下，我们特地推出了一款套餐优惠，现在连续**（recommend_preferential_period）个月每月只需要**（recommend_actual_price）元，可享受套内**GB（recommend_base_flow）国内流量+**（recommend_voice_minutes）分钟国内通话，另**（recommend_preferential_period）月内每月多享受xxGB（recommend_bonus_flow）国内流量，相当于**个月（recommend_preferential_period）内每月共**GB（recommend_total_flow）流量，现在给您办理使用好吗？
+
+
+生成的结果是
+顺便跟您讲一下，我们特地推出了一款套餐优惠，现在连续Xx个月每月只需要199元，可享受套内100GB国内流量+600分钟国内通话，另XX月内每月多享受
+xxGB国内流量，相当于xx个月内每月共100GB流量，现在给您办理使用好吗?
+
+大模型生成的结果都问题：
+话术里面很多 xx
+
+针对接口文档进行分析，看看如何更好的减少 XX，例如，优化话术模板 以及 话术提示要求示词（话术要求字数、语气、计算规则等输出要求）
+并给出样例
+
+
+
+请优化skill的编辑前端
+1、编辑skill中的手动新建接口中，第二步响应样例是否有用？ 没有用的话，可以删除；
+2、接口配置中的 （3）出参映射步骤，  是否可以和 编辑 skill的标准数据关联进行融合，
+3、编辑skill，编辑接口，编辑话术模板页面整体 UI 优化下，和skillmanage风格要统一；
+
+优化下面的地址对应的交互，http://localhost:8000/znhs-gray/Import
+1、② 接口 / 话术模板配置和   编辑skill 的保持统一；
+2、目标省份的配置，需要覆盖 31 个省份；只能选择，不能手动输入；
+3、整体 UI 优化下，和skillmanage风格要统一；
+
+
+
+
+
+
+基于对代码的完整阅读，以下是针对 SkillManager 中接口编辑和新建 Skill 的具体优化建议，聚焦你提出的 4 个核心问题。
+
+---
+
+## 一、逻辑不清晰的根本原因
+
+当前 `SkillConfigEditor.vue` 的接口编辑弹窗存在一个根本性的认知负担：**"三步骤"和"7大标准域"是两个平行的概念体系，用户始终不知道自己在哪个层次操作，目标是什么**。
+
+具体表现：
+- 步骤①"配置请求" → 步骤②"模拟数据" → 步骤③"出参映射"，三步各自独立，看不到整体数据流向
+- `response_extract` / `field_transform` 是技术术语，非技术运营人员看不懂
+- "中间数据集"的概念没有可视化，用户填完②看不出对③有什么影响
+- 7大标准域藏在"标准数据关联" Tab 下，和接口编辑弹窗是割裂的
+
+---
+
+## 二、具体优化方向
+
+### 优化1：接口编辑弹窗改为"以输出为导向"的引导式布局
+
+**现状**：三步是从配置视角（怎么调接口）出发设计的，用户搞不清楚最终会产出什么。
+
+**建议**：把步骤顶部加一个"产出预览区"，始终保持可见，随用户填写实时更新：
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  产出结果（实时预览）                                       │
+│  ┌─────────────────────────────────────────────────────┐│
+│  │ ✓ current_package  ✓ usage  ✓ tags  ✗ user_info ... ││
+│  │ 已覆盖 3/7 个标准域 · 被 2 个话术模板引用              ││
+│  └─────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────┘
+① 配置请求  ──  ② 出参映射（粘贴样例 + 定义映射规则）
+```
+
+产出区的 7 个标准域用"亮色=已配置 / 灰色=未配置"的 chip 显示，这样用户在任何步骤都能一眼知道"我的目标达到了没有"。
+
+---
+
+### 优化2：response_extract / field_transform 改用"领域语言"标注
+
+**现状**：两个 JSON 文本框，看不出关系，也不知道填什么。
+
+**建议**：在两个文本框上方加固定说明栏，并用箭头示意数据流：
+
+```
+接口响应 JSON
+   │
+   ▼  response_extract（第一步：取出中间数据块，给它们命名）
+   │  例：{ "raw_tags": "bean.tags" }  ← 意思是把 bean.tags 取出来，叫做 raw_tags
+   ▼
+中间数据块（raw_tags, current_package, ...）
+   │
+   ▼  field_transform（第二步：决定每个中间块写入哪个标准域）
+   │  例：usage ← raw_tags（只保留流量相关字段）
+   ▼
+7 大标准域（current_package / usage / tags / ...）
+   │
+   ▼  话术模板 linked_vars 消费
+```
+
+同时在 `response_extract` 文本框右侧加一个"从样例 JSON 快速提取"按钮，点击后自动解析样例 JSON 的顶层 key 并生成候选的 extract 规则，用户只需勾选需要的字段。
+
+---
+
+### 优化3：field_transform 从纯 JSON 改为"表格化配置"
+
+**现状**：用户需要手写如下 JSON，难度高且容易出错：
+```json
+{
+  "usage": { "from": "raw_tags", "type": "filter_include", "include_keys": ["近3月平均流量"] }
+}
+```
+
+**建议**：增加一个"可视化配置模式"开关，用表格替代 JSON 手写：
+
+| 标准域（写入哪里） | 来源数据块（from） | 映射方式 | 包含/排除字段 |
+|---|---|---|---|
+| usage ↓ | raw_tags ▼ | 只保留 ▼ | [近3月流量...] × [选择字段] |
+| current_package ↓ | current_package ▼ | 整块透传 ▼ | — |
+| tags ↓ | raw_tags ▼ | 排除 ▼ | [近3月流量...] × |
+
+字段选择用 checkbox 列表，来源于 response_extract 的提取结果（已有数据），这样用户不需要记字段名，直接勾选。"高级 JSON 模式"保留给有经验的用户。
+
+---
+
+### 优化4：新建 Skill 流程与编辑 Skill 完全对齐
+
+**现状**：新建 Skill（步骤创建模式）和编辑 Skill 弹窗是两套入口，共用同一个 `SkillConfigEditor`，但行为不完全一致（模式A有省份/意图直连后端，模式B是本地草稿），用户体感割裂。
+
+**建议**：
+1. 新建 Skill 第一步收集 省份 + 意图 后，**立即切换为和编辑完全一样的三 Tab 布局**（接口配置 / 标准数据关联 / 话术模板），而不是继续走独立的步骤表单
+2. 新建时后端临时创建一个 draft 记录（省份+意图确定后即可），后续编辑逻辑完全复用已有代码
+
+---
+
+### 优化5：验证入口——在编辑弹窗内直接测试
+
+**现状**：编辑完接口需要关闭弹窗，回到列表，点"测试"才能验证结果。
+
+**建议**：在接口编辑弹窗的步骤②（出参映射）下方，增加一个"验证映射结果"内联面板：
+
+```
+─────────────────────────────────────────────────
+验证映射结果
+手机号 [15010470528____] 
+附加参数 extra_data [________________]
+[▶ 执行验证]   状态: ✅ 成功 · current_package ✓ usage ✓ tags ✓
+─────────────────────────────────────────────────
+```
+
+点击后直接调用 `/api/dry-run-mapping` 接口（后端仅执行数据获取+映射，不生成话术），返回每个标准域的实际填充值，用户可以立刻确认映射是否正确，不需要离开当前弹窗。
+
+---
+
+### 优化6：7大标准域与话术模板的关联关系可视化
+
+**现状**：数据流映射 Tab 的左右两栏（数据来源 / 话术模板）之间没有连线，用户看不出哪个域被哪个模板消费了。
+
+**建议**：在"标准数据关联" Tab 中，点击某个标准域 chip（如 `usage`），右侧话术模板列表高亮展示所有引用了该域的模板，同时在模板行内显示具体的槽位变量名（如 `usage_line`）。反过来，点击某个话术模板，左侧高亮该模板依赖的所有标准域。这种双向高亮能让"接口→域→模板"的映射链路一目了然，无需看代码。
+
+---
+
+## 三、优先级建议
+
+| 优化项 | 实现难度 | 收益 |
+|---|---|---|
+| 优化1：产出预览区始终可见 | 低（纯前端状态展示） | 高 |
+| 优化5：弹窗内直接验证 | 中（需后端新增 dry-run 接口） | 高 |
+| 优化3：field_transform 表格化 | 中（前端改造）| 高 |
+| 优化6：双向高亮关联 | 低（纯前端交互）| 中 |
+| 优化2：领域语言标注 | 低（纯 UI 文案）| 中 |
+| 优化4：新建/编辑统一 | 高（流程重构）| 中 |
+
+建议按优先级 1→5→2→6→3→4 推进，前三项改动小、收益大，可以作为本次迭代重点。
+
+请基于skill首页的修改意见，
+
+
+
+请分析接口配置中的设计：
+中间数据集是否有用，是否可以优化？？
+
+它的作用：从响应里按 JSON 路径整块取数据，命名为「中间数据集」。 示例 { "raw_tags": "bean.tags" }。
+
+
+假的响应参数是：
+{
+  "rtnCode": "0",
+  "rtnMsg": "成功",
+  "bean": {
+    "phone": "13800138000",
+    "ioId": "123456789",
+    "tags": {
+      "近3月语音饱和度": "0.50",
+      "融合状态": "合约融合",
+      "近6月平均语音饱和度": "0.64",
+      "高频低额超套客户": "0",
+      "高频高额超套客户": "0",
+      "双卡机异网+移动但移动副卡": "0",
+      "低频低额超套或非超套客户": "1",
+      "分公司": "朝阳分公司",
+      "近3月流量饱和度": "0.93",
+      "近6月平均流量饱和度": "0.95",
+      "双卡槽状态": "双移动卡",
+      "近6月平均折后收入": "12.42",
+      "近3月平均折后收入": "10.50",
+      "近3月平均语音饱和度": "1.00",
+      "低频高额超套客户": "0",
+      "近3月平均流量(MB）": "23552.67",
+      "近6月平均流量(MB）": "38122.17",
+      "近3月平均流量饱和度": "0.00",
+      "近3月平均月消费": "128.50",
+      "近6月平均月消费": "130.42",
+      "近3月平均主叫时长": "100.00",
+      "是否老旧套餐": "0",
+      "近6月平均主叫时长": "121.83",
+      "双卡机移动+异网且移动主卡": "0"
+    },
+    "mainoffer": {
+      "offerId": "111601000461",
+      "offerName": "128元5G畅享套餐",
+      "initFee": 128,
+      "offerType": [],
+      "offerFlow": "30",
+      "offerVoice": "200",
+      "offerPlus": "",
+      "bandWidth": "",
+      "suppCard": "1",
+      "otherRight": [
+        ""
+      ],
+      "offerDesc": "",
+      "tags": []
+    },
+    "recommend_results": [
+      {
+        "offerId": "111602052881",
+        "offerName": "云宽带129元档合约方案",
+        "initFee": 129,
+        "offerType": [],
+        "offerFlow": "50",
+        "offerVoice": "170",
+        "offerPlus": "1个",
+        "bandWidth": "500M",
+        "suppCard": "1",
+        "otherRight": [
+          "IPTV基础会员/移动高清基础会员"
+        ],
+        "offerDesc": "",
+        "tags": [],
+        "rank": 1
+      },
+      {
+        "offerId": "111602052882",
+        "offerName": "云宽带139元档合约方案",
+        "initFee": 139,
+        "offerType": [],
+        "offerFlow": "55",
+        "offerVoice": "180",
+        "offerPlus": "1个",
+        "bandWidth": "500M",
+        "suppCard": "1",
+        "otherRight": [
+          "IPTV基础会员/移动高清基础会员"
+        ],
+        "offerDesc": "",
+        "tags": [],
+        "rank": 1
+      }
+    ]
+  },
+  "beans": [],
+  "object": null
+}
+
+
+智能分析后的响应提取是：
+{
+  "current_package": "bean.mainoffer",
+  "recommended_packages": "bean.recommend_results",
+  "raw_tags": "bean.tags"
+}
+
+
+
+
+现在响应参数是：
+{
+  "rtnCode": "0",
+  "rtnMsg": "成功",
+  "bean": {
+    "phone": "13800138000",
+    "ioId": "123456789",
+    "tags": {
+      "近3月语音饱和度": "0.50",
+      "融合状态": "合约融合",
+      "近6月平均语音饱和度": "0.64",
+      "高频低额超套客户": "0",
+      "高频高额超套客户": "0",
+      "双卡机异网+移动但移动副卡": "0",
+      "低频低额超套或非超套客户": "1",
+      "分公司": "朝阳分公司",
+      "近3月流量饱和度": "0.93",
+      "近6月平均流量饱和度": "0.95",
+      "双卡槽状态": "双移动卡",
+      "近6月平均折后收入": "12.42",
+      "近3月平均折后收入": "10.50",
+      "近3月平均语音饱和度": "1.00",
+      "低频高额超套客户": "0",
+      "近3月平均流量(MB）": "23552.67",
+      "近6月平均流量(MB）": "38122.17",
+      "近3月平均流量饱和度": "0.00",
+      "近3月平均月消费": "128.50",
+      "近6月平均月消费": "130.42",
+      "近3月平均主叫时长": "100.00",
+      "是否老旧套餐": "0",
+      "近6月平均主叫时长": "121.83",
+      "双卡机移动+异网且移动主卡": "0"
+    },
+    "mainoffer": {
+      "offerId": "111601000461",
+      "offerName": "128元5G畅享套餐",
+      "initFee": 128,
+      "offerType": [],
+      "offerFlow": "30",
+      "offerVoice": "200",
+      "offerPlus": "",
+      "bandWidth": "",
+      "suppCard": "1",
+      "otherRight": [
+        ""
+      ],
+      "offerDesc": "",
+      "tags": []
+    },
+    "recommend_results": [
+      {
+        "offerId": "111602052881",
+        "offerName": "云宽带129元档合约方案",
+        "initFee": 129,
+        "offerType": [],
+        "offerFlow": "50",
+        "offerVoice": "170",
+        "offerPlus": "1个",
+        "bandWidth": "500M",
+        "suppCard": "1",
+        "otherRight": [
+          "IPTV基础会员/移动高清基础会员"
+        ],
+        "offerDesc": "",
+        "tags": [],
+        "rank": 1
+      },
+      {
+        "offerId": "111602052882",
+        "offerName": "云宽带139元档合约方案",
+        "initFee": 139,
+        "offerType": [],
+        "offerFlow": "55",
+        "offerVoice": "180",
+        "offerPlus": "1个",
+        "bandWidth": "500M",
+        "suppCard": "1",
+        "otherRight": [
+          "IPTV基础会员/移动高清基础会员"
+        ],
+        "offerDesc": "",
+        "tags": [],
+        "rank": 1
+      }
+    ]
+  },
+  "beans": [],
+  "object": null
+}
+
+
+智能分析后的响应提取response_extract是：
+{
+  "current_package": "bean.mainoffer",
+  "recommended_packages": "bean.recommend_results",
+  "raw_tags": "bean.tags"
+}
+
+还是有raw_tags中间变量，请分析是否合理
+
+
+
+请分析是否可以不需要响应提取response_extract
+直接完成7个域和响应参数的映射？
+
+
+
+推荐产品的响应参数，如有多个，是如何生成话术的？
+  例如：推荐了3个产品，如何关联生成3个话术；
+  给出生成逻辑，判断是否有需要优化的地方
+
+
+
+同时，分析项目中用到大模型的部分，需要把大模型提示词抽取出来，单独放到prompt目录中，一类提示词一个文件。方便后续优化；
+但是不能影响模型的调用；
+
+
+在鉴权模式下，账号对应的所属省份， 只能编辑所属省份的skill，别的省的只能查看，不能编辑
+
+
+
+请提供生成环境的测试验证的的测试数据
+一、省份北京
+  1、场景，套餐推荐；
+  2、接口模式，mock；
+  3、模拟的测试参数；mock 模式；
+  4、10条；
+  5、环境：生产环境
+
+二、广东
+  1、场景：营销活动；
+  2、直传模式
+  3、提供模拟的测试参数，可以直接调用生产的skill生成话术；再测试页面可以验证；
+  4、10 条
+  5、环境：生产环境
+
+存放到文档中；
+
+
+广东的直传模式的入参样例如下：
+{ 
+    "callId": "20260305123xx", 
+    "intent": "营销活动",     #固定值
+    "phone": "15010470528", 
+    "topN": 1, 
+    "province":"200",  
+    "extra_info": {
+        "current_package":{
+           "package_name":"",    # 当前套餐名称
+           "actual_price":"",        # 当前套餐实付价格
+           "voice_minutes":"",     # 当前套餐语音
+           "baseFlow":""            # 当前套餐套内流量    
+         },
+        "final_recommendations": {
+            "recommend_package_name": "",    # 推荐套餐名称
+            "recommend_original_price": "",       # 推荐套餐原始价格
+            "recommend_actual_price": "",         # 推荐套餐实付价格
+            "recommend_discount_amount": "",   # 推荐套餐减免/价格
+            "recommend_base_flow": "",            # 推荐套餐套内流量
+            "recommend_bonus_flow": "",          # 推荐套餐赠送流量
+            "recommend_total_flow": "",            #  推荐套餐总流量
+            "recommend_voice_minutes": "",      #  推荐套餐语音
+            "recommend_preferential_period": ""   #推荐套餐优惠期
+        },
+      "diff":{
+           "diff_actual_price":"",     # 实际价格差异
+           "base_flow_diff":"",        # 套内流量差异
+           "base_flow_diff":"",       # 赠送流量差异
+           "voice_minutes_diff":""  # 套内语音差异    
+      }
+    }
+    }, 
+    "batch_contexts": [
+            {  
+              "product_id": "xx",      # 产品名称  xx流量、套餐xx
+              "stage": "个人市场",    # 固定值  个人市场  or  家庭市场 
+               "scence": "开口话术"  # 固定值
+            }  
+    ]
+ } 
+
+ 请修改测试用例
+
+
+
+
+
+话术模板配置需要优化：
+1、列表字段名称需要修改：模板名称改成 场景意图名称， 场景改成 意图 ，环节不改，同步修改话术模板编辑里面的字段表述；
+2、增加根据省份、场景意图、环节的字段的查询功能；
+3、如果下面的字段：场景意图名称、环节、意图、话术模板内容都一致，只是产品id不一致的话，需要合并展示，产品id按要求的分隔符展示；
+
+ 图中有 2000 多条话术模板，太多了，不好编辑；
+
+
+接口编辑的直传模式域映射部分需要优化；
+1、支持直接入参 操作智能映射；
+2、支持直接透传参数（手动填入入参）  和智能映射两种模式；
+
+这样对应的话术编辑部分，也同步优化，提示词部分也需要优化，以支持两种模式
+直接透传参数的，contex以直传的入参参数进行关联
+
+请对前端和后端进行优化；
+
+
+生产环境测试报错：
+北京的接口查询模式。
+
+入参
+{
+"callId": "20260624xx",
+"intent": "套餐推荐",
+"phone": "15001236082",
+"topN": 2,
+"province":"beijing",
+"extra_data":{
+    "currentMainOffer":{
+        "curOfferName":"128元5G畅想套餐档","curOfferId":"111601000461",
+        "curOfferFee":"12800"
+    }
+}
+}
+
+
+响应报错，部分日志如下：
+
+{
+    "marketing_text": "您好！您当前套餐为128元5G畅想套",
+    "diff_table": null,
+    "stage": "",
+    "scence": ""
+},
+{
+    "product_id": "111602052882",
+    "rank": 2,
+    "marketing_text": "您好！您当前套餐为128元5G畅想套",
+    "diff_table": null,
+    "stage": "",
+    "scence": ""
+}
+],
+"other_info": null
+}
+
+other_info为null正常应该是 查询接口返回的内容，请检查。
+
+参考之前的项目znhs_xy_old，接口查询模式的返回。
+
+
+
+
+话术模板：
+您好!您当前套餐为lcurrent_package]，根据您近6个月的通信消费和使用情况[usage}。我为您推荐[pkz_brief]l套餐，优势是{diff _str)，您只需在现有月均消费的基础上少许增加，即可享受更多权益。
+话术要求：
+直接输出话术文本，不需要前缀，口语化，亲切;营销推荐话术贴合用户痛点;话术模板中需要的数据必须展示，同时可在话术模板基础上结合用户情况生成个性化的话术，但不出现饱和度数据、资源减少的数据;结合字数100字以内。
+
+
+云宽带99元档合约方案
+您好!您当前套餐为未知套餐，根据您近6个月的通信消费和使用情况。我为您推荐云宽带99元档合约方案，优势是月费一，流量一，语音-您只需在现有月均消费的基础上少许增加，即可享受更多权益。
+
+
+云宽带99元档合约方案
+根据您近6个月的通信消费和使用情您好!您当前套餐为未知套餐况。我为您推荐云宽带99元档合约方案，优势是月费一，流量一，语音一，您只需在现有月均消费的基础上少许增加，即可享受更多权益，
+
+5G畅享套餐98元档全球通
+您好!您当前套餐为未知套餐，根据您近6个月的通信消费和使用情况。我为您推荐5G畅享套餐98元档全球通，优势是月费一，流量一，您只需在现有月均消费的基础上少许增加，即可享受更多权语音-益
+
+话术模板配置里面，关联接口后，
+prompt预览
+你是套餐营销推荐坐席，负责将[上下文数据】填充进【话术模板】，生成自然、口语化的个性化套餐营销推荐话术。[上下文数据】(经接口映射得到的真实用户与套餐数据，是你唯一可依据的事实来源，请勿使用未在此列出的信息)历史用量{usage}:近3月平均流量(MB):18.07，流量饱和度:90%，近月平均主叫时长(分钟):380，语音饱和度:76%，月均折后收入(分):128.0，近3月月均消费(分):126.0
+用户标签{tags}:用户价值等级、是否5G用户、网龄(年)
+当前套餐信息 {current_package}:{{CURRENT_OFFER_NAME}},{{CURRENT_0FFER_FEE}}元/月，流量20480GB，语音500分钟
+
+
+提示词里面，还是有具体值，是不是应该体现到透传接口字段或者映射域
+
+
+话术生成context工程分析和优化
+1、确保接口直传模式（智能分析、透传）、接口查询模式下的字段  与话术模板中的拖拉拽的占位符能准确的关联好；
+2、大模型提示词能准确实现context话术生成；
+3、如有优化的地方，请优化前端和后端；
+
+请确认，话术模板配置页面中，选择的接口 和拖拽占位符是否有关联？ 如果没有关联的话，是不是体现关联更好。
+
+请优化话术模版编辑的前端或者后端，让上下游的逻辑更清晰，关联性更强
+
+
+话术模板编辑部分，支持基于入参或者营销数据的占位符，提供一个按钮功能，实现通过调用大模型（根据不同的环境配置，调用不同的环境模型）基于原话术模板语义的自动占位符填填充。
+填充需要准确，符合context工程和提示词要求，节约占位符的手动配置；
+请优化前端和后端能力；
+
+
+
+
+生产环境中，山东请求，如下
+
+{
+  "params": {
+    "callId": "123",
+    "intent": "套餐推荐",
+    "phone": "15853422072",
+    "topn": "",
+    "province": "shandong",
+    "extra_info": {
+      "internetAge": "10"
+    },
+    "batch_contexts": [
+      {
+        "product_id": "20240902586449",
+        "staget": "",
+        "scencet": ""
+      }
+    ]
+  }
+}
+
+
+响应返回如下
+{
+    "busiCode":null,
+    "opId":null,
+    "phone":"null",
+    "returnCode":"340804",
+    "returnMessage":"数据加载失败",
+    "bean":{
+        "total":0
+    },
+    "realReturnMessage":"服务处理超时,错误信息 (). 请检查超时配置是否合理、网络状况是否良好、提供方服务质量是否良好",
+    "beans":[
+        "object":null
+    ]
+}
+
+请分析是什么原因
+
+
+生产环境 创建新的skill报错，其中接口和话术都用的默认的快速的配置，
+
+但是发布的时候还是报错：
+1、
+发布 api_nodes 失败：发布失败(生产读取以 ES 为准，ES 写入未成功):发布失败:
+RequestError(400, 'illegal_argument_exception', 'Limit of total fields [1000] in index [znhs-agent-skill-configs] has been exceeded') (尚无任何 config 生效，可直接重试)
+
+日志如下：
+2026-07-20 17:51:49,143 INFO kafka.coordinator.consumer Setting newly assigned partitions {TopicPartition(topic='topic_lingyun_logout_gray', partition=4)} f or group lingyun_marketing-agent
+2026-07-20 17:51:49,144 INFO kafka.conn <BrokerConnection node_id=4 host=2409:808e:49a0:360::411:9092 <connecting> [IPv6 ('2409:808e:49a0::411', 9092, 0, 0)]>: connecting to 2409:808e:49a0:360::411:9092 [('2409:808e:49a0::411', 9092, 0, 0) IPv6]
+2026-07-20 17:51:49,145 INFO kafka.conn <BrokerConnection node_id=4 host=2409:808e:49a0:360::411:9092 <connecting> [IPv6 ('2409:808e:49a0::411', 9092, 0, 0)]>: Connection complete.
+INFO: 192.168.74.45:58840 - "GET /znhs-gray/api/user/me HTTP/1.1" 200 OK
+2026-07-20 17:51:49,445 INFO AutoConfigAgent.server [list_skills] 并入仅存于 ES 的技能: guangdong:营销推荐
+2026-07-20 17:51:49,445 INFO AutoConfigAgent.server [list_skills] 并入仅存于 ES 的技能: beijing:营销推荐
+2026-07-20 17:51:49,445 INFO AutoConfigAgent.server [list_skills] 返回 9 个技能 (过滤 province='全部' intent='全部'), 配置来源: es=7, local=2
+INFO: 192.168.74.45:58840 - "GET /znhs-gray/api/auto-config/skills?province=&intent= HTTP/1.1" 200 OK
+INFO: 192.168.74.12:56326 - "GET /znhs-gray/assets/Import-jlXmz088.css HTTP/1.1" 200 OK
+INFO: 192.168.74.12:56326 - "GET /znhs-gray/assets/Import-C6MuZNA.js HTTP/1.1" 200 OK
+2026-07-20 17:51:52,970 INFO AutoConfigAgent.server [list_skills] 并入仅存于 ES 的技能: guangdong:营销推荐
+2026-07-20 17:51:52,970 INFO AutoConfigAgent.server [list_skills] 并入仅存于 ES 的技能: beijing:营销推荐
+2026-07-20 17:51:52,971 INFO AutoConfigAgent.server [list_skills] 返回 9 个技能 (过滤 province='全部' intent='全部'), 配置来源: es=7, local=2
+INFO: 192.168.74.12:56326 - "GET /znhs-gray/api/auto-config/skills HTTP/1.1" 200 OK
+INFO: 192.168.74.10:51486 - "POST /znhs-gray/api/auto-config/import/generate HTTP/1.1" 200 OK
+2026-07-20 17:52:19,184 INFO elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-config-meta/doc/anhui%3Add%3Aapi_nodes [status:404 request:0.018s]
+2026-07-20 17:52:19,232 WARNING elasticsearch PUT http://172.19.89.131:9211/znhs-agent-skill-configs/doc/anhui%3Add%3Aapi_nodes [status:400 request:0.048s]
+2026-07-20 17:52:19 WARNING | services.es_config_store::_index_doc_with_retry:264 - [ESConfigStore] 写入命中字段数上限, 尝试调高 total_fields.limit 后重试
+: RequestError(400, 'illegal_argument_exception', 'Limit of total fields [1000] in index [znhs-agent-skill-configs] has been exceeded')
+2026-07-20 17:52:19,255 WARNING elasticsearch PUT http://172.19.89.131:9211/znhs-agent-skill-configs/_settings [status:403 request:0.021s]
+2026-07-20 17:52:19 WARNING | services.es_config_store::_raise_field_limit:246 - [ESConfigStore] 设置 znhs-agent-skill-configs 字段上限失败 (不阻断) : AuthorizationException(403, 'security_exception', 'action [indices:admin/settings/update] is unauthorized for user [developer]')
+2026-07-20 17:52:19,294 WARNING elasticsearch PUT http://172.19.89.131:9211/znhs-agent-skill-configs/doc/anhui%3Add%3Aapi_nodes%3A1 [status:400 request:0.039s]
+2026-07-20 17:52:19 ERROR | services.es_config_store:save_and_publish:353 - [ESConfigStore] save_and_publish 失败: RequestError(400, 'illegal_argument_exception', 'Limit of total fields [1000] in index [znhs-agent-skill-configs] has been exceeded')
+2026-07-20 17:52:19 ERROR | services.skill_publisher:publish_config:168 - [SkillPublisher] anhui/dd/api_nodes ES 发布失败: 发布失败: RequestError(400, 'illegal_argument_exception', 'Limit of total fields [1000] in index [znhs-agent-skill-configs] has been exceeded')
+INFO: 192.168.74.13:956978 - "POST /znhs-gray/api/auto-config/import/publish HTTP/1.1" 500 Internal Server Error
+2026-07-20 17:53:26,512 INFO AutoConfigAgent.server 已备份原配置到: /root/skill-runtime/anhui/dd.bak.1784541206511
+2026-07-20 17:53:26,537 INFO elasticsearch GET http://172.19.89.131:9211/znhs-agent-skill-config-meta/doc/anhui%3Add%3Aapi_nodes [status:404 request:0.025s]
+2026-07-20 17:53:26,584 WARNING elasticsearch PUT http://172.19.89.131:9211/znhs-agent-skill-configs/doc/anhui%3Add%3Aapi_nodes [status:400 request:0.046s]
+2026-07-20 17:53:26 WARNING | services.es_config_store::_index_doc_with_retry:264 - [ESConfigStore] 写入命中字段数上限, 尝试调高 total_fields.limit 后重试: RequestError 400-'illegal_argument_exception', 'Limit of total fields [1000] in index [znhs-agent-skill-configs] has been exceeded'
+2026-07-20 17:53:26 WARNING elasticsearch PUT http://172.19.89.131:9211/znhs-agent-skill-configs/_settings [status:403 request:0.017s]
+2026-07-20 17:53:26 WARNING | services.es_config_store::_raise_field_limit:246 - [ESConfigStore] 设置 znhs-agent-skill-configs 字段上限失败 (不阻断): AuthorizationException(403, 'security_exception', 'action [indices:admin/settings/update] is unauthorized for user [developer]')
+2026-07-20 17:53:26,672 WARNING elasticsearch PUT http://172.19.89.131:9211/znhs-agent-skill-configs/doc/anhui%3Add%3Aapi_nodes%3A1 [status:400 request:0.069s]
+2026-07-20 17:53:26 ERROR | services.es_config_store:save_and_publish:353 - [ESConfigStore] save_and_publish 失败: RequestError(400, 'illegal_argument_exception', 'Limit of total fields [1000] in index [znhs-agent-skill-configs] has been exceeded')
+2026-07-20 17:53:26 ERROR | services.skill_publisher:publish_config:168 - [SkillPublisher] anhui/dd/api_nodes ES 发布失败: 发布失败: RequestError(400, 'illegal_argument_exception', 'Limit of total fields [1000] in index [znhs-agent-skill-configs] has been exceeded')
+INFO: 192.168.74.13:35082 - "POST /znhs-gray/api/auto-config/import/publish HTTP/1.1" 500 Internal Server Error
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+06-27-20 23:24:53  INFO    services.redis_config_bus:publish_change:186 - [RedisConfigBus] 已广播配置变更通知: chongqing:dd
+06-27-20 23:24:53  INFO    services.redis_config_bus:subscribe_loop:242 - [RedisConfigBus] 收到配置变更通知: chongqing:dd
+06-27-20 23:24:53  INFO    utils.skill_runtime:on_change:487 - [Registry] 配置变更触发 reload
+06-27-20 23:24:53  INFO    utils.skill_runtime:load_config_from_external:275 - [SkillLoader] 从 Redis 缓存加载: chongqing:dd
+06-27-20 23:24:53  INFO    utils.skill_runtime:load_package:183 - [SkillLoader] 已加载 ES skill_meta: chongqing:dd
+06-27-20 23:24:53  INFO    utils.skill_runtime:load_package:187 - [SkillLoader] ✅ 加载技能包: chongqing:dd v1.0.0 [配置来源: redis]
+06-27-20 23:24:53  INFO    core.pipeline:invalidate_bundle:110 - ⚠ Bundle 缓存已失效 (省份全量): province=chongqing 共0个
+06-27-20 23:24:53  INFO    utils.skill_runtime:reload_bundle:357 - [Registry] 热重载技能包: chongqing:dd
+06-27-20 23:24:53  INFO    services.es_config_store:save_and_publish:432 - [ESConfigStore] 已发布 chongqing/dd/skill_meta v262
+06-27-20 23:24:53  INFO    services.skill_meta_service:upsert_skill_meta:169 - [SkillMeta] 已写入 skill_meta: chongqing:dd
+06-27-20 23:24:53  INFO    utils.skill_runtime:load_config_from_external:275 - [SkillLoader] 从 Redis 缓存加载: chongqing:dd
+06-27-20 23:24:53  INFO    utils.skill_runtime:load_package:183 - [SkillLoader] 已加载 ES skill_meta: chongqing:dd
+06-27-20 23:24:53  INFO    utils.skill_runtime:load_package:187 - [SkillLoader] ✅ 加载技能包: chongqing:dd v1.0.0 [配置来源: redis]
+06-27-20 23:24:53  INFO    core.pipeline:invalidate_bundle:110 - ⚠ Bundle 缓存已失效 (省份全量): province=chongqing 共0个
+06-27-20 23:24:53  INFO    utils.skill_runtime:reload_bundle:357 - [Registry] 热重载技能包: chongqing:dd
+06-27-20 23:24:53  INFO    services.es_config_store:save_and_publish:432 - [ESConfigStore] 已发布 chongqing/dd/biz_config v262
+06-27-20 23:24:53  INFO    services.skill_publisher:write_local_file:86 - [ConfigPublisher] 已写本地配置文件: /root/znhs/skills-runtime/chongqing/dd/oc
+06-27-20 23:24:53  INFO    services.redis_config_bus:publish_change:186 - [RedisConfigBus] 已广播配置变更通知: chongqing:dd
+06-27-20 23:24:53  INFO    services.redis_config_bus:subscribe_loop:242 - [RedisConfigBus] 收到配置变更通知: chongqing:dd
+06-27-20 23:24:53  INFO    utils.skill_runtime:on_change:487 - [Registry] 配置变更触发 reload
+06-27-20 23:24:53  INFO    utils.skill_runtime:load_config_from_external:275 - [SkillLoader] 从 Redis 缓存加载: chongqing:dd
+06-27-20 23:24:53  INFO    utils.skill_runtime:load_package:183 - [SkillLoader] 已加载 ES skill_meta: chongqing:dd
+06-27-20 23:24:53  INFO    utils.skill_runtime:load_package:187 - [SkillLoader] ✅ 加载技能包: chongqing:dd v1.0.0 [配置来源: redis]
+06-27-20 23:24:53  INFO    core.pipeline:invalidate_bundle:110 - ⚠ Bundle 缓存已失效 (省份全量): province=chongqing 共0个
+06-27-20 23:24:53  INFO    utils.skill_runtime:reload_bundle:357 - [Registry] 热重载技能包: chongqing:dd
+06-27-20 23:24:53  INFO    services.es_config_store:save_and_publish:432 - [ESConfigStore] 已发布 chongqing/dd/skill_meta v263
+06-27-20 23:24:53  INFO    services.skill_meta_service:upsert_skill_meta:169 - [SkillMeta] 已写入 skill_meta: chongqing:dd
+06-27-20 23:24:53  INFO    utils.skill_runtime:load_config_from_external:275 - [SkillLoader] 从 Redis 缓存加载: chongqing:dd
+06-27-20 23:24:53  INFO    utils.skill_runtime:load_package:183 - [SkillLoader] 已加载 ES skill_meta: chongqing:dd
+06-27-20 23:24:53  INFO    utils.skill_runtime:load_package:187 - [SkillLoader] ✅ 加载技能包: chongqing:dd v1.0.0 [配置来源: redis]
+06-27-20 23:24:54  INFO    core.pipeline:invalidate_bundle:110 - ⚠ Bundle 缓存已失效 (省份全量): province=chongqing 共0个
+06-27-20 23:24:54  INFO    utils.skill_runtime:reload_bundle:357 - [Registry] 热重载技能包: chongqing:dd
+06-27-20 23:24:54  INFO    services.es_config_store:save_and_publish:432 - [ESConfigStore] 已发布 chongqing/dd/biz_config v263
+06-27-20 23:24:54  INFO    services.skill_publisher:write_local_file:86 - [ConfigPublisher] 已写本地配置文件: /root/znhs/skills-runtime/chongqing/dd/oc
+06-27-20 23:24:54  INFO    services.redis_config_bus:publish_change:186 - [RedisConfigBus] 已广播配置变更通知: chongqing:dd
+06-27-20 23:24:54  INFO    services.redis_config_bus:subscribe_loop:242 - [RedisConfigBus] 收到配置变更通知: chongqing:dd
+06-27-20 23:24:54  INFO    utils.skill_runtime:on_change:487 - [Registry] 配置变更触发 reload
+06-27-20 23:24:54  INFO    utils.skill_runtime:load_config_from_external:275 - [SkillLoader] 从 Redis 缓存加载: chongqing:dd
+06-27-20 23:24:54  INFO    utils.skill_runtime:load_package:183 - [SkillLoader] 已加载 ES skill_meta: chongqing:dd
+06-27-20 23:24:54  INFO    utils.skill_runtime:load_package:187 - [SkillLoader] ✅ 加载技能包: chongqing:dd v1.0.0 [配置来源: redis]
+06-27-20 23:24:54  INFO    core.pipeline:invalidate_bundle:110 - ⚠ Bundle 缓存已失效 (省份全量): province=chongqing 共0个
+06-27-20 23:24:54  INFO    utils.skill_runtime:reload_bundle:357 - [Registry] 热重载技能包: chongqing:dd
+06-27-20 23:24:54  INFO    services.es_config_store:save_and_publish:432 - [ESConfigStore] 已发布 chongqing/dd/skill_meta v264
+06-27-20 23:24:54  INFO    services.skill_meta_service:upsert_skill_meta:169 - [SkillMeta] 已写入 skill_meta: chongqing:dd
+06-27-20 23:24:54  INFO    utils.skill_runtime:load_config_from_external:275 - [SkillLoader] 从 Redis 缓存加载: chongqing:dd
+06-27-20 23:24:54  INFO    utils.skill_runtime:load_package:183 - [SkillLoader] 已加载 ES skill_meta: chongqing:dd
+06-27-20 23:24:54  INFO    utils.skill_runtime:load_package:187 - [SkillLoader] ✅ 加载技能包: chongqing:dd v1.0.0 [配置来源: redis]
+06-27-20 23:24:54  INFO    core.pipeline:invalidate_bundle:110 - ⚠ Bundle 缓存已失效 (省份全量): province=chongqing 共0个
+06-27-20 23:24:54  INFO    utils.skill_runtime:reload_bundle:357 - [Registry] 热重载技能包: chongqing:dd
+06-27-20 23:24:54  INFO    services.es_config_store:save_and_publish:432 - [ESConfigStore] 已发布 chongqing/dd/biz_config v264
+06-27-20 23:24:54  INFO    services.skill_publisher:write_local_file:86 - [ConfigPublisher] 已写本地配置文件: /root/znhs/skills-runtime/chongqing/dd/oc
+
+
+
+一、问题修复1
+1、生产环境导入话术模板到 ES，按钮一直转圈，显示导入中状态；如图
+2、下线一个skill，提示不存在:hebei/ddx，但是实际上页面能显示该skill，配置来源redis;如图
+3、 下线一个skill，提示：已下线，可重新发布或安全删除。但是页面状态还是已发布，不能点删除按钮； 如图
+
+请分析前后端逻辑，看后端处理 ES 存储 增删改的逻辑的是否需要优化
+
+
+
+优化点一：优化广东话术要求或者话术模板；
+
+1、话术模板样例：
+顺便跟您讲一下，我们特地推出了一款流量优惠: 连续 (recommend_preferential_period)个月，每月只需 {recommend_actual_price)元，可享套内(recommend_base_flow}GB 国内流量;另在优惠期内每月再送(recommend_bonus_flow}GB 流量，相当于每月共{recommend_total_flow}GB。现在给您办理使用好吗?
+
+2、话术要求样例
+你是电信套餐营销坐席。请把[话术模板】中所有{变量名)用"主服务补充信息(extra_info)"里final_recommendations 下的同名字段值精确替换后，仅做口语化润色，输出一句自然话术。严格遵守:
+1.占位符:模板中(xxx)必须全部替换为真实数值;最终话术禁止出现*、**、x、xx、XX
+、{或字段英文名。2.空值/零值处理:字段值为空、缺失或为0时，不得直接说"0个月/0GB/0元/0分钟"。其中优惠期recommend_preferential_period 为0 或空时改说"连续包月"(不要出现"o 个月/连续0个月");其它数值字段(流量/语音/赠送等)为0或空时，删除包含该字段的整个分句，不保留占位、不编造数字。
+3. 计算规则:recommend_total_flow 缺失时按 recommend_base_flow +recommend_bonus_flow 求和;结果为0 或空则省略"再送/共"相关表述。4.数字规范:金额带"元"、流量带"GB"、优惠期带"个月"，不改变给定数值大小。语气字数:口语化、礼貌、贴合用户痛点，结尾带办理引导，总字数120字以内。5.6.忠实:只使用给定字段值，不虚构套餐名、价格或权益。
+
+新入参样例：
+{ 
+    "callId": "20260305123xx", 
+    "intent": "营销活动",     #固定值
+    "phone": "15010470528", 
+    "topN": 1, 
+    "province":"200",  
+    "extra_info": {
+        "current_package":{
+           "package_name":"",    # 当前套餐名称   goodsName
+           "actual_price":"",        # 当前套餐实付价格 actualPrice
+           "voice_minutes":"",     # 当前套餐语音 domesticVice
+           "baseFlow":""            # 当前套餐套内流量    internalFlow
+		"equity": ""   #权益 rightsInterests
+ 		"broadband": ""   #宽带 broadband
+         },
+        "final_recommendations": {
+            "recommend_package_name": "",    # 推荐套餐名称
+            "recommend_original_price": "",       # 推荐套餐原始价格  ？
+            "recommend_actual_price": "",         # 推荐套餐实付价格
+            "recommend_discount_amount": "",   # 推荐套餐减免/价格  ？
+            "recommend_base_flow": "",            # 推荐套餐套内流量
+            "recommend_bonus_flow": "",          # 推荐套餐赠送流量
+            "recommend_total_flow": "",            #  推荐套餐总流量    推荐套餐套内流量 + 推荐套餐赠送流量
+            "recommend_voice_minutes": "",      #  推荐套餐语音
+            "recommend_preferential_period": ""   #推荐套餐优惠期
+ 		"recommend_equity": ""   #权益
+ 		"recommend_broadband": ""   #宽带
+
+
+        },
+      "diff":{
+           "diff_actual_price":"",     # 实际价格差异   priceType == 3  actualPrice
+           "base_flow_diff":"",        # 套内流量差异 priceType == 3  internalFlowRate
+           "bonus_flow_diff":"",       # 赠送流量差异 priceType == 3  giftTraffic
+           "voice_minutes_diff":""  # 套内语音差异    priceType == 3  voice
+
+      }，
+	"portrait_style":{
+		"communication_style":"",//沟通风格
+		"business_conte":""//商机总结话术
+	}
+  
+    }, 
+    "batch_contexts": [
+            {  
+              "product_id": "xx",      # 产品名称  xx流量、套餐xx
+              "stage": "个人市场",    # 固定值  个人市场  or  家庭市场 
+               "scence": "开口话术"  # 固定值
+            }  
+    ]
+ } 
+
+说明：
+1."batch_contexts"字段替换原extra_contexts字段
+2. 如推荐产品为家庭市场，"extra_info"字段传空值，示例：  "extra_info"：{}
+3. 给出extra_info具体参数示例，确认与话术模板匹配对应关系
+
+
+变化点： 增加了性格特征；
+	"portrait_style":{
+		"communication_style":"",//沟通风格
+		"business_conte":""//商机总结话术
+	}
+
+
+性格特征的中文描述如：
+效率型（脾气急、没耐心，容易打断、发火，很难沟通）
+直接型（有话直说、不绕弯，需求清晰，沟通效率高）
+平和型（情绪稳定、态度友好、配合度高，最好沟通）
+谨慎型（想得多、不敢轻易决定，不情绪化，但推进慢）
+细致型（注重细节、认真，需要讲清楚，讲理、好沟通）
+敏感型（情绪波动大，易激动、难安抚，最难沟通）
+
+
+请根据新增的字段，优化话术模板  和提示词要求，让大模型生成的话术更个性化一些
+
+
+========== 优化后（含性格特征 portrait_style）2026-07-21 ==========
+
+【后端已支持】透传模式下 extra_info.portrait_style 会自动展开一层，
+communication_style / business_conte 作为独立上下文行（带 {锚点}）进入 Prompt，
+话术要求可直接按字段名引用；无需前端改动。个性化“语气/字数”规则放在“话术要求”里配置。
+
+一、话术模板（个人市场·流量优惠；性格不进模板，走话术要求）
+顺便跟您讲一下，我们特地推出了一款流量优惠：连续{recommend_preferential_period}个月，每月只需{recommend_actual_price}元，可享套内{recommend_base_flow}GB国内流量；另在优惠期内每月再送{recommend_bonus_flow}GB流量，相当于每月共{recommend_total_flow}GB。现在给您办理使用好吗？
+
+  含语音版（推荐套餐有语音时）：在“套内{recommend_base_flow}GB国内流量”后加“+{recommend_voice_minutes}分钟国内通话”。
+  家庭市场：extra_info 传 {}，用无占位符的固定文案模板，不要挂 {recommend_*}。
+  关联变量勾选：recommend_preferential_period, recommend_actual_price, recommend_base_flow,
+               recommend_bonus_flow, recommend_total_flow（含语音再加 recommend_voice_minutes）。
+
+二、话术要求（含性格个性化，直接粘贴到模板“话术要求”）
+你是电信套餐营销坐席。请把【话术模板】中所有{变量名}用【上下文数据】里 final_recommendations 下的同名字段值精确替换后，仅做口语化润色，输出一句可直接对客播报的话术。严格遵守：
+1. 占位符：模板中{xxx}必须全部替换为真实数值；最终话术禁止出现 *、**、x、xx、XX、{ 或字段英文名。
+2. 空值/零值：字段为空、缺失或为0时，不得直接说“0个月/0GB/0元/0分钟”。其中 recommend_preferential_period 为0或空时改说“连续包月”（不要出现“连续0个月”）；其它数值字段（流量/语音/赠送等）为0或空时，删除包含该字段的整个分句，不保留占位、不编造数字。
+3. 计算：recommend_total_flow 缺失时按 recommend_base_flow + recommend_bonus_flow 求和；结果为0或空则省略“再送/共”相关表述。
+4. 数字规范：金额带“元”、流量带“GB”、优惠期带“个月”，不改变给定数值大小。
+5. 个性化（按上下文 communication_style 调整语气与字数，缺省按“平和型”；business_conte 为商机总结，用于一句点出用户痛点，为空则跳过，不编造）：
+   - 效率型：直奔优惠与办理，砍掉铺垫，≤90字。
+   - 直接型：卖点清晰不绕弯，先价格再权益，≤110字。
+   - 平和型：礼貌自然、软引导，≤120字。
+   - 谨慎型：强调“可先了解、无压力”，少催办，突出划算与可对比点，≤130字。
+   - 细致型：把流量/语音/优惠期讲清楚再引导，结构完整，≤140字。
+   - 敏感型：先认同再推荐，语气更柔、避免施压措辞，≤120字。
+6. 语气：口语化、礼貌、贴合用户痛点，结尾带办理引导（效率型可更简短）。
+7. 忠实：只使用给定字段值，不虚构套餐名、价格或权益。
+
+三、入参与上下文对应关系（透传模式）
+  extra_info.final_recommendations.recommend_*  → 模板 {recommend_*} 同名占位符
+  extra_info.portrait_style.communication_style → 上下文行“{communication_style}”，驱动第5条语气/字数
+  extra_info.portrait_style.business_conte      → 上下文行“{business_conte}”，用于点痛点
+  batch_contexts[].product_id                   → 命中对应产品模板（支持中文ID、逗号/中文逗号/换行分隔）
+
+四、性格 → 生成倾向对照（同一产品，语气差异）
+  效率型：短、直，先价格流量再办；一句话说完。
+  直接型：价格→流量→办理，结构清楚不绕弯。
+  平和型：礼貌自然，软性引导办理。
+  谨慎型：多一句“您可以先了解，合适再办”，弱化催办。
+  细致型：优惠期/套内/赠送分项讲清再收尾。
+  敏感型：先接住痛点、再推荐，措辞更柔。
+
+
+请优化下面的话术模板和提示词，也是广东的
+根据您的套餐，推荐您办理**元及以上套餐，享**个月千兆宽带提速减免至每月**元;优惠期**个月，期间需保持使用**元及以上主套餐，可享一宽提速至**M。现在给您办理使用好吗?
+
+家庭市场固定文案:请原样返回话术模板内容，保持模板中的占位符**不变，不要替换、不要改写、不要新增或删除任何文字。
+
+========== 优化后（家庭市场·宽带提速，含性格特征）2026-07-21 ==========
+
+【说明】
+- 家庭市场 extra_info 传 {}，无动态变量；数值由业务人员配模板时写死（方案A）。
+- portrait_style 仍通过透传通道展开（后端已支持）；话术要求按性格做语气适配。
+- 不保留"原样返回"指令（大模型容易"帮忙"改数字），改为"保值+按性格润色"双约束。
+
+一、话术模板（占位符/透传版；数值经 extra_info 透传字段动态填入）
+根据您的套餐情况，我们为您推荐办理{broadband_package_fee}元及以上套餐，可享{broadband_preferential_period}个月千兆宽带提速优惠，减免至每月仅{broadband_monthly_fee}元；优惠期共{broadband_preferential_period}个月，期间需保持使用{broadband_package_fee}元及以上主套餐，即可将一宽提速至{broadband_speed}M。现在给您办理使用好吗？
+
+  占位符字段（透传，直接取 extra_info 顶层同名字段）：
+    {broadband_package_fee}         办理/保持的主套餐门槛（元）
+    {broadband_preferential_period} 优惠期 / 提速优惠月数（个月）
+    {broadband_monthly_fee}         提速减免后每月费用（元）
+    {broadband_speed}               一宽提速带宽（M）
+  关联变量勾选：broadband_package_fee, broadband_preferential_period, broadband_monthly_fee, broadband_speed
+  batch_contexts.stage = "家庭市场"，scence = "开口话术"。
+
+二、话术要求（含性格个性化，直接粘贴到模板"话术要求"）
+你是电信套餐营销坐席。请把【话术模板】中所有{变量名}用【上下文数据】里 final_recommendations 下的同名字段值精确替换后，仅做口语化润色，输出一句可直接对客播报的话术。严格遵守：
+1. 占位符：模板中{xxx}必须全部替换为真实数值；最终话术禁止出现 *、**、x、xx、XX、{、} 或任何字段英文名。
+2. 空值/零值：字段为空、缺失或为0时，不得直接说"0元/0个月/0M"；应删除包含该字段的整个分句，不保留占位、不编造数字（如提速带宽缺失则不提"提速至xxM"）。
+3. 保值：给定字段的数值原样使用，不得放大/缩小/凑整或替换。
+4. 数字规范：金额带"元"、带宽带"M"、优惠期带"个月"，不改变给定数值大小。
+5. 个性化（按上下文 communication_style 调整语气与字数，缺省按"平和型"；business_conte 为商机总结，用于一句自然引入用户痛点，为空则直接从模板内容开始，不编造）：
+   - 效率型：直奔活动利益与办理，砍掉客套铺垫，≤80字。
+   - 直接型：先说优惠力度再说使用条件，逻辑清楚不绕弯，≤100字。
+   - 平和型：礼貌自然，稳步引导，≤120字。
+   - 谨慎型：强调"可先了解、无压力"，突出划算，语气不催，≤130字。
+   - 细致型：把减免价格、优惠期、保持条件、提速带宽逐项说清，再引导办理，≤140字。
+   - 敏感型：先认同用户，再轻柔带出优惠，完全不施压，≤120字。
+6. 语气：口语化、礼貌、贴合用户痛点，结尾带办理引导（效率型可更简短）。
+7. 忠实：只使用给定字段值，不虚构任何套餐名称、价格或权益。
+
+三、入参与上下文对应关系（透传模式）
+  extra_info.broadband_package_fee         → 模板 {broadband_package_fee}（办理/保持门槛，元）
+  extra_info.broadband_preferential_period → 模板 {broadband_preferential_period}（优惠期，个月）
+  extra_info.broadband_monthly_fee         → 模板 {broadband_monthly_fee}（减免后每月，元）
+  extra_info.broadband_speed               → 模板 {broadband_speed}（提速带宽，M）
+  extra_info.portrait_style.communication_style → 上下文行 {communication_style}，驱动第5条语气/字数
+  extra_info.portrait_style.business_conte      → 上下文行 {business_conte}，用于引入商机痛点
+  batch_contexts[].stage = "家庭市场"，product_id 对应具体活动档位的模板
+
+四、入参样例（家庭市场·宽带提速，透传模式）
+{
+  "callId": "20260721001",
+  "intent": "营销活动",
+  "phone": "15010470528",
+  "topN": 1,
+  "province": "200",
+  "extra_info": {
+    "broadband_package_fee": "59",
+    "broadband_preferential_period": "6",
+    "broadband_monthly_fee": "29",
+    "broadband_speed": "1000",
+    "portrait_style": {
+      "communication_style": "细致型",
+      "business_conte": "家里宽带常卡顿，关注稳定与性价比"
+    }
+  },
+  "batch_contexts": [
+    { "product_id": "TD_59_1000M", "stage": "家庭市场", "scence": "开口话术" }
+  ]
+}
+
+
+
+
+
+优化下面的话术模板  和话术要求
+
+为了感谢您的支持，目前我们推出一个大礼包，您可保持使用29元及以上套餐，办理首条宽带的全家享礼包30元/月(含畅看版或咪咕版)，即可享受一条300M宽带、电视、电视会员等服务。现在登记办理，更可以享前**个月每月返还**元话费，最高返还**元话费。相当于前**年宽带月租仅需**元/月，单办全家享礼包即可享优惠(如客户有路由器需求可在下单时勾选同装)，非常划算，现在就为您下单办理好吗?
+
+========== 优化后（家庭市场·全家享礼包，占位符/透传，含性格特征）2026-07-21 ==========
+
+【说明】
+- 礼包固定条款（29元及以上套餐、全家享礼包30元/月、300M宽带、含畅看/咪咕版）为活动固定文案，写死不做变量。
+- 仅"返话费/折算"数值随档位变化，用占位符经 extra_info 透传字段填入。
+- portrait_style 透传展开（后端已支持），话术要求按性格适配语气/字数。
+
+一、话术模板（占位符/透传版；固定条款写死，返费数值用占位符）
+为了感谢您的支持，目前我们推出一个大礼包，您可保持使用29元及以上套餐，办理首条宽带的全家享礼包30元/月（含畅看版或咪咕版），即可享受一条300M宽带、电视、电视会员等服务。现在登记办理，更可享前{rebate_months}个月每月返还{monthly_rebate}元话费，最高返还{max_rebate}元话费；相当于前{effective_years}年宽带月租仅需{effective_monthly_fee}元/月，单办全家享礼包即可享优惠（如有路由器需求可在下单时勾选同装），非常划算，现在就为您下单办理好吗？
+
+  占位符字段（透传，取 extra_info 顶层同名字段）：
+    {rebate_months}          返话费月数（个月）
+    {monthly_rebate}         每月返还话费（元）
+    {max_rebate}             最高返还话费合计（元）
+    {effective_years}        折算年限（年）
+    {effective_monthly_fee}  折算后宽带月租（元/月）
+  关联变量勾选：rebate_months, monthly_rebate, max_rebate, effective_years, effective_monthly_fee
+  batch_contexts.stage = "家庭市场"，scence = "开口话术"。
+
+二、话术要求（含性格个性化，直接粘贴到模板"话术要求"）
+你是电信套餐营销坐席。请把【话术模板】中所有{变量名}用【上下文数据】里 final_recommendations 下的同名字段值精确替换后，仅做口语化润色，输出一句可直接对客播报的话术。严格遵守：
+1. 占位符：模板中{xxx}必须全部替换为真实数值；最终话术禁止出现 *、**、x、xx、XX、{、} 或任何字段英文名。
+2. 空值/零值：字段为空、缺失或为0时，不得直接说"0元/0个月/0年"；应删除包含该字段的整个分句，不保留占位、不编造数字（如"最高返还"缺失则不提该句）。
+3. 保值：礼包固定条款（29元及以上套餐、全家享礼包30元/月、300M宽带、含畅看/咪咕版）及给定字段数值原样使用，不得放大/缩小/凑整或替换、不得删改固定权益。
+4. 数字规范：金额带"元"、月数带"个月"、年限带"年"、月租带"元/月"，不改变给定数值大小。
+5. 个性化（按上下文 communication_style 调整语气与字数，缺省按"平和型"；business_conte 为商机总结，用于一句自然引入用户痛点，为空则直接从模板内容开始，不编造）：
+   - 效率型：直奔礼包利益与办理，砍掉客套铺垫，≤90字。
+   - 直接型：先说返费力度再说礼包内容，逻辑清楚不绕弯，≤110字。
+   - 平和型：礼貌自然，稳步引导，≤130字。
+   - 谨慎型：强调"可先了解、无压力"，突出划算与返费保障，语气不催，≤140字。
+   - 细致型：把礼包内容、返费月数/金额、折算月租逐项说清，再引导办理，≤150字。
+   - 敏感型：先认同用户，再轻柔带出礼包优惠，完全不施压，≤130字。
+6. 语气：口语化、礼貌、贴合用户痛点，结尾带办理引导（效率型可更简短）。
+7. 忠实：只使用给定字段值与模板固定条款，不虚构任何套餐名称、价格、权益或返费。
+
+三、入参与上下文对应关系（透传模式）
+  extra_info.rebate_months          → 模板 {rebate_months}（返话费月数，个月）
+  extra_info.monthly_rebate         → 模板 {monthly_rebate}（每月返还，元）
+  extra_info.max_rebate             → 模板 {max_rebate}（最高返还合计，元）
+  extra_info.effective_years        → 模板 {effective_years}（折算年限，年）
+  extra_info.effective_monthly_fee  → 模板 {effective_monthly_fee}（折算后月租，元/月）
+  extra_info.portrait_style.communication_style → 上下文行 {communication_style}，驱动第5条语气/字数
+  extra_info.portrait_style.business_conte      → 上下文行 {business_conte}，用于引入商机痛点
+  batch_contexts[].stage = "家庭市场"，product_id 对应具体礼包档位的模板
+
+四、入参样例（家庭市场·全家享礼包，透传模式）
+{
+  "callId": "20260721002",
+  "intent": "营销活动",
+  "phone": "15010470528",
+  "topN": 1,
+  "province": "200",
+  "extra_info": {
+    "rebate_months": "24",
+    "monthly_rebate": "20",
+    "max_rebate": "480",
+    "effective_years": "2",
+    "effective_monthly_fee": "10",
+    "portrait_style": {
+      "communication_style": "平和型",
+      "business_conte": "家中多设备用网，关注宽带+电视一体化与长期性价比"
+    }
+  },
+  "batch_contexts": [
+    { "product_id": "QJX_300M_GIFT", "stage": "家庭市场", "scence": "开口话术" }
+  ]
+}
+
+
+
+现在的skill测试页面需要优化：
+1、直接选择根据skill类型（接口类型），生成完整的请求参数测试参数（完整的入参参数），参数（可手动修改）；
+2、参数 ok，后可以点击测试，右边再生成结果；
+
+请优化整个测试逻辑，测试用例需要跟skill配置关联，能提供多个测试用例的参数，并提供测试参数自动生成的功能；

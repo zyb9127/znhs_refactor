@@ -1,0 +1,14 @@
+{
+  "province_code": "liaoning",
+  "province_name": "辽宁",
+  "enabled": true,
+  "version": "1.0.0",
+  "intents": {
+    "套餐推荐": {
+      "name": "套餐推荐",
+      "version": "1.0.0",
+      "enabled": true,
+      "description": "辽宁套餐智能推荐"
+    }
+  }
+}

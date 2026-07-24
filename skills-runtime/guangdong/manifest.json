@@ -1,0 +1,20 @@
+{
+  "province_code": "guangdong",
+  "province_name": "广东",
+  "enabled": true,
+  "version": "1.0.0",
+  "intents": {
+    "套餐推荐": {
+      "name": "套餐推荐",
+      "version": "1.0.0",
+      "enabled": true,
+      "description": "广东套餐智能推荐"
+    },
+    "营销活动": {
+      "name": "营销活动",
+      "version": "1.0.0",
+      "enabled": true,
+      "description": "广东营销活动话术生成"
+    }
+  }
+}

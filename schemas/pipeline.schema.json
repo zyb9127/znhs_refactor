@@ -1,0 +1,29 @@
+{
+  "$id": "pipeline.schema.json",
+  "title": "组件化管道定义",
+  "description": "biz_config.pipeline 可选 key 的结构。steps 逐步执行，when 条件不满足则跳过该步。",
+  "type": "object",
+  "required": ["steps"],
+  "properties": {
+    "steps": {
+      "type": "array",
+      "description": "按顺序执行的组件步骤列表",
+      "items": {
+        "type": "object",
+        "required": ["component"],
+        "properties": {
+          "component": {"type": "string", "description": "已注册的组件名，如 data_fetch/recommend/script_generate/output_guard"},
+          "params":    {"type": "object", "description": "组件参数，结构见各组件 config_schema"},
+          "when": {
+            "type": "object",
+            "description": "执行条件；缺省恒执行",
+            "properties": {
+              "ctx_field": {"type": "string", "description": "FlowContext 字段名"},
+              "op":        {"type": "string", "enum": ["nonempty", "empty", "always"], "description": "条件操作符"}
+            }
+          }
+        }
+      }
+    }
+  }
+}

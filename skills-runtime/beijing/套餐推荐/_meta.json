@@ -1,0 +1,13 @@
+{
+  "name": "beijing-package-recommend",
+  "description": "北京套餐智能推荐 Skill",
+  "version": "1.0.0",
+  "type": "scenario",
+  "province": "beijing",
+  "scenario_id": "套餐推荐",
+  "entry_script": "scripts/main_flow.py",
+  "config_files": ["api_nodes.json", "biz_config.json"],
+  "required_plugins": ["plugins.package_diff", "plugins.unit_converter"],
+  "author": "beijing-team",
+  "openclaw_compatible": true
+}

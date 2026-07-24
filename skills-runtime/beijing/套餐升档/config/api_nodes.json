@@ -1,0 +1,129 @@
+{
+  "_comment": "北京 套餐升档 — 接口节点配置（北京示例预置版）",
+  "_desc": "DataStep 并发调用本文件中 enabled=true 的所有接口",
+  "package_upgrade_api": {
+    "enabled": true,
+    "_comment": "北京套餐升档推荐接口 — 获取用户当前套餐、推荐套餐列表及用量标签",
+    "url": "http://placeholder.beijing.api/recommend/upgrade",
+    "method": "POST",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "timeout": 30,
+    "max_retries": 2,
+    "mock_mode": true,
+    "request_template": {
+      "phone": "{{PHONE}}",
+      "ioId": "{{IOID}}",
+      "intent": "{{INTENT}}",
+      "taskId": "{{TASK_ID}}",
+      "currentMainOffer": {
+        "curOfferName": "{{CURRENT_OFFER_NAME}}",
+        "curOfferId": "{{CURRENT_OFFER_ID}}",
+        "curOfferFee": "{{CURRENT_OFFER_FEE}}"
+      }
+    },
+    "mock_response": {
+      "resultCode": "0000",
+      "resultMsg": "success",
+      "bean": {
+        "mainoffer": {
+          "offerName": "{{CURRENT_OFFER_NAME}}",
+          "offerId": "{{CURRENT_OFFER_ID}}",
+          "initFee": "{{CURRENT_OFFER_FEE}}",
+          "offerFlow": "20480",
+          "offerVoice": "500"
+        },
+        "recommend_results": [
+          {
+            "offerName": "188元5G畅享套餐",
+            "offerId": "111601000462",
+            "initFee": "18800",
+            "offerFlow": "30720",
+            "offerVoice": "1000",
+            "offerDesc": "30GB流量+1000分钟+5G网络"
+          },
+          {
+            "offerName": "238元5G尊享套餐",
+            "offerId": "111601000463",
+            "initFee": "23800",
+            "offerFlow": "51200",
+            "offerVoice": "1500",
+            "offerDesc": "50GB流量+1500分钟+5G网络"
+          },
+          {
+            "offerName": "298元5G至尊套餐",
+            "offerId": "111601000464",
+            "initFee": "29800",
+            "offerFlow": "102400",
+            "offerVoice": "2000",
+            "offerDesc": "100GB流量+2000分钟+5G网络"
+          }
+        ],
+        "tags": {
+          "近3月平均流量(MB）": "18500",
+          "近3月平均主叫时长(分钟)": "380",
+          "流量饱和度": "90%",
+          "语音饱和度": "76%",
+          "月均折后收入（分）": "12800",
+          "近3月月均消费（分）": "12600",
+          "用户价值等级": "高价值",
+          "是否5G用户": "是",
+          "是否有宽带": "否",
+          "网龄（年）": "5"
+        }
+      }
+    },
+    "response_extract": {
+      "current_package": "bean.mainoffer",
+      "recommended_packages": "bean.recommend_results",
+      "raw_tags": "bean.tags"
+    },
+    "field_transform": {
+      "usage.data_usage": {
+        "from": "raw_tags",
+        "type": "filter_include",
+        "include_keys": [
+          "近3月平均流量(MB）",
+          "流量饱和度"
+        ],
+        "unit_convert": {
+          "近3月平均流量(MB）": "mb_to_gb"
+        }
+      },
+      "usage.voice_usage": {
+        "from": "raw_tags",
+        "type": "filter_include",
+        "include_keys": [
+          "近3月平均主叫时长(分钟)",
+          "语音饱和度"
+        ]
+      },
+      "usage.consumption": {
+        "from": "raw_tags",
+        "type": "filter_include",
+        "include_keys": [
+          "月均折后收入（分）",
+          "近3月月均消费（分）"
+        ],
+        "unit_convert": {
+          "月均折后收入（分）": "fen_to_yuan",
+          "近3月月均消费（分）": "fen_to_yuan"
+        }
+      },
+      "tags": {
+        "from": "raw_tags",
+        "type": "filter_exclude",
+        "exclude_keys": [
+          "近3月平均流量(MB）",
+          "流量饱和度",
+          "近3月平均主叫时长(分钟)",
+          "语音饱和度",
+          "月均折后收入（分）",
+          "近3月月均消费（分）"
+        ]
+      }
+    },
+    "created_by": "admin"
+  }
+}

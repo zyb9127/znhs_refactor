@@ -1,0 +1,13 @@
+{
+  "name": "beijing-套餐升档",
+  "description": "北京套餐升档推荐 Skill — 获取推荐套餐列表并生成个性化升档话术",
+  "version": "1.0.0",
+  "type": "scenario",
+  "province": "beijing",
+  "scenario_id": "套餐升档",
+  "entry_script": "scripts/main_flow.py",
+  "config_files": ["api_nodes.json", "biz_config.json"],
+  "required_plugins": ["plugins.package_diff", "plugins.unit_converter"],
+  "author": "system",
+  "auto_generated": false
+}

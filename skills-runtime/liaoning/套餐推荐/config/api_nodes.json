@@ -1,0 +1,69 @@
+{
+  "crm": {
+    "enabled": true,
+    "_comment": "查询用户当前及下周期主商品信息",
+    "url": "http://restapi.ngcrmpfcore-ln.cs.ln.cmos:8080/ngcrmpfcore_ln/csf/crm/userMainOfferService/",
+    "method": "GET",
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Channel-Id": "ngbusi_ln"
+    },
+    "timeout": 30,
+    "max_retries": 2,
+    "mock_mode": false,
+    "request_body_wrapper": "params",
+    "request_template": {
+      "userMobile": "{{PHONE}}",
+      "crmpfPubInfo": {
+        "staffId": "{{extra_data.crmpfPubInfo.staffId}}"
+      }
+    },
+    "response_extract": {
+      "current_package": "object.result"
+    },
+    "field_transform": {
+      "current_package": {
+        "from": "current_package",
+        "type": "filter_include",
+        "include_keys": [
+          "curOfferName",
+          "curOfferId",
+          "curOfferDesc"
+        ]
+      },
+      "_unit_conversions": []
+    },
+    "created_by": "interface_mapper_agent",
+    "created_at": "2026-06-17 10:16",
+    "mock_response": {
+      "rtnCode": "0",
+      "rtnMsg": "成功!",
+      "bean": {},
+      "beans": [],
+      "object": {
+        "result": {
+          "nextOfferName": "",
+          "curOfferName": "动感地带芒果卡-79元档",
+          "Ext10": "",
+          "nextOfferId": "-1",
+          "nextOfferDesc": "",
+          "curOfferId": "111040060003",
+          "Ext2": "",
+          "Ext1": "",
+          "curOfferDesc": "动感地带芒果卡-79元档，套餐月费79元，套餐内含150分钟国内（除港澳台地区）通话、30GB专属流量、30GB国内（除港澳台地区）通用流量、移动云盘基础功能、视频彩铃基础功能、专属特色权益。另可享首条500M宽带权益，全国亲情网4人（含主号）组网不收费。新入网用户首月套餐费免收，套餐内资源按天折算提供，次月起全额收取。专属流量范围包括阿里系、百度系、抖音系、网易游戏、腾讯系、芒果TV、快手、喜马拉雅等超过100款热门APP(免流范围不包含上述APP中的第三方广告/视频/图文/弹幕、开直播、直播类视频上传、语音及视频聊天、在线观看/下载/缓存第三方视频所产生的流量)。具体支持专属流量的APP清单随中国移动业务合作情况或将发生变动，届时将会自动为用户调整，另具体以办理页面展示为准。套餐外资费标准为国内通用流量5元/GB，不足1GB按0.29元/M执行；国内主叫0.1元/分钟，国内被叫免费，国内点对点短信0.1元/条，含来电显示。套餐所含通用流量支持共享及结转至次月使用，套餐所含定向流量不支持结转及共享。套餐有效期3年，期满后如双方无异议自动续约，每次续约3年，以此类推。本产品无合约捆绑，退订/销户/携转等无需承担违约责任。",
+          "Ext4": "",
+          "Ext3": "",
+          "Ext6": "",
+          "Ext5": "",
+          "Ext8": "",
+          "Ext7": "",
+          "Ext9": "",
+          "curMainOfferNetFlag": "3"
+        },
+        "respDesc": "success",
+        "respCode": "0",
+        "resultRows": "1"
+      }
+    }
+  }
+}

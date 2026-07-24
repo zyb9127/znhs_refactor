@@ -1,0 +1,102 @@
+{
+  "_comment": "主服务可用占位符映射表 — 接口入参匹配时的参照",
+  "_ref": "主服务入参结构见 主服务入参.txt",
+  "_structure": {
+    "callId":   "请求追踪ID（固定参数）",
+    "intent":   "业务意图（固定参数）",
+    "phone":    "用户手机号（固定参数）",
+    "topN":     "推荐个数（固定参数）",
+    "province": "省份代码（固定参数）",
+    "extra_data":    "调用接口的补充入参（可选，key-value 自由扩展）",
+    "extra_info":    "非调用接口的已知信息，可直接用于话术生成（可选）",
+    "extra_context": {
+      "stage":  "环节（可选，用于话术模板匹配）",
+      "scence": "场景（可选，用于话术模板匹配，注意拼写为 scence）"
+    }
+  },
+  "placeholders": {
+    "{{PHONE}}": {
+      "source": "phone",
+      "desc": "用户手机号",
+      "type": "string",
+      "required": true,
+      "example": "13800138000"
+    },
+    "{{INTENT}}": {
+      "source": "intent",
+      "desc": "业务意图，与下游接口/话术/省份配置对齐",
+      "type": "string",
+      "required": true,
+      "example": "套餐推荐"
+    },
+    "{{CALL_ID}}": {
+      "source": "callId",
+      "desc": "请求追踪ID / 对话ID",
+      "type": "string",
+      "required": false,
+      "example": "trace_id_placeholder"
+    },
+    "{{PROVINCE}}": {
+      "source": "province",
+      "desc": "省份代码",
+      "type": "string",
+      "required": false,
+      "example": "beijing"
+    },
+    "{{TOP_N}}": {
+      "source": "topN",
+      "desc": "推荐个数，与下游推荐对齐",
+      "type": "integer",
+      "required": false,
+      "example": 3
+    },
+    "{{IOID}}": {
+      "source": "extra_data.ioId",
+      "desc": "用户 IO ID（常见于北京等省份接口入参）",
+      "type": "string",
+      "required": false,
+      "example": "io_id_placeholder"
+    },
+    "{{TASK_ID}}": {
+      "source": "extra_data.taskId",
+      "desc": "任务ID / 会话ID（部分省份接口使用）",
+      "type": "string",
+      "required": false,
+      "example": "task_id_placeholder"
+    },
+    "{{CURRENT_OFFER_NAME}}": {
+      "source": "extra_data.currentMainOffer.curOfferName",
+      "desc": "用户当前主套餐名称",
+      "type": "string",
+      "required": false,
+      "example": "XX元套餐"
+    },
+    "{{CURRENT_OFFER_ID}}": {
+      "source": "extra_data.currentMainOffer.curOfferId",
+      "desc": "用户当前主套餐ID",
+      "type": "string",
+      "required": false,
+      "example": "offer_id_placeholder"
+    },
+    "{{CURRENT_OFFER_FEE}}": {
+      "source": "extra_data.currentMainOffer.curOfferFee",
+      "desc": "用户当前主套餐费用（单位：分）",
+      "type": "string",
+      "required": false,
+      "example": "12800"
+    }
+  },
+  "extra_data_fields": {
+    "_comment": "extra_data 中的自定义字段示例；接口入参无法匹配固定占位符时，使用 {{extra_data.字段名}} 格式动态取值",
+    "ioId":                              "用户 IO ID",
+    "taskId":                            "任务ID / 会话ID",
+    "currentMainOffer.curOfferName":     "用户当前主套餐名称",
+    "currentMainOffer.curOfferId":       "用户当前主套餐ID",
+    "currentMainOffer.curOfferFee":      "用户当前主套餐费用（单位：分）",
+    "userLevel":                         "用户等级",
+    "certType":                          "证件类型",
+    "channelId":                         "渠道ID"
+  },
+  "extra_data_pattern": "{{extra_data.{field}}}",
+  "_note": "无法匹配到上述固定占位符的接口入参，使用 extra_data_pattern 格式：{{extra_data.字段名}}；嵌套字段使用点分隔，如 {{extra_data.currentMainOffer.curOfferName}}"
+}

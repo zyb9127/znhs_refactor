@@ -1,0 +1,27 @@
+{
+  "$id": "template.schema.json",
+  "title": "单条话术模板",
+  "description": "biz_config.script_templates_v2 中单条模板的结构定义。priority 为新增可选字段，越大越优先，缺省 0（等价旧行为：列表顺序优先）。",
+  "type": "object",
+  "required": ["template_name", "template_content"],
+  "properties": {
+    "template_id":        {"type": "string", "description": "模板唯一 ID"},
+    "template_name":      {"type": "string", "description": "模板名称"},
+    "template_content":   {"type": "string", "description": "话术模板正文，可含 {var} 占位符"},
+    "intent":             {"type": "string", "description": "所属意图，空表示不限"},
+    "province":           {"type": "string", "description": "所属省份，空表示不限"},
+    "product_id":         {"type": "string", "description": "匹配产品 ID，支持逗号/换行分隔多关键词模糊匹配，空表示兜底"},
+    "scene":              {"type": "string", "description": "场景维度，空表示不限"},
+    "stage":              {"type": "string", "description": "阶段维度，空表示不限"},
+    "prompt_template":    {"type": "string", "description": "自定义 Prompt 模板（可选）"},
+    "linked_vars":        {"type": "array", "items": {"type": "string"}, "description": "关联的 context 变量 key 列表"},
+    "linked_apis":        {"type": "array", "items": {"type": "string"}, "description": "关联的接口节点名列表"},
+    "script_requirement": {"type": "string", "description": "话术生成附加要求"},
+    "status":             {"type": "string", "enum": ["online", "offline", "deleted"], "description": "模板状态，默认 online"},
+    "priority":           {"type": "integer", "description": "优先级，越大越优先，默认 0；仅模板索引路径生效"},
+    "created_by":         {"type": "string"},
+    "created_at":         {"type": "string"},
+    "updated_by":         {"type": "string"},
+    "updated_at":         {"type": "string"}
+  }
+}

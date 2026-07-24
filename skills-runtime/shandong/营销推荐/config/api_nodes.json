@@ -1,0 +1,18 @@
+{
+  "cc": {
+    "_comment": "dd",
+    "url": "",
+    "method": "POST",
+    "enabled": true,
+    "source_type": "direct",
+    "request_template": {},
+    "response_extract": {},
+    "field_transform": {},
+    "mock_mode": false,
+    "mock_response": {},
+    "direct_mode": "mapping",
+    "passthrough_fields": [],
+    "created_by": "admin",
+    "created_at": "2026-07-20 11:06:06"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "znhs",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite --mode development",
+    "build": "vite build --mode production",
+    "build:dev": "vite build --mode development",
+    "build:gray": "vite build --mode gray",
+    "build:prod": "vite build --mode production",
+    "preview": "vite preview",
+    "build:artifact:prod": "vite build --mode production --outDir dist-prod",
+    "build:artifact:gray": "vite build --mode gray --outDir dist-gray",
+    "build:artifact:dev": "vite build --mode development --outDir dist-dev",
+    "build:artifacts": "npm run build:artifact:prod && npm run build:artifact:gray && npm run build:artifact:dev"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "color-message-aibox-vue": "0.1.11",
+    "color-message-lingyun-vue": "0.0.30",
+    "color-star-atom-style": "0.0.6",
+    "color-star-custom-components": "0.0.48",
+    "color-star-custom-methods": "0.0.35",
+    "element-plus": "^2.7.0",
+    "ling-yun-custom-components": "0.0.79",
+    "ling-yun-methods": "0.0.56",
+    "pinia": "^2.1.0",
+    "vue": "^3.4.0",
+    "vue-router": "^4.3.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.0",
+    "vite": "^8.1.3"
+  }
+}

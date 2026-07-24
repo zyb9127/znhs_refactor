@@ -1,0 +1,217 @@
+{
+  "北京测试接口_api": {
+    "enabled": true,
+    "_comment": "营销推荐话术获取接口",
+    "url": "http://restapi.ngcrmpfcore-bj.cs.bj.cmos:8080/ngcrmpfcore_bj/csf/business/productRecommend",
+    "method": "POST",
+    "headers": {
+      "Content-Type": "application/json",
+      "x-Channel-ID": "ngbusi"
+    },
+    "timeout": 30,
+    "max_retries": 2,
+    "mock_mode": false,
+    "request_body_wrapper": "params",
+    "request_template": {
+      "ioId": "",
+      "intent": "{{INTENT}}",
+      "phone": "{{PHONE}}",
+      "currentMainOffer": {
+        "curOfferName": "{{extra_data.currentMainOffer.curOfferName}}",
+        "curOfferId": "{{extra_data.currentMainOffer.curOfferId}}",
+        "curOfferFee": "{{extra_data.currentMainOffer.curOfferFee}}"
+      }
+    },
+    "response_extract": {
+      "raw_tags": "bean.tags",
+      "current_package": "bean.mainoffer",
+      "recommended_packages": "bean.recommend_results"
+    },
+    "field_transform": {
+      "usage.data_usage": {
+        "from": "raw_tags",
+        "type": "filter_include",
+        "include_keys": [
+          "近3月流量饱和度",
+          "近6月平均流量饱和度",
+          "近3月平均流量(MB）",
+          "近6月平均流量(MB）",
+          "近3月平均流量饱和度"
+        ],
+        "unit_convert": {
+          "近3月平均流量(MB）": "mb_to_gb",
+          "近6月平均流量(MB）": "mb_to_gb"
+        },
+        "field_rename": {
+          "近3月平均流量(MB）": "近3月平均流量((GB)）",
+          "近6月平均流量(MB）": "近6月平均流量((GB)）"
+        }
+      },
+      "usage.voice_usage": {
+        "from": "raw_tags",
+        "type": "filter_include",
+        "include_keys": [
+          "近3月语音饱和度",
+          "近6月平均语音饱和度",
+          "近3月平均语音饱和度",
+          "近3月平均主叫时长",
+          "近6月平均主叫时长"
+        ],
+        "unit_convert": {
+          "近3月平均主叫时长": "fen_to_yuan",
+          "近6月平均主叫时长": "fen_to_yuan"
+        }
+      },
+      "usage.consumption": {
+        "from": "raw_tags",
+        "type": "filter_include",
+        "include_keys": [
+          "近6月平均折后收入",
+          "近3月平均折后收入",
+          "近3月平均月消费",
+          "近6月平均月消费"
+        ]
+      },
+      "tags": {
+        "from": "raw_tags",
+        "type": "filter_exclude",
+        "exclude_keys": [
+          "近3月流量饱和度",
+          "近6月平均流量饱和度",
+          "近3月平均流量(MB）",
+          "近6月平均流量(MB）",
+          "近3月平均流量饱和度",
+          "近3月语音饱和度",
+          "近6月平均语音饱和度",
+          "近3月平均语音饱和度",
+          "近3月平均主叫时长",
+          "近6月平均主叫时长",
+          "近6月平均折后收入",
+          "近3月平均折后收入",
+          "近3月平均月消费",
+          "近6月平均月消费"
+        ]
+      },
+      "_unit_conversions": [
+        {
+          "target_path": "usage.data_usage",
+          "field": "近3月平均流量(MB）",
+          "new_field": "近3月平均流量((GB)）",
+          "converter": "mb_to_gb",
+          "desc": "用户近3个月平均流量用量（单位：MB）"
+        },
+        {
+          "target_path": "usage.data_usage",
+          "field": "近6月平均流量(MB）",
+          "new_field": "近6月平均流量((GB)）",
+          "converter": "mb_to_gb",
+          "desc": "用户近6个月平均流量用量（单位：MB）"
+        },
+        {
+          "target_path": "usage.voice_usage",
+          "field": "近3月平均主叫时长",
+          "new_field": "近3月平均主叫时长",
+          "converter": "fen_to_yuan",
+          "desc": "用户近3个月平均主叫时长（单位：分钟）"
+        },
+        {
+          "target_path": "usage.voice_usage",
+          "field": "近6月平均主叫时长",
+          "new_field": "近6月平均主叫时长",
+          "converter": "fen_to_yuan",
+          "desc": "用户近6个月平均主叫时长（单位：分钟）"
+        }
+      ]
+    },
+    "created_by": "interface_mapper_agent",
+    "created_at": "2026-05-06 10:55",
+    "mock_response": {
+      "rtnCode": "0",
+      "rtnMsg": "成功",
+      "bean": {
+        "phone": "13800138000",
+        "ioId": "123456789",
+        "tags": {
+          "近3月语音饱和度": "0.50",
+          "融合状态": "合约融合",
+          "近6月平均语音饱和度": "0.64",
+          "高频低额超套客户": "0",
+          "高频高额超套客户": "0",
+          "双卡机异网+移动但移动副卡": "0",
+          "低频低额超套或非超套客户": "1",
+          "分公司": "朝阳分公司",
+          "近3月流量饱和度": "0.93",
+          "近6月平均流量饱和度": "0.95",
+          "双卡槽状态": "双移动卡",
+          "近6月平均折后收入": "12.42",
+          "近3月平均折后收入": "10.50",
+          "近3月平均语音饱和度": "1.00",
+          "低频高额超套客户": "0",
+          "近3月平均流量(MB）": "23552.67",
+          "近6月平均流量(MB）": "38122.17",
+          "近3月平均流量饱和度": "0.00",
+          "近3月平均月消费": "128.50",
+          "近6月平均月消费": "130.42",
+          "近3月平均主叫时长": "100.00",
+          "是否老旧套餐": "0",
+          "近6月平均主叫时长": "121.83",
+          "双卡机移动+异网且移动主卡": "0"
+        },
+        "mainoffer": {
+          "offerId": "111601000461",
+          "offerName": "128元5G畅享套餐",
+          "initFee": 128,
+          "offerType": [],
+          "offerFlow": "30",
+          "offerVoice": "200",
+          "offerPlus": "",
+          "bandWidth": "",
+          "suppCard": "1",
+          "otherRight": [
+            ""
+          ],
+          "offerDesc": "",
+          "tags": []
+        },
+        "recommend_results": [
+          {
+            "offerId": "111602052881",
+            "offerName": "云宽带129元档合约方案",
+            "initFee": 129,
+            "offerType": [],
+            "offerFlow": "50",
+            "offerVoice": "170",
+            "offerPlus": "1个",
+            "bandWidth": "500M",
+            "suppCard": "1",
+            "otherRight": [
+              "IPTV基础会员/移动高清基础会员"
+            ],
+            "offerDesc": "",
+            "tags": [],
+            "rank": 1
+          },
+          {
+            "offerId": "111602052882",
+            "offerName": "云宽带139元档合约方案",
+            "initFee": 139,
+            "offerType": [],
+            "offerFlow": "55",
+            "offerVoice": "180",
+            "offerPlus": "1个",
+            "bandWidth": "500M",
+            "suppCard": "1",
+            "otherRight": [
+              "IPTV基础会员/移动高清基础会员"
+            ],
+            "offerDesc": "",
+            "tags": [],
+            "rank": 1
+          }
+        ]
+      },
+      "beans": [],
+      "object": null
+    }
+  }
+}

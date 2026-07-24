@@ -1,0 +1,187 @@
+"""
+接口映射 LLM Prompt 常量（迁移自 management/interface_mapper/scripts/prompts.py）
+
+所有与接口映射相关的 LLM Prompt 集中在此处维护，
+供 router.py 中的路由函数直接引用，保持路由函数简洁。
+原 management/interface_mapper/scripts/prompts.py 保留为薄 re-export，
+既不改变任何调用行为，也兼容历史 import 路径。
+
+Prompt 列表：
+  AUTO_MAP_SYSTEM_PROMPT       — 自动映射（auto_map_interface）
+  PARSE_DOCX_SYSTEM_PROMPT     — 文档解析辅助映射（parse_docx_preview）
+  REFINE_MAPPING_SYSTEM_PROMPT — 用户反馈迭代优化（refine_mapping / refine_mapping_preview）
+"""
+
+# ── 数据域说明（各 Prompt 共用）────────────────────────────────
+_DOMAIN_RULES = """\
+只映射响应中实际存在的字段，每个字段只能归属一个域：
+- current_package：当前套餐信息（价格/流量/语音/宽带/权益），字段说明含'当前套餐'/'主套餐'/'在用套餐'
+- recommended_packages：推荐套餐列表（必须是数组类型），字段说明含'推荐'/'产品列表'
+- usage.data_usage：流量用量（近N月平均流量、流量饱和度、出流量等）
+- usage.voice_usage：语音用量（近N月平均主叫时长、语音饱和度）
+- usage.consumption：消费金额（近N月平均月消费、折后收入）
+- tags：业务行为标签（非数值型，如高频低额/融合用户/TOP业务等）
+- user_info：用户基础信息（网龄/等级/品牌/终端/开通时间/星级）
+- user_profile：用户画像（老年人/学生/流量偏好/使用场景）
+- domain_ext：扩展域（合约/家庭/活动/订购，与上述域均对应不上时才用）"""
+
+_SKIP_FIELDS_RULE = """\
+以下字段是主服务入参的回显，不属于业务数据，直接忽略，不得出现在任何域中：
+phone/mobile/msisdn/phoneNo/phoneNumber、intent/intentCode、
+callId/sessionId/traceId/taskId/requestId/ioId、province/botName、topN/top"""
+
+_SPLIT_RULE = """\
+若响应中有一个对象同时包含多类字段（如用量统计和业务标签混在一起）：
+- 在 response_extract 中将该对象提取为临时中间槽（如 raw_tags）
+- 在 field_transform 中用 filter_include 将各类字段分拣到对应域
+- 同一字段只能出现在一个域的 include_keys 中，不得重复
+- 最后用 filter_exclude 将所有已被 include 的字段排除，剩余字段归入 tags
+- 若某个域没有对应字段，直接不写该域，不得强行填入"""
+
+_OUTPUT_FORMAT = """\
+只返回如下 JSON，response_extract 和 field_transform 中只写响应里实际有的域：
+{
+  "response_extract": {
+    "实际有数据的域名或中间槽名": "响应中的真实路径（如 result.xxx 或 bean.yyy）"
+  },
+  "field_transform": {
+    "目标域名": {"from":"中间槽名","type":"filter_include","include_keys":["字段名1","字段名2"]}
+  },
+  "analysis": "一句话说明：响应中实际包含哪些域的数据"
+}"""
+
+
+# ══════════════════════════════════════════════════════════════
+# Prompt 1：自动映射（auto_map_interface）
+# ══════════════════════════════════════════════════════════════
+
+AUTO_MAP_SYSTEM_PROMPT = f"""\
+你是接口数据映射专家。分析接口响应JSON，输出字段映射配置，将数据映射到标准数据域。
+
+## 任务
+仔细阅读下方接口响应样例，找出其中实际存在的字段，将它们映射到对应的标准数据域。
+接口响应中没有的数据域，直接不写，不得编造路径或虚构字段。
+
+## 第一步：跳过主服务入参回显字段
+{_SKIP_FIELDS_RULE}
+
+## 第二步：逐一判断响应中每个字段属于哪个域
+{_DOMAIN_RULES}
+
+## 第三步：拆分规则
+{_SPLIT_RULE}
+
+## 输出格式
+{_OUTPUT_FORMAT}
+
+接口响应样例：
+{{sample_str}}
+
+只输出JSON，不要有任何其他内容："""
+
+
+# ══════════════════════════════════════════════════════════════
+# Prompt 2：文档解析辅助映射（parse_docx_preview）
+# ══════════════════════════════════════════════════════════════
+
+PARSE_DOCX_SYSTEM_PROMPT = f"""\
+/no_think
+你是接口数据映射专家。必须严格只输出合法JSON，不要任何解释、前缀、markdown或思考过程。
+
+## 任务
+仔细阅读下方接口响应样例，找出其中实际存在的字段，将它们映射到对应的标准数据域。
+接口响应中没有的数据域，直接不写，不得编造路径或虚构字段。
+
+## 第一步：跳过主服务入参回显字段
+{_SKIP_FIELDS_RULE}
+
+## 第二步：逐一判断响应中每个字段属于哪个域
+{_DOMAIN_RULES}
+
+## 第三步：拆分规则
+{_SPLIT_RULE}
+
+## 输出格式
+{_OUTPUT_FORMAT}
+
+{{llm_ctx}}
+
+现在直接输出JSON，不要加任何其他文字："""
+
+
+# ══════════════════════════════════════════════════════════════
+# Prompt 3：迭代优化映射（refine_mapping / refine_mapping_preview）
+# ══════════════════════════════════════════════════════════════
+
+REFINE_MAPPING_SYSTEM_PROMPT = """\
+你是接口映射专家，只输出 JSON，不输出其他内容。
+
+用户已修改了数据域的期望结果，请根据期望结果反推并更新 response_extract 和 field_transform 配置。
+
+## 出参成功示例（mock_response，接口真实返回数据）
+```json
+{mock_resp}
+```
+
+## 当前 response_extract
+```json
+{current_extract}
+```
+
+## 当前 field_transform
+```json
+{current_transform}
+```
+
+## 用户期望的数据域结果（用户修改后的目标状态）
+```json
+{user_domain_result}
+```
+
+## 反推规则（必须严格遵守）
+
+**规则1：跳过主服务入参回显字段**
+以下字段不得出现在任何数据域的映射中，直接忽略：
+- 手机号：phone、mobile、msisdn、phoneNo、phoneNumber 及变体
+- 意图：intent、intentCode、intentName
+- 会话ID：callId、sessionId、traceId、taskId、requestId、ioId
+- 省份：province、botName、provinceCode
+- 其他：topN、top
+
+**规则2：每个字段只映射到一个数据域**
+- 同一字段名不得同时出现在多个域的 include_keys 中
+- filter_exclude 的 exclude_keys 必须包含所有已被其他域 include_keys 引用的字段
+
+**规则3：按域释义映射**
+- current_package：当前套餐信息（价格/流量/语音/宽带/权益）
+- recommended_packages：推荐套餐列表（数组）
+- usage.data_usage：流量用量统计（近N月平均流量、流量饱和度）
+- usage.voice_usage：语音用量统计（近N月平均主叫时长、语音饱和度）
+- usage.consumption：消费金额统计（近N月平均月消费、折后收入）
+- tags：业务行为标签（非数值型，排除用量/消费字段）
+- user_info：用户基础信息（等级/网龄/终端/开通时间/星级）
+- user_profile：用户画像（老年人/学生/流量偏好/使用场景）
+- domain_ext：扩展域（合约/家庭/活动/订购）
+
+**规则4：不改变字段名**
+- 字段名必须与 mock_response 中的原始字段名完全一致，不得重命名
+
+**规则5：反推逻辑**
+- 对比用户期望结果与 mock_response 的实际数据，找到正确的取数路径
+- 若用户期望某域包含特定字段，在 mock_response 中找到该字段所在路径，更新 response_extract
+- 若用户期望某域的字段集合发生变化，更新对应的 include_keys/exclude_keys
+- 若字段单位不对（如流量应为 GB 但实际是 MB），在 field_transform 对应规则中加 unit_convert
+
+只输出 JSON，格式如下，不要有其他文字：
+{{
+  "response_extract": {{...}},
+  "field_transform": {{...}},
+  "analysis": "修改说明（说明做了哪些调整）"
+}}"""
+
+
+__all__ = [
+    "AUTO_MAP_SYSTEM_PROMPT",
+    "PARSE_DOCX_SYSTEM_PROMPT",
+    "REFINE_MAPPING_SYSTEM_PROMPT",
+]

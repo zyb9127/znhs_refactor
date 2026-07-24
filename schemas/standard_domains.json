@@ -1,0 +1,56 @@
+{
+  "description": "znhs 标准域/变量标签单一真源。domains 依据 core/context.py resource_context；var_labels 照抄 steps/script_step.py _VAR_LABELS；linked_vars 依据 frontend TemplateEditDialog.vue LINKED_VAR_LIST 与 utils/var_infer.py；fixed_params 依据 utils/placeholder.py 内置默认表。",
+  "domains": [
+    {"key": "current_package",      "label": "当前套餐信息",  "desc": "用户当前在用套餐信息（current_package 域）"},
+    {"key": "usage",                "label": "历史用量",      "desc": "历史用量：流量/语音/消费（usage 域）"},
+    {"key": "tags",                 "label": "用户标签",      "desc": "用户标签集合（tags 域）"},
+    {"key": "user_info",            "label": "用户基础信息",  "desc": "用户基础信息：星级/网龄/入网时间等（user_info 域）"},
+    {"key": "recommended_packages", "label": "推荐产品",      "desc": "候选/推荐套餐列表（recommended_packages 域）"},
+    {"key": "user_profile",         "label": "用户画像",      "desc": "用户画像：使用偏好/行为特征（user_profile 域）"},
+    {"key": "domain_ext",           "label": "扩展信息",      "desc": "扩展域：合约/活动/订购等杂项信息（domain_ext 域）"}
+  ],
+  "var_labels": {
+    "cur_brief":       "当前套餐信息",
+    "current_package": "当前套餐信息",
+    "pkg_brief":       "推荐产品信息",
+    "diff_str":        "差异",
+    "usage_line":      "历史用量",
+    "usage":           "历史用量",
+    "user_tags":       "用户标签",
+    "tags":            "用户标签",
+    "user_info":       "用户基础信息",
+    "user_profile":    "用户画像",
+    "domain_ext":      "扩展信息",
+    "extra_info":      "主服务补充信息(extra_info)",
+    "extra_context":   "模板匹配上下文(extra_context)"
+  },
+  "linked_vars": [
+    {"key": "cur_brief",     "label": "当前套餐信息",   "slot": "current_package",      "desc": "映射 current_package 域"},
+    {"key": "pkg_brief",     "label": "推荐产品信息",   "slot": "recommended_packages", "desc": "从 recommended_packages[0] 格式化"},
+    {"key": "diff_str",      "label": "套餐差异",       "slot": "__computed__",         "desc": "由 PackageDiff 计算（自动）"},
+    {"key": "usage_line",    "label": "历史用量",       "slot": "usage",                "desc": "映射 usage 域"},
+    {"key": "user_tags",     "label": "用户标签",       "slot": "tags",                 "desc": "映射 tags 域"},
+    {"key": "user_info",     "label": "用户基础信息",   "slot": "user_info",            "desc": "映射 user_info 域"},
+    {"key": "user_profile",  "label": "用户画像",       "slot": "user_profile",         "desc": "映射 user_profile 域"},
+    {"key": "domain_ext",    "label": "扩展信息",       "slot": "domain_ext",           "desc": "映射 domain_ext 域"},
+    {"key": "extra_info",    "label": "主服务补充信息", "slot": "",                     "desc": "主服务 extra_info 透传"},
+    {"key": "extra_context", "label": "模板匹配上下文", "slot": "",                     "desc": "主服务 extra_context 透传"},
+    {"key": "table",         "label": "差异表格",       "slot": "",                     "desc": "仅前端展示，不进 LLM"}
+  ],
+  "generated_vars": [
+    "pkg_brief",
+    "diff_str",
+    "table",
+    "cur_brief",
+    "usage_line",
+    "user_tags",
+    "reason_line"
+  ],
+  "fixed_params": [
+    {"placeholder": "{{PHONE}}",    "source": "ctx.phone",    "desc": "用户手机号"},
+    {"placeholder": "{{INTENT}}",   "source": "ctx.intent",   "desc": "意图标识"},
+    {"placeholder": "{{CALL_ID}}",  "source": "ctx.trace_id", "desc": "通话/请求追踪 ID"},
+    {"placeholder": "{{PROVINCE}}", "source": "ctx.province", "desc": "省份标识"},
+    {"placeholder": "{{TOP_N}}",    "source": "ctx.top_n",    "desc": "推荐产品数量上限"}
+  ]
+}

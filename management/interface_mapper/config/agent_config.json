@@ -1,0 +1,69 @@
+{
+  "_comment": "Interface Mapper Agent 运行时配置",
+  "max_iterations": 10,
+  "temperature": 0.1,
+  "max_tokens": 4096,
+  "stage_label": "interface_mapper_agent",
+  "tool_call_timeout": 30,
+  "skills_runtime_root": "skills-runtime",
+  "unit_keywords": {
+    "mb_to_gb":    ["MB", "MB）", "兆字节", "兆流量", "（MB）", "(MB)"],
+    "fen_to_yuan": ["（分）", "(分)", "单位分", "单位：分", "分钱", "单位为分"],
+    "jiao_to_fen": ["（角）", "(角)", "单位角", "单位：角", "单位为角"]
+  },
+  "skip_output_fields": {
+    "_comment": "出参映射时需要跳过的字段（主服务入参回显，不属于业务数据，无需映射到任何数据域）",
+    "phone_fields":    ["phone", "mobile", "msisdn", "phoneNo", "phoneNumber", "telNo", "mobileNo"],
+    "intent_fields":   ["intent", "intentCode", "intentName"],
+    "session_fields":  ["callId", "sessionId", "traceId", "taskId", "requestId", "ioId", "logId", "serialNo"],
+    "province_fields": ["province", "botName", "provinceCode", "areaCode"],
+    "other_fields":    ["topN", "top", "pageSize", "pageNo"]
+  },
+  "standard_slots": {
+    "_comment": "7大标准数据域定义，与 数据映射域.txt 保持一致",
+    "current_package":      "用户当前套餐信息，含价格、流量、语音、宽带、权益等信息（判断依据：出参说明含'当前套餐'/'主套餐'/'在用套餐'/'当前产品'）",
+    "recommended_packages": "产品推荐信息列表（数组），含价格、流量、语音、权益等（判断依据：类型为数组，说明含'推荐'/'产品列表'/'套餐列表'）",
+    "usage":                "用户历史用量，近3/6月平均语音/流量/消费/饱和度/当前已用等（判断依据：说明含'饱和度'/'近3/6月平均'/'历史用量'）",
+    "usage.data_usage":     "流量用量统计字段，从 usage 子域拆分（字段名含流量/data/MB/GB/饱和度）",
+    "usage.voice_usage":    "语音用量统计字段，从 usage 子域拆分（字段名含语音/主叫/voice/通话/时长）",
+    "usage.consumption":    "消费金额统计字段，从 usage 子域拆分（字段名含消费/收入/月均/折后/费用）",
+    "tags":                 "用户标签，业务行为特征（排除用量/消费字段后的纯业务标签），如高频低额/融合用户/是否为xx等（注意：不含人口属性画像，那属于 user_profile）",
+    "user_info":            "用户基础信息，账户属性，如用户等级、网龄、终端类型、开通时间、星级等（注意：不含使用偏好，那属于 user_profile）",
+    "user_profile":         "用户画像，人口属性和使用偏好，如老年人/学生/小孩、流量偏好/使用场景/语音偏好等（注意：不含业务行为标签，那属于 tags）",
+    "domain_ext":           "扩展域，家庭业务/合约/活动/订购信息等，与上述6个域均对应不上时使用"
+  },
+  "domain_boundary_rules": {
+    "_comment": "域边界说明，避免 LLM 混淆相似域",
+    "tags_vs_user_profile": "tags=业务行为标签（高频低额/融合用户）；user_profile=人口属性画像（老年人/学生/流量重度用户）",
+    "user_info_vs_user_profile": "user_info=账户基础属性（等级/网龄/星级）；user_profile=使用偏好和人群特征",
+    "usage_vs_tags": "usage=数值型用量统计（近N月平均流量/语音/消费）；tags=标签型业务特征（非数值）"
+  },
+  "fixed_placeholder_map": {
+    "_comment": "接口入参字段名（小写去分隔符）→ 主服务占位符，与 main_service_params.json 保持同步",
+    "phone":        "{{PHONE}}",
+    "mobile":       "{{PHONE}}",
+    "msisdn":       "{{PHONE}}",
+    "intent":       "{{INTENT}}",
+    "callid":       "{{CALL_ID}}",
+    "taskid":       "{{CALL_ID}}",
+    "traceid":      "{{CALL_ID}}",
+    "province":     "{{PROVINCE}}",
+    "botname":      "{{PROVINCE}}",
+    "topn":         "{{TOP_N}}",
+    "ioid":         "{{IOID}}",
+    "curoffername": "{{CURRENT_OFFER_NAME}}",
+    "curofferid":   "{{CURRENT_OFFER_ID}}",
+    "curofferfee":  "{{CURRENT_OFFER_FEE}}"
+  },
+  "extra_data_common_fields": {
+    "_comment": "常见 extra_data 字段参考，接口入参无法匹配固定占位符时从此处取值，格式 {{extra_data.字段名}}",
+    "ioId":                          "用户 IO ID（北京等省份常用）",
+    "taskId":                        "任务ID / 会话ID",
+    "currentMainOffer.curOfferName": "用户当前主套餐名称",
+    "currentMainOffer.curOfferId":   "用户当前主套餐ID",
+    "currentMainOffer.curOfferFee":  "用户当前主套餐费用（单位：分）",
+    "userLevel":                     "用户等级",
+    "certType":                      "证件类型",
+    "channelId":                     "渠道ID"
+  }
+}

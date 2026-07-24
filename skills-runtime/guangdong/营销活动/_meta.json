@@ -1,0 +1,12 @@
+{
+  "name": "guangdong-marketing-activity",
+  "description": "广东营销活动话术生成 Skill",
+  "version": "1.0.0",
+  "type": "scenario",
+  "province": "广东",
+  "scenario_id": "营销活动",
+  "config_files": ["api_nodes.json", "biz_config.json"],
+  "required_plugins": ["plugins.package_diff", "plugins.unit_converter"],
+  "author": "guangdong-team",
+  "openclaw_compatible": true
+}

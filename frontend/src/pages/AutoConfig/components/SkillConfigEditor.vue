@@ -344,6 +344,21 @@
                   :autosize="{ minRows: 5, maxRows: 14 }" spellcheck="false"
                   placeholder='{"phone":"{{PHONE}}","intent":"{{INTENT}}"}' class="code-textarea" />
               </el-form-item>
+              <el-form-item label="请求头" label-width="90px">
+                <div style="width:100%;">
+                  <div v-for="(h, i) in ifcEditForm.headers_pairs" :key="i"
+                    style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">
+                    <el-input v-model="h.k" placeholder="Header 名，如 x-Channel-ID" style="flex:0 0 42%;" />
+                    <el-input v-model="h.v" placeholder="Header 值，如 ngbusi" style="flex:1;" />
+                    <el-button size="small" text type="danger" @click="removeHeaderRow(i)">删除</el-button>
+                  </div>
+                  <el-button size="small" type="primary" plain @click="addHeaderRow">+ 添加请求头</el-button>
+                  <div class="ifc-hint" style="margin-top:6px;">
+                    运行时在默认 <code>Content-Type</code> / <code>Accept</code> 之上叠加这些头（同名以此处为准）。
+                    如省侧接口要求渠道标识，例如北京查询接口需带 <code>x-Channel-ID: ngbusi</code>。
+                  </div>
+                </div>
+              </el-form-item>
             </template>
             <template v-else>
               <el-form-item label="节点状态" label-width="90px">
@@ -523,6 +538,19 @@
 
                 <!-- 表格配置模式 -->
                 <div v-if="ftVisualMode" class="ft-table">
+                  <!-- 直接提取的标准域（response_extract key=标准域名，整块透传优先的结果）：
+                       无需 field_transform 规则，只读展示避免误以为映射丢失 -->
+                  <div v-if="ftDirectDomains.length" class="ft-direct-block">
+                    <div v-for="d in ftDirectDomains" :key="d.slot" class="ft-row ft-direct-row">
+                      <span class="ft-c-slot">
+                        <b>{{ STANDARD_SLOT_LABELS[d.slot] || d.slot }}（{{ d.slot }}）</b>
+                      </span>
+                      <span class="ft-c-from"><code>{{ d.path }}</code></span>
+                      <span class="ft-c-type"><el-tag size="small" type="success">直接提取</el-tag></span>
+                      <span class="ft-c-keys ft-dash">已在②响应提取中整块透传，无需转换规则</span>
+                      <span class="ft-c-op"></span>
+                    </div>
+                  </div>
                   <div class="ft-row ft-head">
                     <span class="ft-c-slot">写入标准域</span>
                     <span class="ft-c-from">来源 from（中间集 / JSON路径）</span>
@@ -565,7 +593,8 @@
                       <el-button link type="danger" size="small" @click="removeFtRow(i)">删除</el-button>
                     </div>
                   </div>
-                  <div v-if="!ftRows.length" class="ft-empty">还没有映射规则，点击下方「添加映射规则」，或在①填样例后点「智能分析」自动生成。</div>
+                  <div v-if="!ftRows.length && !ftDirectDomains.length" class="ft-empty">还没有映射规则，点击下方「添加映射规则」，或在①填样例后点「智能分析」自动生成。</div>
+                  <div v-else-if="!ftRows.length" class="ft-empty">其余标准域暂无转换规则；上方「直接提取」的域已整块写入，无需配置。</div>
                   <el-button size="small" plain class="ft-add" @click="addFtRow">+ 添加映射规则</el-button>
                 </div>
 
@@ -1065,11 +1094,11 @@
             话术模板（{{ templateList.length }} 组<template v-if="templateTotalCount !== templateList.length"> · 共 {{ templateTotalCount }} 条</template>）
           </span>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <!-- 筛选：场景意图名称 / 环节（省份由当前技能包固定，无需筛选）-->
+            <!-- 筛选：场景分类名称 / 环节（省份由当前技能包固定，无需筛选）-->
             <el-input
               v-model="tplFilterName"
               size="small"
-              placeholder="场景意图名称"
+              placeholder="场景分类名称"
               clearable
               style="width:170px;"
               @input="tplPage = 1"
@@ -1128,7 +1157,7 @@
           <el-table-column type="selection" width="40" align="center" reserve-selection />
           <el-table-column type="index" :index="(i) => (tplPage-1)*TBL_PAGE_SIZE + i + 1"
             width="48" align="center" label="#" />
-          <el-table-column label="场景意图名称" min-width="160" show-overflow-tooltip>
+          <el-table-column label="场景分类名称" min-width="160" show-overflow-tooltip>
             <template #default="{ row }">
               <span style="font-weight:600;">{{ row.template_name || '（未命名）' }}</span>
             </template>
@@ -1245,7 +1274,7 @@
                 <el-icon><Download /></el-icon>&nbsp;下载 CSV 模板
               </el-button>
               <div class="csv-cols">
-                <span class="csv-col-tag">场景意图名称</span>
+                <span class="csv-col-tag">场景分类名称</span>
                 <span class="csv-col-tag">环节</span>
                 <span class="csv-col-tag">意图</span>
                 <span class="csv-col-tag">产品ID</span>
@@ -1445,7 +1474,28 @@ const ifcEditForm    = reactive({
   source_type: 'api',   // 'api' 接口查询模式 | 'direct' 直传模式（extra_info）
   direct_mode: 'mapping', // 直传子模式：'mapping' 智能映射到标准域 | 'passthrough' 直接透传字段
   passthrough_fields: [], // 透传子模式下选定的入参字段（空=全部顶层字段）
+  headers_pairs: [],    // 接口查询模式请求头（键值对，保存时转 headers 对象）
 })
+
+// ── 请求头（接口查询模式）键值对 ↔ 对象互转 ────────────────────
+// 运行时 api_client 会在默认 Content-Type/Accept 之上叠加/覆盖这里的头（同名以此处为准）。
+// 例：北京查询接口需带渠道标识 { "x-Channel-ID": "ngbusi" }。
+function headersObjToPairs(obj) {
+  const o = obj && typeof obj === 'object' ? obj : {}
+  const pairs = Object.entries(o).map(([k, v]) => ({ k: String(k), v: v == null ? '' : String(v) }))
+  return pairs.length ? pairs : [{ k: 'Content-Type', v: 'application/json' }]
+}
+function headersPairsToObj(pairs) {
+  const out = {}
+  for (const p of (pairs || [])) {
+    const k = (p.k || '').trim()
+    if (!k) continue
+    out[k] = p.v == null ? '' : String(p.v)
+  }
+  return out
+}
+function addHeaderRow() { ifcEditForm.headers_pairs.push({ k: '', v: '' }) }
+function removeHeaderRow(i) { ifcEditForm.headers_pairs.splice(i, 1) }
 
 // ── 直传模式辅助 ──────────────────────────────────────
 const isDirectMode = computed(() => ifcEditForm.source_type === 'direct')
@@ -1583,6 +1633,30 @@ const showMappingResult = computed(() => {
 // ── 优化3：field_transform 表格化可视配置（与高级 JSON 模式等价，数据格式不变）──
 const ftVisualMode = ref(true)          // true 表格模式 / false 高级 JSON
 const ftRows = ref([])                  // 可视表格行模型
+
+// 标准域 key → 中文标签（供直接提取只读行展示）
+const STANDARD_SLOT_LABELS = {
+  current_package: '当前套餐', usage: '历史用量', tags: '用户标签',
+  user_info: '用户基础信息', recommended_packages: '推荐产品',
+  user_profile: '用户画像', domain_ext: '扩展域',
+}
+
+// 直接提取的标准域：response_extract 的 key 命中 7 大标准域且未被 field_transform 覆盖。
+// 这类域走「整块透传优先」路径（②整块提取即写入标准域），无需转换规则；
+// 在表格配置中只读展示，避免用户误以为 current_package / recommended_packages 映射丢失。
+const ftDirectDomains = computed(() => {
+  const ext = _safeParse(ifcEditForm.response_extract)
+  const tr = _safeParse(ifcEditForm.field_transform)
+  const ftSlots = new Set(Object.keys(tr || {}).map(k => String(k).split('.')[0]))
+  const out = []
+  for (const [key, path] of Object.entries(ext || {})) {
+    if (String(key).startsWith('_')) continue
+    if (!STANDARD_SLOTS.has(key)) continue
+    if (ftSlots.has(key)) continue
+    out.push({ slot: key, path: String(path || '') })
+  }
+  return out
+})
 const ftSpecial = ref({})               // 下划线前缀的特殊配置（如 _unit_conversions），表格不展示为域行但需原样保留
 let ftInternalWrite = false             // 防止表格↔JSON 循环同步
 
@@ -1692,6 +1766,14 @@ function parseUnitRows() {
   ftUnitRows.value = [...map.values()]
 }
 
+/** 规范化重命名字段名：折叠历史脏数据中的重复括号（如 "近3月平均流量((GB)）" → "近3月平均流量(GB)"）*/
+function _cleanRenameField(name) {
+  return String(name || '')
+    .replace(/[(（]{2,}/g, '(')                 // 连续左括号折叠为一个半角 (
+    .replace(/[)）]{2,}/g, ')')                 // 连续右括号折叠为一个半角 )
+    .replace(/\(([^()（）]*)）/g, '($1)')        // 半角开 + 全角闭 → 统一半角
+}
+
 /** 单位换算表格 → 写回 _unit_conversions（展示镜像）+ 写穿透到各规则 unit_convert/field_rename（运行时真源）*/
 function commitUnitRows() {
   const norm = ftUnitRows.value
@@ -1699,7 +1781,7 @@ function commitUnitRows() {
     .map(u => ({
       target_path: u.target_path,
       field: u.field,
-      new_field: u.new_field || u.field,
+      new_field: _cleanRenameField(u.new_field || u.field),
       converter: u.converter,
       desc: u.desc || '',
     }))
@@ -2031,6 +2113,7 @@ function openIfcCreate() {
     field_transform: '{}', mock_mode: false, mock_response: '{}',
     // 需求：透传模式作为第一选择（默认），接口查询模式为第二选择
     source_type: 'direct',
+    headers_pairs: [{ k: 'Content-Type', v: 'application/json' }],
   })
   ifcAutoMapAnalysis.value = ''
   ifcEditVisible.value = true
@@ -2356,6 +2439,7 @@ async function openIfcEdit(item) {
       source_type:      cfg.source_type === 'direct' ? 'direct' : 'api',
       direct_mode:      cfg.direct_mode === 'passthrough' ? 'passthrough' : 'mapping',
       passthrough_fields: Array.isArray(cfg.passthrough_fields) ? [...cfg.passthrough_fields] : [],
+      headers_pairs:    headersObjToPairs(cfg.headers),
     })
   } catch { /* 允许打开空表单 */ }
   // 缓存原始快照（用于保存时判断是否有修改）
@@ -2372,6 +2456,7 @@ async function openIfcEdit(item) {
     source_type:      ifcEditForm.source_type,
     direct_mode:      ifcEditForm.direct_mode,
     passthrough_fields: [...ifcEditForm.passthrough_fields],
+    headers:          JSON.stringify(headersPairsToObj(ifcEditForm.headers_pairs)),
   }
   rebuildIfcEditPreview()
   ifcEditVisible.value = true
@@ -2456,6 +2541,7 @@ async function saveIfcEdit() {
       (snap.source_type || 'api') === ifcEditForm.source_type &&
       (snap.direct_mode || 'mapping') === ifcEditForm.direct_mode &&
       JSON.stringify(snap.passthrough_fields || []) === JSON.stringify(ifcEditForm.passthrough_fields || []) &&
+      (snap.headers || '{}') === JSON.stringify(headersPairsToObj(ifcEditForm.headers_pairs)) &&
       _jsonEqual(snap.request_template, ifcEditForm.request_template) &&
       _jsonEqual(snap.response_extract, ifcEditForm.response_extract) &&
       _jsonEqual(snap.field_transform,  ifcEditForm.field_transform) &&
@@ -2487,6 +2573,8 @@ async function saveIfcEdit() {
     mock_mode: isDirect ? false : ifcEditForm.mock_mode,
     mock_response: mock,
   }
+  // 接口查询模式：写入请求头（直传模式不发 HTTP，headers 不参与，交由后端合并保留原值）
+  if (!isDirect) body.headers = headersPairsToObj(ifcEditForm.headers_pairs)
   if (isDirect) {
     body.direct_mode = ifcEditForm.direct_mode
     body.passthrough_fields = isPass ? [...ifcEditForm.passthrough_fields] : []
@@ -2779,6 +2867,7 @@ function openLocalIfcCreate() {
     // 需求：透传模式作为第一选择（默认），接口查询模式为第二选择
     source_type: 'direct',
     direct_mode: 'passthrough', passthrough_fields: [],
+    headers_pairs: [{ k: 'Content-Type', v: 'application/json' }],
   })
   ifcEditOriginalSnapshot.value = null
   ifcAutoMapAnalysis.value = ''
@@ -2805,6 +2894,7 @@ function openLocalIfcEdit(row) {
     source_type:      row.source_type === 'direct' ? 'direct' : 'api',
     direct_mode:      row.direct_mode === 'passthrough' ? 'passthrough' : 'mapping',
     passthrough_fields: Array.isArray(row.passthrough_fields) ? [...row.passthrough_fields] : [],
+    headers_pairs:    headersObjToPairs(row.headers),
   })
   ifcEditOriginalSnapshot.value = {
     description:      ifcEditForm.description,
@@ -2816,6 +2906,7 @@ function openLocalIfcEdit(row) {
     field_transform:  ifcEditForm.field_transform,
     mock_mode:        ifcEditForm.mock_mode,
     mock_response:    ifcEditForm.mock_response,
+    headers:          JSON.stringify(headersPairsToObj(ifcEditForm.headers_pairs)),
   }
   rebuildIfcEditPreview()
   ifcEditVisible.value = true
@@ -2838,7 +2929,10 @@ function saveLocalIfcEdit(req, ext, tr, mock) {
     url:                  isDirect ? '' : ifcEditForm.url,
     method:               ifcEditForm.method,
     source_type:          ifcEditForm.source_type,
-    headers:              reactive({ ...(old?.headers || { 'Content-Type': 'application/json' }) }),
+    // 接口查询模式用表单编辑的请求头；直传模式不发 HTTP，沿用原值/默认
+    headers:              reactive(isDirect
+                            ? { ...(old?.headers || { 'Content-Type': 'application/json' }) }
+                            : headersPairsToObj(ifcEditForm.headers_pairs)),
     timeout:              old?.timeout ?? 30,
     max_retries:          old?.max_retries ?? 2,
     mock_mode:            isDirect ? false : ifcEditForm.mock_mode,
@@ -2871,7 +2965,7 @@ function removeNode(idx) {
 
 // ── 模板分页 & 搜索 ────────────────────────────────────
 const TBL_PAGE_SIZE = 20
-// 筛选条件：场景意图名称（模糊）/ 环节（精确）/ 意图（场景，精确）
+// 筛选条件：场景分类名称（模糊）/ 环节（精确）/ 意图（场景，精确）
 const tplFilterName  = ref('')
 const tplFilterStage = ref('')
 const tplFilterScene = ref('')
@@ -3174,7 +3268,7 @@ function openImportCsv() {
 
 // 优化六：下载导入用 CSV 模板（含表头，列顺序与解析一致），带 BOM 防止 Excel 中文乱码
 function downloadCsvTemplate() {
-  const header = '场景意图名称,环节,意图,产品ID,话术内容,关联变量(可留空),状态(online/offline)'
+  const header = '场景分类名称,环节,意图,产品ID,话术内容,关联变量(可留空),状态(online/offline)'
   const sample1 = '套餐推荐话术_5G升档,推荐环节,套餐升级,prod001,"您好，根据您的用量{usage}，推荐办理{pkg_brief}。",,online'
   const sample2 = '套餐推荐话术_兜底,推荐环节,套餐升级,,"您好，为您推荐更合适的套餐{pkg_brief}。",,online'
   const csv = '\uFEFF' + header + '\n' + sample1 + '\n' + sample2 + '\n'
@@ -3257,7 +3351,7 @@ async function doImportCsv() {
     if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1)   // 去除残留 BOM
     const rows = parseCsv(text).filter(r => r.some(c => (c || '').trim() !== ''))
     if (!rows.length) { importMsg.value = 'CSV 文件为空'; importOk.value = false; return }
-    // 列顺序：场景意图名称, 环节, 意图, 产品ID, 话术内容, 关联变量(可留空), 状态
+    // 列顺序：场景分类名称, 环节, 意图, 产品ID, 话术内容, 关联变量(可留空), 状态
     const dataRows = _looksLikeHeader(rows[0]) ? rows.slice(1) : rows
 
     // 解析为标准记录（话术内容必填）
@@ -3545,6 +3639,25 @@ function inferProducedSlots(cfg) {
   return inferProducedSlotDetails(cfg).map(x => x.slot)
 }
 
+/**
+ * 推断透传模式节点「对外提供的入参字段」（供 TemplateEditDialog 的「提供变量」展示）。
+ * 透传模式不写 7 域映射规则，其提供的变量就是选定的 passthrough_fields；
+ * 未显式选择（空=全部顶层字段）时从 mock_response 顶层非标准域字段推断。
+ * 返回 { passthrough, fields }；非透传节点 passthrough=false。
+ */
+function derivePassthroughInfo(cfg) {
+  if (!cfg || cfg.source_type !== 'direct' || cfg.direct_mode !== 'passthrough') {
+    return { passthrough: false, fields: [] }
+  }
+  let fields = Array.isArray(cfg.passthrough_fields)
+    ? cfg.passthrough_fields.filter(k => typeof k === 'string' && k) : []
+  if (!fields.length) {
+    const sample = (cfg.mock_response && typeof cfg.mock_response === 'object') ? cfg.mock_response : {}
+    fields = Object.keys(sample).filter(k => k && !k.startsWith('_') && !STANDARD_SLOTS.has(k))
+  }
+  return { passthrough: true, fields }
+}
+
 // 模式 A 接口详情缓存（异步拉取后填入，便于在数据流映射页展示具体字段）
 const ifcDetailsCache = reactive({})  // api_name → cfg
 
@@ -3575,6 +3688,7 @@ const availableApisForTpl = computed(() => {
       const cfg = ifcDetailsCache[it.api_name]
       if (cfg) {
         const details = inferProducedSlotDetails(cfg)
+        const pt = derivePassthroughInfo(cfg)
         return {
           api_name: it.api_name,
           description: it.description || cfg._comment || '',
@@ -3583,6 +3697,8 @@ const availableApisForTpl = computed(() => {
           source_type: (cfg.source_type ?? it.source_type) === 'direct' ? 'direct' : 'api',
           produced_slots: details.map(x => x.slot),
           produced_slot_details: details,
+          passthrough: pt.passthrough,
+          passthrough_fields: pt.fields,
         }
       }
       return {
@@ -3592,12 +3708,16 @@ const availableApisForTpl = computed(() => {
         mock_mode: !!it.mock_mode,
         source_type: it.source_type === 'direct' ? 'direct' : 'api',
         produced_slots: Array.isArray(it.produced_slots) ? it.produced_slots : [],
+        // 详情未拉到时无法判定透传字段，先按 source_type 标记（拉到详情后自动细化）
+        passthrough: it.source_type === 'direct',
+        passthrough_fields: [],
       }
     })
   }
   // 模式 B：从 apiNodeList 直接推断
   return apiNodeList.value.map(n => {
     const details = inferProducedSlotDetails(n)
+    const pt = derivePassthroughInfo(n)
     return {
       api_name: n._key,
       description: n._comment || '',
@@ -3606,6 +3726,8 @@ const availableApisForTpl = computed(() => {
       source_type: n.source_type === 'direct' ? 'direct' : 'api',
       produced_slots: details.map(x => x.slot),
       produced_slot_details: details,
+      passthrough: pt.passthrough,
+      passthrough_fields: pt.fields,
     }
   })
 })
@@ -4487,7 +4609,7 @@ function loadFromProps(val) {
   strategy.max_parallel_scripts = s.max_parallel_scripts ?? 3
 
   // Mode A（有 province+intent，如 Skill 管理）：话术模板改由 loadTplItems 分页拉全量并
-  // 「按场景意图/环节/意图/话术内容」合并归类展示（不同 product_id 收进同一分组行），
+  // 「按场景分类/环节/意图/话术内容」合并归类展示（不同 product_id 收进同一分组行），
   // 增删改经 /api/templates 独立持久化；此处不用 biz_config 直读列表覆盖，避免退回「按产品ID逐条铺开」。
   if (props.province && props.intent) return
 
@@ -4616,18 +4738,12 @@ function parseJsonField(node, field, text) {
 // ── 话术模板操作 ──────────────────────────────────────
 let _uid = 1000
 
-/** 表格"产品 ID"列：兼容模式 A（_product_ids 数组）与模式 B（单 product_id）。
- *  product_id 可能是逗号分隔的多个 ID（如 "A,B,C"），需要拆分为独立元素统计。 */
+/** 表格"产品 ID"列：兼容模式 A（_product_ids 数组）与模式 B（单 product_id） */
 function rowProductIds(row) {
   const pids = Array.isArray(row._product_ids) && row._product_ids.length
     ? row._product_ids
     : (row.product_id ? [row.product_id] : [])
-  // 展平逗号分隔的 product_id 字符串
-  const flat = []
-  for (const p of pids) {
-    if (p) flat.push(...String(p).split(',').map(s => s.trim()).filter(Boolean))
-  }
-  return flat.filter((v, i, arr) => arr.indexOf(v) === i)
+  return pids.filter(p => p)
 }
 
 /** 合并归类后底层模板总条数（各分组产品数之和；兜底组按 1 条计），用于「N 组 · 共 M 条」展示 */
@@ -6390,6 +6506,13 @@ async function removeTemplate(idx) {
 .ft-c-op { text-align: right; }
 .ft-empty { padding: 12px; font-size: 12px; color: var(--muted); text-align: center; }
 .ft-add { margin: 8px 0 2px; }
+/* 直接提取的标准域（response_extract 整块透传）：只读展示行 */
+.ft-direct-block { border-bottom: 1px solid #e8f5ec; }
+.ft-direct-row { background: #f6fdf8; font-size: 12px; }
+.ft-direct-row .ft-c-slot b { font-size: 12px; color: #2f7a4d; font-weight: 600; }
+.ft-direct-row .ft-c-from code {
+  font-size: 12px; background: #eef7f0; border-radius: 4px; padding: 1px 6px; color: #4a6b57;
+}
 
 /* 优化5：内联验证映射结果 */
 .om2-validate { border-color: #a7e0c1; background: #fafffb; }

@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from utils.observability import begin_request_context, reset_request_context, summarize_request_context
 from utils.skill_runtime import skill_registry
+from utils import province_logger
 
 router = APIRouter(tags=["实时服务"])
 
@@ -136,6 +137,10 @@ async def recommend(request: Request):
         # 将转换后的 province_key 写入请求数据，确保技能包内部使用标准 code
         req_data = req.model_dump()
         req_data["province"] = province_key
+        # 分省日志：记录完整入参（按省份目录落盘，便于分省排查）
+        province_logger.log_request(
+            province_key, req.intent, trace_id, req.phone, req_data,
+        )
         result = await executor.execute(req_data)
 
         elapsed = (time.perf_counter() - t0) * 1000
@@ -143,7 +148,16 @@ async def recommend(request: Request):
             f"[recommend] ✅ 完成  trace_id={trace_id}  "
             f"elapsed={elapsed:.0f}ms  scripts={len(result.get('recommend_results', []))}"
         )
-        summarize_request_context()
+        obs_summary = summarize_request_context()
+        recommend_results = result.get("recommend_results", [])
+        # 分省日志：记录出参（模型返回话术）+ 关键统计
+        province_logger.log_response(
+            province_key, req.intent, trace_id, req.phone,
+            code=200, elapsed_ms=elapsed,
+            recommend_results=recommend_results,
+            other_info=result.get("other_info"),
+            metadata=obs_summary,
+        )
         return JSONResponse({
             "code": 200,
             "message": "success",
@@ -152,7 +166,7 @@ async def recommend(request: Request):
                 "phone": req.phone,
                 "intent": req.intent,
                 "province": req.province,
-                "recommend_results": result.get("recommend_results", []),
+                "recommend_results": recommend_results,
             },
             "other_info": result.get("other_info"),
         })
@@ -162,6 +176,15 @@ async def recommend(request: Request):
     except Exception as exc:
         elapsed = (time.perf_counter() - t0) * 1000
         logger.exception(f"[recommend] ❌ 异常  trace_id={trace_id}  elapsed={elapsed:.0f}ms")
+        # 分省日志：记录异常出参，便于分省排查失败请求
+        try:
+            province_logger.log_response(
+                PROVINCE_CODE_MAP.get(req.province, req.province), req.intent,
+                trace_id, req.phone, code=500, elapsed_ms=elapsed,
+                metadata=summarize_request_context(), error=str(exc),
+            )
+        except Exception:
+            pass
         return JSONResponse({"code": 500, "message": str(exc), "data": None}, status_code=500)
     finally:
         reset_request_context(obs_token)

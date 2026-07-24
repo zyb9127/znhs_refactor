@@ -13,6 +13,8 @@
 - W105 linked_vars 含未知变量名
 - W106 response_extract 槽位既非 7 大标准域也没有任何 field_transform 引用（悬空槽位）
 - W107 (intent, product_id, stage, scene) 维度完全相同的 online 模板 >1 条（引冲突检测）
+- W108 field_rename / _unit_conversions.new_field 目标字段名含畸形括号（双括号/全半角混用，
+       运行时数据键与模板子字段占位符无法精确同名对齐；存量配置巡检）
 - I101 模板无 priority 字段（提示可用新字段控制优先级）
 
 返回结构统一：{"errors": [...], "warnings": [...], "info": [...], "stats": {...}}，
@@ -34,6 +36,18 @@ from management.config_agent.conflict_detector import detect_conflicts
 # ── 占位符提取（规格 §7 指定 regex）─────────────────────────────
 # group(1) = {{var}} 双花括号命中；group(2) = {var} 单花括号命中
 _PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}|\{(\w+)\}")
+
+# 子字段路径占位符 {域[子键]} / {域[子键1][子键2]}：group(1)=根域名
+# （方括号内子键可含中文/括号/点号，故不与单花括号 regex 重叠，需单独提取校验）
+_SUBFIELD_PLACEHOLDER_RE = re.compile(r"\{(\w+)(?:\[[^\[\]]+\])+\}")
+
+# 子字段占位符允许的根域（标准域 + 历史别名 + 推荐条派生名）——build_prompt._subfield_roots 同源
+_SUBFIELD_ROOT_KEYS: Set[str] = {
+    "current_package", "cur_brief", "cur_name",
+    "usage", "usage_line", "tags", "user_tags",
+    "user_info", "user_profile", "domain_ext",
+    "pkg_brief", "pkg_name", "recommended_package", "extra_info",
+}
 
 # ── 合法 status 枚举（缺省/空串按 online 处理）──────────────────
 _VALID_STATUS: Set[str] = {"online", "offline", "deleted"}
@@ -227,6 +241,20 @@ def _lint_one_template(
             f"占位符 {{{name}}} 不在已知变量集合（标准域/linked_vars/生成变量）内，运行时可能无法渲染",
         ))
 
+    # W104（子字段占位符）：{域[子键]} 的根域须是已知标准域/别名，否则运行时取不到值
+    unknown_sub_roots: List[str] = []
+    for m in _SUBFIELD_PLACEHOLDER_RE.finditer(content):
+        root = m.group(1)
+        if (root not in _SUBFIELD_ROOT_KEYS and root not in allowed
+                and root not in unknown_sub_roots):
+            unknown_sub_roots.append(root)
+    for root in unknown_sub_roots:
+        warnings.append(_item(
+            "W104", "warning", f"{path}.template_content",
+            f"子字段占位符根域 {{{root}[...]}} 不是已知标准域（可用根域：当前套餐/历史用量/"
+            f"用户标签/用户信息/画像/推荐产品等），运行时可能无法取到子字段值",
+        ))
+
     # W105 linked_vars 含未知变量名
     for var in linked_vars:
         if var not in known:
@@ -403,6 +431,10 @@ def lint_api_nodes(api_nodes: Dict[str, Any], province: str, intent: str) -> Dic
         # E201 field_transform 的 from 槽位不存在于 response_extract
         referenced_slots: Set[str] = set()
         for target, rule in field_transform.items():
+            # 下划线开头为内部 meta 键（如 _unit_conversions，值为 list 而非转换规则），
+            # 不是真实转换规则，跳过 E201/引用统计，避免误报 from 槽位不存在。
+            if str(target).startswith("_"):
+                continue
             # from 缺省等于目标路径（与 data_step.py L327 语义一致）
             if isinstance(rule, dict):
                 effective_from = str(rule.get("from") or target)
@@ -432,6 +464,36 @@ def lint_api_nodes(api_nodes: Dict[str, Any], province: str, intent: str) -> Dic
                 f"{node_name}.response_extract.{slot_name}",
                 f"槽位 {slot_name!r} 既非 7 大标准域也没有任何 field_transform 引用（悬空槽位）",
             ))
+
+        # W108 重命名目标字段名含畸形括号（双括号 / 全半角混用）——
+        # 运行时数据键将与话术模板子字段占位符无法精确同名对齐（存量配置巡检；
+        # 新保存已被 publish_config / DataStep 双层规范化，此处提示尽早清洗配置）
+        try:
+            from utils.field_naming import clean_rename_field  # 延迟 import
+        except Exception:  # noqa: BLE001 - util 不可用时跳过该检查
+            clean_rename_field = None
+        if clean_rename_field is not None:
+            for target, rule in field_transform.items():
+                if str(target) == "_unit_conversions" and isinstance(rule, list):
+                    for idx, conv in enumerate(rule):
+                        nf = conv.get("new_field") if isinstance(conv, dict) else None
+                        if nf and clean_rename_field(nf) != nf:
+                            report["warnings"].append(_item(
+                                "W108", "warning",
+                                f"{node_name}.field_transform._unit_conversions[{idx}]",
+                                f"重命名目标字段名 {nf!r} 含畸形括号，建议改为 "
+                                f"{clean_rename_field(nf)!r}（否则模板子字段占位符需依赖模糊匹配）",
+                            ))
+                    continue
+                if isinstance(rule, dict) and isinstance(rule.get("field_rename"), dict):
+                    for src, dst in rule["field_rename"].items():
+                        if dst and clean_rename_field(dst) != dst:
+                            report["warnings"].append(_item(
+                                "W108", "warning",
+                                f"{node_name}.field_transform.{target}.field_rename",
+                                f"重命名目标字段名 {dst!r} 含畸形括号，建议改为 "
+                                f"{clean_rename_field(dst)!r}（否则模板子字段占位符需依赖模糊匹配）",
+                            ))
 
     report["stats"] = {"node_count": node_count, "enabled_count": enabled_count}
     return report

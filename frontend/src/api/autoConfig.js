@@ -33,6 +33,9 @@ export const acPublishSkill    = (payload)  => http.post(`${P}/import/publish`, 
 
 // ── Skill 管理 ──────────────────────────────────────────────────
 export const acListSkills = (params = {}) => http.get(`${P}/skills`, { params })
+/** 新建 skill 重名前置校验：以运行时 registry（ES/Redis 生效配置）为准判断省份下场景分类是否已存在 */
+export const acSkillExists = (province, intent) =>
+  http.get(`${P}/skills/exists`, { params: { province, intent } })
 /** 一键导出全部技能包配置（返回 JSON blob，用于前端触发下载） */
 export const acExportAllSkills = (params = {}) =>
   http.get(`${P}/skills/export`, { params, responseType: 'blob' })

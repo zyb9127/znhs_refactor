@@ -51,7 +51,7 @@
 
         <el-form-item v-else prop="template_name" required>
           <template #label>
-            <span class="fl">场景意图名称<span class="req-star">*</span></span>
+            <span class="fl">场景分类名称<span class="req-star">*</span></span>
             <span class="fh">必填。用于标识该话术模板，建议含意图与卖点，如「套餐推荐话术_5G升档」</span>
           </template>
           <el-input v-model="form.template_name" placeholder="如：套餐推荐话术_5G升档" clearable />
@@ -142,13 +142,20 @@
             <div v-if="api.description" class="api-desc">{{ api.description }}</div>
             <div class="api-slots">
               <span class="api-slots-label">提供变量：</span>
-              <template v-if="api.produced_slots.length">
+              <template v-if="api.produced_slots.length || (api.passthrough && api.passthrough_fields && api.passthrough_fields.length)">
                 <el-tag v-for="s in api.produced_slots" :key="s" size="small"
                   :type="isSlotLinked(s) ? 'success' : ''"
                   class="slot-tag" :title="SLOT_LABEL[s] || s">
                   {{ SLOT_LABEL[s] || s }}
                 </el-tag>
+                <!-- 透传模式：直接暴露的入参字段（非 7 域映射，作为可引用变量）-->
+                <el-tag v-for="f in (api.passthrough ? api.passthrough_fields : [])" :key="'pt-'+f"
+                  size="small" type="success" effect="plain" class="slot-tag" :title="'透传入参字段：' + f">
+                  {{ f }}
+                </el-tag>
               </template>
+              <!-- 透传模式但未显式选字段：透传全部顶层入参字段 -->
+              <span v-else-if="api.passthrough" class="api-slots-empty">透传全部顶层入参字段</span>
               <span v-else class="api-slots-empty">未配置映射规则</span>
             </div>
           </label>
@@ -168,7 +175,7 @@
         <!-- 优化四/五：可映射固定域调色板 —— 与「① 关联接口」联动：仅展示当前生效接口产出的域/透传字段 -->
         <div v-if="multiProduct" class="dragvar-palette">
           <span class="dragvar-palette-label">可映射固定域</span>
-          <span class="dragvar-palette-tip">点击或拖拽插入；随「① 关联接口」勾选联动，角标标注产出接口</span>
+          <span class="dragvar-palette-tip">点击/拖拽插入整块域；带 ▾ 的域可展开选「子字段」精准匹配到槽位；随「① 关联接口」勾选联动</span>
           <template v-if="insertableVars.length">
             <span v-for="v in insertableVars" :key="v.key"
               class="dragvar-chip" :class="'chip-' + (v.kind || 'domain')" draggable="true"
@@ -177,6 +184,26 @@
               @click="insertVar(v.key)">
               {{ v.label }}<code>{{ '{' + v.key + '}' }}</code>
               <span v-if="chipSrcTag(v)" class="chip-src">{{ chipSrcTag(v) }}</span>
+              <el-popover v-if="v.subfields && v.subfields.length" placement="bottom-start"
+                :width="320" trigger="click" popper-class="subfield-pop">
+                <template #reference>
+                  <span class="chip-caret" title="展开选择子字段（更精准匹配槽位）" @click.stop>▾</span>
+                </template>
+                <div class="subfield-panel">
+                  <div class="subfield-head">
+                    「{{ v.label }}」子字段（点击/拖入 = 精准占位符 {{ '{域[子键]}' }}）<br/>
+                    <span class="subfield-head-note">字段名与样例值均为<b>映射转换后</b>（重命名/单位换算完成）的最终参数，运行时按同名动态取真实值</span>
+                  </div>
+                  <div v-for="s in v.subfields" :key="s.token" class="subfield-row"
+                    draggable="true" :title="'插入 {' + s.token + '}'"
+                    @dragstart="onTokenDragStart($event, s.token)"
+                    @click="insertToken(s.token)">
+                    <span class="subfield-name">{{ s.label }}</span>
+                    <span v-if="s.path.includes('.')" class="subfield-path">{{ s.path }}</span>
+                    <span v-if="subSampleText(s)" class="subfield-sample">例：{{ subSampleText(s) }}</span>
+                  </div>
+                </div>
+              </el-popover>
             </span>
           </template>
           <span v-else class="dragvar-empty">先在「① 关联接口」勾选接口，这里会列出该接口映射产出的可用固定域</span>
@@ -676,10 +703,22 @@ const passthroughVars = computed(() =>
     return producers.some(n => activeApiNames.value.has(n))
   }))
 
-// 可拖入模板的变量 = 映射固定域 + 直传透传字段 + 计算生成变量（去重，带来源标注）
+// 各域「下一级子字段」映射：key → [{token,label,path,sample}]（后端 context_vars 按接口 mock 映射推导）
+// 用于调色板展开精确子字段占位符（{域[子键]}），把入参字段更精准地匹配到话术槽位。
+const subfieldsByKey = computed(() => {
+  const map = {}
+  for (const v of dynamicVarList.value) {
+    if (Array.isArray(v.subfields) && v.subfields.length) map[v.key] = v.subfields
+  }
+  return map
+})
+
+// 可拖入模板的变量 = 映射固定域 + 直传透传字段 + 计算生成变量（去重，带来源标注 + 可选子字段）
 const insertableVars = computed(() => {
+  const sub = subfieldsByKey.value
   const list = mappedDomainVars.value.map(v => ({
     key: v.key, label: v.label, apis: v.apis || [], kind: 'domain',
+    subfields: sub[v.key] || [],
   }))
   const seen = new Set(list.map(v => v.key))
   for (const p of passthroughVars.value) {
@@ -688,11 +727,15 @@ const insertableVars = computed(() => {
       list.push({
         key: p.key, label: p.label || p.key,
         apis: Array.isArray(p.api_names) ? p.api_names : [], kind: 'passthrough',
+        subfields: sub[p.key] || [],
       })
     }
   }
   for (const g of generatedVarList.value) {
-    if (!seen.has(g.key)) { seen.add(g.key); list.push({ key: g.key, label: g.label, apis: [], kind: 'generated' }) }
+    if (!seen.has(g.key)) {
+      seen.add(g.key)
+      list.push({ key: g.key, label: g.label, apis: [], kind: 'generated', subfields: sub[g.key] || [] })
+    }
   }
   return list
 })
@@ -821,6 +864,19 @@ function onVarDragStart(e, key) {
   e.dataTransfer.setData('text/plain', '{' + key + '}')
   e.dataTransfer.effectAllowed = 'copy'
 }
+// 子字段占位符：整 token 已含方括号路径（如 usage[data_usage][近6月平均流量(GB)]），直接插入
+function insertToken(token) { insertAtCursor('{' + token + '}') }
+function onTokenDragStart(e, token) {
+  e.dataTransfer.setData('text/plain', '{' + token + '}')
+  e.dataTransfer.effectAllowed = 'copy'
+}
+// 子字段样例值预览（截断，避免过长）
+function subSampleText(s) {
+  if (s == null || s.sample == null || s.sample === '') return ''
+  let t = String(s.sample)
+  if (t.length > 18) t = t.slice(0, 18) + '…'
+  return t
+}
 
 // ── 拖拽落点可视化（业内通用方案：mirror div 定位 + 自定义闪烁光标 + 接管插入）──
 // 原理：
@@ -940,10 +996,14 @@ const contentVarHint = computed(() => {
   const refs = new Set()
   // 同时识别 {var} 与 {{var}}
   for (const m of text.matchAll(/\{\{?(\w+)\}?\}/g)) refs.add(m[1])
-  if (!refs.size) return null
+  // 子字段占位符 {域[子键]…}：仅校验根域是否已知（子键随数据变化，不做白名单）
+  const subRoots = new Set()
+  for (const m of text.matchAll(/\{(\w+)(?:\[[^\[\]]+\])+\}/g)) subRoots.add(m[1])
+  if (!refs.size && !subRoots.size) return null
   if (props.multiProduct) {
     const known = availableVarKeys.value
     const unmapped = [...refs].filter(k => !known.has(k))
+      .concat([...subRoots].filter(k => !known.has(k)))
     if (unmapped.length) {
       return {
         level: 'warn',
@@ -1276,6 +1336,12 @@ function handleSave() {
 .chip-generated:hover { background: #fff4e6; border-color: #e8590c; }
 .chip-generated .chip-src { background: #fff0e0; color: #d9480f; }
 .dragvar-empty { font-size: 12px; color: #adb5bd; }
+/* 子字段展开箭头 ▾：点击弹出该域下一级子字段列表，精准插入 {域[子键]} */
+.chip-caret {
+  margin-left: 2px; padding: 0 3px; border-radius: 6px; cursor: pointer;
+  font-size: 11px; color: #4263eb; background: #e7f0ff; line-height: 1.4;
+}
+.chip-caret:hover { background: #4263eb; color: #fff; }
 .var-group--auto .var-group-hint { color: #2b8a3e; }
 .content-var-hint.warn { color: #b45309; background: #fff3bf; }
 .content-var-hint.ok { color: #2b8a3e; background: #ebfbee; }
@@ -1409,5 +1475,31 @@ function handleSave() {
   color: #495057; background: #f8f9fa; white-space: pre-wrap;
   word-break: break-all; max-height: 240px; overflow-y: auto; line-height: 1.65;
   border-top: 1px solid #dee2e6;
+}
+</style>
+
+<!-- 子字段选择弹层（el-popover 内容 teleport 到 body，需非 scoped 全局样式） -->
+<style>
+.subfield-pop { padding: 6px !important; }
+.subfield-panel { max-height: 300px; overflow-y: auto; }
+.subfield-head {
+  font-size: 11px; color: #868e96; padding: 2px 6px 6px;
+  border-bottom: 1px dashed #e4e7ed; margin-bottom: 4px; line-height: 1.5;
+}
+.subfield-head-note { color: #2b8a3e; font-size: 10.5px; }
+.subfield-row {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  padding: 5px 8px; border-radius: 6px; font-size: 12px; user-select: none;
+}
+.subfield-row:hover { background: #eef2ff; }
+.subfield-row:active { cursor: grabbing; }
+.subfield-name { font-weight: 600; color: #1c4ed8; flex-shrink: 0; }
+.subfield-path {
+  font-family: monospace; font-size: 11px; color: #adb5bd;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.subfield-sample {
+  margin-left: auto; font-size: 11px; color: #2b8a3e;
+  background: #ebfbee; border-radius: 8px; padding: 1px 6px; flex-shrink: 0;
 }
 </style>

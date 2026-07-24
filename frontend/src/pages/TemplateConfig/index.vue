@@ -49,7 +49,7 @@
               <td>
                 <span v-if="!t._product_ids || !t._product_ids.length">—</span>
                 <span v-else>
-                  {{ flatProductIds(t).slice(0,3).join(', ') }}<span v-if="flatProductIds(t).length > 3" style="color:var(--muted)"> 等{{ flatProductIds(t).length }}个</span>
+                  {{ t._product_ids.slice(0,3).join(', ') }}<span v-if="t._product_ids.length > 3" style="color:var(--muted)"> 等{{ t._product_ids.length }}个</span>
                 </span>
               </td>
               <td>{{ t.stage || '—' }}</td>
@@ -657,17 +657,6 @@ function mergeByGroup(items) {
   return [...map.values()]
 }
 
-/** 展平 product_id 列表：product_id 可能是逗号分隔的多个 ID（如 "A,B,C"），拆分为独立元素 */
-function flatProductIds(t) {
-  if (!t._product_ids || !t._product_ids.length) return []
-  const result = []
-  for (const p of t._product_ids) {
-    if (p) result.push(...p.split(',').map(s => s.trim()).filter(Boolean))
-  }
-  // 去重
-  return result.filter((v, i, arr) => arr.indexOf(v) === i)
-}
-
 function resetFilters() {
   Object.assign(filter, { name:'', stage:'', scene:'', status:'', province:'' })
   loadTemplates()
@@ -739,7 +728,7 @@ function viewTemplate(tpl) {
     <div class="detail-row"><span class="detail-label">应用省份</span><span class="detail-value">${esc(provMap[tpl.province] || tpl.province || '—')}</span></div>
     <div class="detail-row"><span class="detail-label">应用环节</span><span class="detail-value">${esc(tpl.stage || '—')}</span></div>
     <div class="detail-row"><span class="detail-label">应用场景</span><span class="detail-value">${esc(tpl.scene || '—')}</span></div>
-    <div class="detail-row"><span class="detail-label">产品 ID</span><span class="detail-value">${esc((tpl._product_ids && tpl._product_ids.length) ? flatProductIds(tpl).join('\n') : (tpl.product_id || '（兜底模板）'))}</span></div>
+    <div class="detail-row"><span class="detail-label">产品 ID</span><span class="detail-value">${esc((tpl._product_ids && tpl._product_ids.length) ? tpl._product_ids.join('\n') : (tpl.product_id || '（兜底模板）'))}</span></div>
     <div class="detail-row"><span class="detail-label">模板内容</span><span class="detail-value code">${esc(tpl.template_content || '—')}</span></div>
     <div class="detail-row"><span class="detail-label">关联变量</span><span class="detail-value">${esc(linkedVars)}</span></div>
     <div class="detail-row"><span class="detail-label">话术要求</span><span class="detail-value code">${esc(tpl.script_requirement || '—')}</span></div>

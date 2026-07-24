@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import re
 import unittest
+import unittest.mock
 from typing import Any, Dict, List, Optional
 
 from engine.prompt_builder import (
@@ -294,8 +295,8 @@ class _OraclePromptStep(ScriptStep):  # type: ignore[misc]
             ]
             if context_lines:
                 lines.append(
-                    "【上下文数据】（经接口映射得到的真实用户与套餐数据，"
-                    "是你唯一可依据的事实来源，请勿使用未在此列出的信息）"
+                    "【上下文数据】（均为最终可直接引用的参数值：接口出参已按映射规则完成字段重命名与单位换算，"
+                    "直传字段为主服务入参原值；是你唯一可依据的事实来源，请勿使用未在此列出的信息）"
                 )
                 lines.extend(context_lines)
             if template_text:
@@ -308,13 +309,33 @@ class _OraclePromptStep(ScriptStep):  # type: ignore[misc]
                 "2. 若某项信息缺失、为空或为 0，则跳过对应表述，既不提及、也不得用其他字段的值代替"
                 "（例如语音为 0 则不谈语音；优惠月数为 0 则表述为“连续包月”而非“连续 0 个月”）。\n"
                 "3. 占位符对应关系：【上下文数据】每行已用 {占位符} 标注其对应的槽位，"
-                "请将【话术模板】中出现的同名 {占位符} 替换为该行的事实值（按语义就近对应，不要张冠李戴）；"
+                "请将【话术模板】中出现的同名 {占位符} 替换为该行的事实值（含 {域[子键]} 形式的子字段占位符，"
+                "须整串同名精确对应）；严禁串填：尤其不得用套餐内包含量（套餐流量/语音额度/月费）"
+                "冒充历史使用量（月均流量/主叫时长/月均消费），反之亦然；"
+                "若该行事实包含多个指标（如历史用量、用户标签），不得原样罗列、也不得因内容多而整体略过该槽位，"
+                "应提炼其中最能支撑推荐理由的 1-3 个要点，口语化融入话术"
+                "（如“您月均流量已达37GB、接近饱和”）；"
                 "模板中出现但【上下文数据】未列出的占位符按第 2 条处理（跳过、不臆造、不串填）。\n"
                 "4. 保留话术模板的语义与结构，输出贴合用户痛点、可直接对客播报的完整话术，"
                 "最终结果不得残留任何 {} 占位符或字段名。"
             )
+            # 个性化润色规则（镜像 engine.prompt_builder._has_persona_context）
+            _persona_vars = {"tags", "user_tags", "user_profile"}
+            _persona_hints = ("style", "persona", "portrait", "性格", "画像", "风格", "偏好")
+            _has_persona = bool(emitted & _persona_vars) or any(
+                any(h in str(k).lower() for h in _persona_hints)
+                for k in (passthrough_ctx or {})
+            )
+            rule_no = 5
+            if _has_persona:
+                lines.append(
+                    f"{rule_no}. 个性化润色：结合【上下文数据】中的用户标签/画像/性格信息调整称呼、语气与卖点顺序"
+                    "（如价格敏感型客户强调优惠与性价比、流量大户强调流量升级、性格沉稳者用平实可信的措辞），"
+                    "标签与画像仅用于选择表达风格和卖点侧重，不得把标签名或画像字段名原样写进话术。"
+                )
+                rule_no += 1
             if script_requirement:
-                lines.append(f"5. 话术要求：{script_requirement}")
+                lines.append(f"{rule_no}. 话术要求：{script_requirement}")
             lines.append("请直接输出话术文本，不需要任何前缀标签：\n话术：")
             return "\n".join(lines)
 
@@ -595,6 +616,289 @@ class TestNewFormatLinkedVars(EquivalenceBase):
         self.assertIn("推荐套餐流量(GB) {pkg_flow}：30", out)
         self.assertIn("推荐套餐语音(分钟) {pkg_voice}：1000", out)
 
+    def test_persona_rule_injection_and_numbering(self) -> None:
+        """含用户标签/画像上下文 → 追加「个性化润色」规则且话术要求编号顺延为 6；
+        无标签/画像 → 不追加、编号保持 5。零配置透传兜底同场景验证。"""
+        pkg = dict(_SAMPLE_PKG)
+        # ① 有 tags：追加润色规则
+        out = self.assert_same_prompt(
+            ctx=make_ctx(),
+            pkg=pkg,
+            template_text="推荐{pkg_brief}，{usage}。",
+            linked_vars=["pkg_brief", "usage", "tags"],
+            script_requirement="150字以内",
+            field_aliases=_FIELD_ALIASES,
+        )
+        self.assertIn("5. 个性化润色", out)
+        self.assertIn("6. 话术要求：150字以内", out)
+        # ② 无标签/画像：不追加
+        ctx2 = make_ctx(tags={}, user_profile={}, extra_info={}, extra_context={})
+        out2 = self.assert_same_prompt(
+            ctx=ctx2,
+            pkg=pkg,
+            template_text="推荐{pkg_brief}。",
+            linked_vars=["pkg_brief"],
+            script_requirement="简洁",
+            field_aliases=_FIELD_ALIASES,
+        )
+        self.assertNotIn("个性化润色", out2)
+        self.assertIn("5. 话术要求：简洁", out2)
+        # ③ 多指标提炼规则文案存在
+        self.assertIn("提炼其中最能支撑推荐理由的 1-3 个要点", out)
+
+    def test_subfield_path_placeholders(self) -> None:
+        """子字段路径占位符 {域[子键]} / {域[子键1][子键2]} → 从原始域字典按路径精确取值注入，
+        锚点用完整 token 与模板同名对齐；取不到的子字段不入 Prompt。"""
+        ctx = make_ctx()
+        template = (
+            "您好！您当前套餐{current_package[offerName]}，"
+            "近6月流量约{usage[data_usage][近6月平均流量(GB)]}GB，"
+            "语音{usage[voice_usage][近6月平均主叫时长]}分钟，"
+            "标签{tags[高频高额超套客户]}，"
+            "推荐{pkg_brief[offerName]}，"
+            "缺失字段{current_package[不存在字段]}。"
+        )
+        out = build_prompt(
+            user_prompt_tpl="",
+            template_text=template,
+            ctx=ctx,
+            pkg=_SAMPLE_PKG,
+            diff=PackageDiff(ctx.current_package, _SAMPLE_PKG),
+            linked_vars=[],
+            script_requirement="150字以内",
+            field_aliases=_FIELD_ALIASES,
+        )
+        # 各子字段按完整 token 锚点 + 叶子标签注入，取值精确
+        self.assertIn("offerName {current_package[offerName]}：畅享39元套餐", out)
+        self.assertIn("近6月平均流量(GB) {usage[data_usage][近6月平均流量(GB)]}：25", out)
+        self.assertIn("近6月平均主叫时长 {usage[voice_usage][近6月平均主叫时长]}：200", out)
+        self.assertIn("高频高额超套客户 {tags[高频高额超套客户]}：是", out)
+        self.assertIn("offerName {pkg_brief[offerName]}：畅享99元套餐", out)
+        # 取不到值的子字段不注入
+        self.assertNotIn("{current_package[不存在字段]}：", out)
+        # 单级容错：usage 两级结构可用单括号命中叶子键
+        out2 = build_prompt(
+            user_prompt_tpl="", template_text="流量{usage[近6月平均流量(GB)]}",
+            ctx=ctx, pkg=_SAMPLE_PKG,
+            diff=PackageDiff(ctx.current_package, _SAMPLE_PKG),
+            linked_vars=[], field_aliases=_FIELD_ALIASES,
+        )
+        self.assertIn("{usage[近6月平均流量(GB)]}：25", out2)
+        # tags 子字段触发个性化润色规则
+        self.assertIn("个性化润色", out)
+
+    def test_subfield_bracket_fuzzy_match(self) -> None:
+        """回归（北京「用户消费信息未生效」）：映射 field_rename 产出畸形键名
+        「近6月平均流量((GB)）」（双括号+全角右括号）时，模板子键写成「((GB))」或
+        「(GB)」任一形态都必须命中同一字段——按 精确→全半角归一→去括号 canonical 三档匹配。"""
+        ctx = make_ctx(usage={
+            "data_usage": {"近6月平均流量((GB)）": 37.23, "近6月平均流量饱和度": "0.95"},
+            "voice_usage": {"近3月平均主叫时长": "100.00"},
+            "consumption": {"近6月平均月消费": "130.42"},
+        })
+        tpl = (
+            "平均消费{usage[consumption][近6月平均月消费]}元，"
+            "流量用了{usage[data_usage][近6月平均流量((GB))]}GB，"
+            "也可写{usage[data_usage][近6月平均流量(GB)]}GB，"
+            "语音{usage[voice_usage][近3月平均主叫时长]}分钟。"
+        )
+        out = build_prompt(
+            user_prompt_tpl="", template_text=tpl, ctx=ctx, pkg=_SAMPLE_PKG,
+            diff=PackageDiff(ctx.current_package, _SAMPLE_PKG),
+            linked_vars=[], field_aliases=_FIELD_ALIASES,
+        )
+        self.assertIn("{usage[consumption][近6月平均月消费]}：130.42", out)
+        self.assertIn("{usage[data_usage][近6月平均流量((GB))]}：37.23", out)
+        self.assertIn("{usage[data_usage][近6月平均流量(GB)]}：37.23", out)
+        self.assertIn("{usage[voice_usage][近3月平均主叫时长]}：100.00", out)
+
+    def test_rename_field_normalization_guard(self) -> None:
+        """保存守护：field_transform 重命名目标名中的畸形括号在保存时被规范化。"""
+        from routers.management import _normalize_field_transform_renames
+        ft = {
+            "usage.data_usage": {
+                "from": "raw_tags", "type": "filter_include",
+                "field_rename": {"近6月平均流量(MB）": "近6月平均流量((GB)）"},
+            },
+            "_unit_conversions": [
+                {"target_path": "usage.data_usage", "field": "近6月平均流量(MB）",
+                 "new_field": "近6月平均流量((GB)）", "converter": "mb_to_gb"},
+            ],
+        }
+        fixed = _normalize_field_transform_renames(ft)
+        self.assertEqual(len(fixed), 2)
+        self.assertEqual(
+            ft["usage.data_usage"]["field_rename"]["近6月平均流量(MB）"], "近6月平均流量(GB)")
+        self.assertEqual(ft["_unit_conversions"][0]["new_field"], "近6月平均流量(GB)")
+        # 已规范的名字不再改动
+        self.assertEqual(_normalize_field_transform_renames(ft), [])
+
+    def test_data_step_rename_normalizes_at_runtime(self) -> None:
+        """运行时产出防护：即使存量配置的 field_rename 目标名含畸形括号，
+        DataStep._apply_unit_convert 产出的数据键也必须是规范形态（(GB) 单括号）。"""
+        from steps.data_step import DataStep
+        data = {"近6月平均流量(MB）": 38122.17}
+        rule = {
+            "unit_convert": {"近6月平均流量(MB）": "mb_to_gb"},
+            "field_rename": {"近6月平均流量(MB）": "近6月平均流量((GB)）"},   # 畸形目标名
+        }
+        out = DataStep._apply_unit_convert(data, rule)
+        self.assertIn("近6月平均流量(GB)", out)          # 键名已规范化
+        self.assertNotIn("近6月平均流量((GB)）", out)
+        self.assertAlmostEqual(float(out["近6月平均流量(GB)"]), 37.23, places=1)
+
+    def test_publish_choke_point_normalizes_whole_config(self) -> None:
+        """写入 choke point 防护：整份 api_nodes（含多节点）保存前统一规范化重命名目标名。"""
+        from utils.field_naming import normalize_api_nodes_renames
+        api_nodes = {
+            "_meta": {"comment": "跳过下划线节点"},
+            "节点A": {
+                "field_transform": {
+                    "usage.data_usage": {
+                        "field_rename": {"近3月平均流量(MB）": "近3月平均流量((GB))"},
+                    },
+                },
+            },
+            "节点B": {"field_transform": {}},
+        }
+        fixed = normalize_api_nodes_renames(api_nodes)
+        self.assertEqual(len(fixed), 1)
+        self.assertIn("节点A", fixed[0])
+        self.assertEqual(
+            api_nodes["节点A"]["field_transform"]["usage.data_usage"]["field_rename"]["近3月平均流量(MB）"],
+            "近3月平均流量(GB)",
+        )
+        # 幂等：再跑一遍无改动
+        self.assertEqual(normalize_api_nodes_renames(api_nodes), [])
+
+    def test_guard_preserves_referenced_intermediate_slots(self) -> None:
+        """保存守护（北京事故第二形态）：field_transform 引用的中间槽位（raw_tags）
+        在新 response_extract 中缺失 → 自动保留；显式置空 = 有意删除，予以尊重。"""
+        from routers.management import _guard_response_extract
+        old_ext = {
+            "current_package": "bean.mainoffer",
+            "recommended_packages": "bean.recommend_results",
+            "raw_tags": "bean.tags",
+        }
+        ft = {
+            "usage.data_usage": {"from": "raw_tags", "type": "filter_include"},
+            "tags": {"from": "raw_tags", "type": "filter_exclude"},
+            "_unit_conversions": [],
+        }
+        # ① 智能分析回填漏掉 raw_tags 与 recommended_packages → 双双被保留
+        body_ext = {"current_package": "bean.mainoffer"}
+        new_ext, preserved = _guard_response_extract(old_ext, body_ext, ft)
+        self.assertEqual(new_ext["raw_tags"], "bean.tags")
+        self.assertEqual(new_ext["recommended_packages"], "bean.recommend_results")
+        self.assertIn("raw_tags", preserved)
+        self.assertIn("recommended_packages", preserved)
+        # ② 显式置空 = 有意删除
+        body_ext2 = {"current_package": "bean.mainoffer", "raw_tags": ""}
+        new_ext2, preserved2 = _guard_response_extract(old_ext, body_ext2, ft)
+        self.assertNotIn("raw_tags", new_ext2)
+        self.assertNotIn("raw_tags", preserved2)
+        # ③ 无 field_transform 引用的普通槽位不强留
+        new_ext3, _ = _guard_response_extract(
+            {"raw_other": "bean.other"}, {"current_package": "bean.mainoffer"}, {})
+        self.assertNotIn("raw_other", new_ext3)
+
+    def test_transform_missing_source_warns_and_prompt_flags_missing_slots(self) -> None:
+        """静默失败消除（生产 usage/tags 缺失场景端到端）：
+        ① response_extract 丢失 raw_tags → usage/tags 映射域为空（DataStep 告警，本测不断言日志）；
+        ② build_prompt 组装后，模板引用的 {usage}/{tags}/子字段槽位无数据 → 不入上下文、
+           上下文中仅有有数据的域（current_package 等），且不会用其他域的值顶替。"""
+        from steps.data_step import DataStep
+        import json as _json
+        cfg = _json.load(open(
+            "skills-runtime/beijing/套餐推荐/config/api_nodes.json", encoding="utf-8"
+        ))["北京测试接口_api"]
+        cfg = _json.loads(_json.dumps(cfg))   # 深拷贝
+        del cfg["response_extract"]["raw_tags"]   # 模拟生产 ES 丢失中间槽位
+        ds = DataStep("beijing")
+        extracted = ds._extract_fields(cfg["mock_response"], cfg)
+        resources = ds._transform_fields(extracted, cfg, cfg["mock_response"])
+        # usage/tags 静默为空（root cause 复现）
+        self.assertFalse(resources.get("usage"))
+        self.assertFalse(resources.get("tags"))
+        self.assertTrue(resources.get("current_package"))
+        # build_prompt：usage 相关槽位不入上下文，也不被套餐数据顶替
+        ctx = make_ctx(
+            current_package=resources["current_package"], usage={}, tags={},
+            user_info={}, user_profile={}, domain_ext={},
+            extra_info={}, extra_context={},
+        )
+        pkg = resources["recommended_packages"][0]
+        tpl = ("您当前{current_package}，平均消费{usage[consumption][近6月平均月消费]}元，"
+               "月均流量{usage}，标签{tags}。推荐{pkg_brief}。")
+        out = build_prompt(
+            user_prompt_tpl="", template_text=tpl, ctx=ctx, pkg=pkg,
+            diff=PackageDiff(ctx.current_package, pkg),
+            linked_vars=["current_package", "usage", "tags", "pkg_brief"],
+        )
+        self.assertNotIn("{usage}：", out)          # 空域不入上下文
+        self.assertNotIn("{tags}：", out)
+        self.assertNotIn("近6月平均月消费]}：", out)  # 子字段槽位取不到值不注入
+        self.assertIn("{current_package}：", out)
+
+    def test_publish_lint_reports_dangling_from_slot(self) -> None:
+        """保存时巡检：from 槽位不存在（E201）在 lint_api_nodes 中可检出
+        （publish_config 保存时调用同一函数并写入 result.warnings）。"""
+        from management.config_agent.linter import lint_api_nodes
+        api_nodes = {
+            "节点A": {
+                "response_extract": {"current_package": "bean.mainoffer"},   # 缺 raw_tags
+                "field_transform": {
+                    "usage.data_usage": {"from": "raw_tags", "type": "filter_include"},
+                },
+            },
+        }
+        report = lint_api_nodes(api_nodes, "beijing", "套餐推荐")
+        msgs = [i["message"] for i in report["errors"]]
+        self.assertTrue(any("raw_tags" in m for m in msgs))
+
+    def test_zero_config_passthrough(self) -> None:
+        """接口查询模式无任何映射规则 → 按同名标准域零配置透传（含 bean 层与推荐列表别名）。"""
+        from steps.data_step import DataStep
+        raw = {
+            "bean": {
+                "current_package": {"offerName": "A套餐"},
+                "recommend_results": [{"offerId": "1"}],
+            },
+            "tags": {"x": "1"},
+        }
+        out = DataStep._zero_config_passthrough(raw)
+        self.assertEqual(out["current_package"], {"offerName": "A套餐"})
+        self.assertEqual(out["recommended_packages"], [{"offerId": "1"}])
+        self.assertEqual(out["tags"], {"x": "1"})
+        self.assertEqual(DataStep._zero_config_passthrough("not a dict"), {})
+        self.assertEqual(DataStep._zero_config_passthrough({"a": 1}), {})
+
+    def test_fee_uses_executed_fee_not_name_price(self) -> None:
+        """回归：月费差须以客户【实付执行月费】(费用字段)为准，而非套餐名里的宣传标价。
+
+        北京场景：当前「128元5G畅享套餐」(initFee=128)，推荐「云宽带139元档合约方案」但其
+        实际执行月费 initFee=129（"139元档"仅为对外标价）。正确涨幅应为 129-128=+1 元，
+        而非按名字标价算的 139-128=+11 元（那会把"标价-现价"错当涨幅、虚高月费差）。
+        """
+        cur = {"offerName": "128元5G畅享套餐", "initFee": 128,
+               "offerFlow": "30", "offerVoice": "200"}
+        rec = {"offerId": "P139", "offerName": "云宽带139元档合约方案",
+               "initFee": 129, "offerFlow": "55", "offerVoice": "180", "rank": 1}
+        diff = PackageDiff(cur, rec)
+        self.assertEqual(diff.cur_fee, 128.0)
+        self.assertEqual(diff.tgt_fee, 129.0)   # 取执行价 initFee=129，非名字里的"139元档"
+        self.assertEqual(diff.fee_diff_yuan, 1.0)
+        self.assertIn("月费+1", diff.summary_str())
+        self.assertNotIn("月费+11", diff.summary_str())
+
+    def test_fee_from_name_only_when_no_fee_field(self) -> None:
+        """无任何显式费用字段时，才从套餐名解析档位价兜底。"""
+        cur = {"offerName": "神州行"}            # 无费用字段、名字无价 → None
+        rec = {"offerName": "99元套餐"}           # 无费用字段 → 从名字取 99
+        diff = PackageDiff(cur, rec)
+        self.assertIsNone(diff.cur_fee)
+        self.assertEqual(diff.tgt_fee, 99.0)
+
     def test_partial_diff_only_computable_dims(self) -> None:
         """当前套餐仅有月费（无流量/语音）→ diff_str 只含月费差异，
         不得出现「流量—」「语音—」占位。"""
@@ -667,6 +971,38 @@ class TestNewFormatLinkedVars(EquivalenceBase):
         self.assertIn("recommend_base_flow {recommend_base_flow}：20", out)
         # 透传模式下不再整包 dump extra_info
         self.assertNotIn("主服务补充信息(extra_info) {extra_info}：", out)
+
+    def test_passthrough_subfield_resolves_from_dict_field(self) -> None:
+        """透传字段为字典时，{字段[子键]} 能像映射模式一样精确取值（issue 2）。
+        取数根登记自 passthrough_context / extra_info 的顶层字典字段，纯增量，
+        不影响未使用子字段占位符的既有配置生成。"""
+        ctx = make_ctx(
+            extra_info={"portrait_style": {"communication_style": "理性简洁", "tone": "专业"}},
+            extra_context={},
+        )
+        ctx.passthrough_context = {
+            "portrait_style": {"communication_style": "理性简洁", "tone": "专业"},
+        }
+        tpl = "请用{portrait_style[communication_style]}的风格，语气{portrait_style[tone]}介绍。"
+        out = build_prompt(
+            user_prompt_tpl="", template_text=tpl, ctx=ctx, pkg=_SAMPLE_PKG,
+            diff=PackageDiff(ctx.current_package, _SAMPLE_PKG),
+            linked_vars=[],
+        )
+        # 子字段精确注入，锚点为完整 token
+        self.assertIn("{portrait_style[communication_style]}：理性简洁", out)
+        self.assertIn("{portrait_style[tone]}：专业", out)
+
+    def test_passthrough_subfield_absent_not_injected(self) -> None:
+        """无对应子字段数据时不注入、不臆造（安全）。"""
+        ctx = make_ctx(extra_info={"portrait_style": {"tone": "专业"}}, extra_context={})
+        ctx.passthrough_context = {"portrait_style": {"tone": "专业"}}
+        out = build_prompt(
+            user_prompt_tpl="", template_text="风格{portrait_style[communication_style]}。",
+            ctx=ctx, pkg=_SAMPLE_PKG, diff=PackageDiff(ctx.current_package, _SAMPLE_PKG),
+            linked_vars=[],
+        )
+        self.assertNotIn("communication_style]}：", out)
 
 
 class TestOldFormatUserPromptTpl(EquivalenceBase):
@@ -768,6 +1104,28 @@ class TestVarLabelsAndHelpers(unittest.TestCase):
                 msg=f"case={tpl_raw!r}",
             )
 
+    def test_flatten_subfields_empty_skeleton(self) -> None:
+        """透传/extra_info 骨架样例（叶子全空）：include_empty=True 时按键结构产出子字段，
+        include_empty=False（标准域映射）时仍跳过空值。对应北京「等等」全空 mock_response。"""
+        from routers.management import _flatten_domain_subfields
+
+        skeleton = {
+            "current_package": {"package_name": "", "actual_price": ""},
+            "diff": {"voice_minutes_diff": ""},
+        }
+        # 默认（映射标准域）：空值叶子被跳过 → 无子字段
+        self.assertEqual(_flatten_domain_subfields("extra_info", skeleton), [])
+        # 透传骨架：按键结构展开，token 与 build_prompt 解析一致（多层方括号）
+        subs = _flatten_domain_subfields("extra_info", skeleton, include_empty=True)
+        tokens = {s["token"] for s in subs}
+        self.assertIn("extra_info[current_package][package_name]", tokens)
+        self.assertIn("extra_info[current_package][actual_price]", tokens)
+        self.assertIn("extra_info[diff][voice_minutes_diff]", tokens)
+        # 非空值仍照常产出（不因引入 include_empty 破坏原行为）
+        subs2 = _flatten_domain_subfields(
+            "extra_info", {"a": {"b": "有值"}}, include_empty=False)
+        self.assertEqual([s["token"] for s in subs2], ["extra_info[a][b]"])
+
 
 @unittest.skipUnless(_BASELINE_AVAILABLE, f"script_step 导入失败: {_BASELINE_IMPORT_ERROR}")
 class TestPreviewPrompt(unittest.TestCase):
@@ -847,6 +1205,56 @@ class TestPreviewPrompt(unittest.TestCase):
             field_aliases={}, max_length=66,
         )
         self.assertEqual(out, expected)
+
+
+class TestRepublishLocal(unittest.TestCase):
+    """从本地标准配置整包重发布到 ES（生产事故恢复）。
+
+    不依赖真实 ES：patch publish_config 断言「读到的本地配置」被原样整包发布，
+    并覆盖本地文件缺失 / 非法类型的降级返回。
+    """
+
+    def test_read_local_config_beijing_has_raw_tags(self) -> None:
+        from services.skill_publisher import read_local_config
+        cfg = read_local_config("beijing", "套餐推荐", "api_nodes")
+        self.assertIsInstance(cfg, dict)
+        node = cfg["北京测试接口_api"]
+        # 本地标准配置必须含被 field_transform 引用的中间槽位 raw_tags
+        self.assertEqual(node["response_extract"].get("raw_tags"), "bean.tags")
+
+    def test_read_local_config_bad_inputs_return_none(self) -> None:
+        from services.skill_publisher import read_local_config
+        self.assertIsNone(read_local_config("beijing", "不存在的意图", "api_nodes"))
+        self.assertIsNone(read_local_config("beijing", "套餐推荐", "not_allowed"))
+        self.assertIsNone(read_local_config("../etc", "x", "api_nodes"))  # 路径穿越
+
+    def test_republish_local_publishes_local_config(self) -> None:
+        import services.skill_publisher as sp
+        from services.skill_publisher import PublishResult
+        captured: Dict[str, Any] = {}
+
+        def _fake_publish(province, intent, config_type, data, **kw):
+            captured["province"] = province
+            captured["config_type"] = config_type
+            captured["data"] = data
+            return PublishResult(True, "ok", version=7, es_written=True, file_written=True)
+
+        with unittest.mock.patch.object(sp, "publish_config", _fake_publish), \
+                unittest.mock.patch.object(sp, "_reload_registry", lambda *a, **k: None):
+            results = sp.republish_local("beijing", "套餐推荐", config_types=("api_nodes",))
+        self.assertTrue(results["api_nodes"].success)
+        self.assertEqual(captured["config_type"], "api_nodes")
+        # 发布的就是本地标准配置整包（含 raw_tags）
+        node = captured["data"]["北京测试接口_api"]
+        self.assertEqual(node["response_extract"].get("raw_tags"), "bean.tags")
+
+    def test_republish_local_missing_file_fails_gracefully(self) -> None:
+        import services.skill_publisher as sp
+        with unittest.mock.patch.object(sp, "publish_config") as m:
+            results = sp.republish_local("beijing", "不存在的意图", config_types=("api_nodes",))
+        self.assertFalse(results["api_nodes"].success)
+        self.assertIn("本地配置文件不存在", results["api_nodes"].message)
+        m.assert_not_called()   # 本地无文件时不应触发发布
 
 
 if __name__ == "__main__":

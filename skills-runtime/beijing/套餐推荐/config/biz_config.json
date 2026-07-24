@@ -3,7 +3,7 @@
     "default_strategy": "direct",
     "top_n": 2,
     "intent_strategies": {},
-    "max_script_length": 100,
+    "max_script_length": 150,
     "max_parallel_scripts": 3
   },
   "field_aliases": {
@@ -41,7 +41,7 @@
       "scene": "",
       "stage": "",
       "product_id": "",
-      "template_content": "您好！您当前套餐为{cur_brief}，根据您近6个月的通信消费和使用情况{usage_line}。我为您推荐{pkg_brief}套餐，{diff_str}，您只需在现有月均消费的基础上少许增加，即可享受更多权益。",
+      "template_content": "您好！您当前办理的是{current_package}。根据您近6个月的实际使用情况，{usage}，为您推荐更合适的{pkg_brief}。它的优势是{diff_str}，更贴合您的用量需求，每月仅需在现有消费上小幅增加即可升级，办理请回复1。",
       "prompt_template": "你是移动套餐营销推荐坐席。\n请基于以下用户信息和话术模板生成个性化套餐营销推荐话术：\n\n话术模板：{template_content}\n\n直接输出话术文本，不需要前缀，口语化；营销推荐话术贴合用户痛点，字数{max_length}字以内。",
       "linked_apis": [],
       "status": "online",
@@ -51,11 +51,11 @@
       "linked_vars": [
         "current_package",
         "usage",
-        "user_info",
         "pkg_brief",
-        "diff_str"
+        "diff_str",
+        "tags"
       ],
-      "script_requirement": "直接输出话术文本，不需要前缀，口语化，亲切；营销推荐话术贴合用户痛点；话术模板中需要的数据必须展示，同时可在话术模板基础上结合用户情况生成个性化的话术，但不出现饱和度数据、资源减少的数据；结合字数100字以内。",
+      "script_requirement": "直接输出话术文本，不加任何前缀，口语化、亲切，像坐席一样自然交流；紧扣用户痛点做营销推荐。\n① 必须用【上下文数据】里的真实数字体现历史用量与匹配度：说清近6个月月均实际使用流量约多少GB、通话约多少分钟，并据此说明推荐理由（如流量用量偏高、现有套餐流量不够用）。\n② 只强调升级/增加的资源与新增权益（如流量增加、宽带提速、IPTV/会员权益），绝不提及任何减少的资源（如通话分钟数下降）。\n③ 严禁出现“饱和度”“百分比”等任何指标数值，也不得出现字段名、占位符或英文键名。\n④ 月费只表述为“每月小幅增加”或具体增加金额，不得虚构优惠。\n⑤ 可结合用户标签（如融合、双卡等）调整称呼、措辞与卖点侧重做个性化，但不得把标签名原样念出。\n⑥ 全文控制在150字以内，信息完整、可直接对客播报。",
       "updated_by": "admin"
     },
     {

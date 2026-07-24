@@ -37,6 +37,7 @@ from prompt.script_generation import (
     SCRIPT_GEN_RULES,
     SCRIPT_LEGACY_USER_TEMPLATE,
     SCRIPT_OUTPUT_SUFFIX,
+    SCRIPT_PERSONA_RULE,
     SCRIPT_SYSTEM_HEADER,
     SCRIPT_TEMPLATE_HEADER,
 )
@@ -130,56 +131,35 @@ def _fmt_num(v: Any) -> str:
     return str(int(f)) if abs(f - round(f)) < 1e-9 else str(round(f, 2))
 
 
-def _try_compute_compound(expr: str, extra_info: Dict[str, Any]) -> Optional[str]:
-    """尝试解析并计算复合占位符，如 flow+giftFlow-tf。
-
-    先按原样精确匹配 extra_info key；找不到则按 + / - 拆分为多个独立变量，
-    对每个变量在 extra_info 中查找值，全部找到后按顺序运算得出结果。
-    任一变量缺失 → 返回 None（调用方应跳过整句）。
-    """
-    if not expr:
-        return None
-    # 1) 精确匹配：extra_info 里直接有这个 key
-    if isinstance(extra_info, dict) and expr in extra_info:
-        return _fmt_num(extra_info[expr])
-    # 2) 不含运算符 → 非复合占位符，交给上层处理
-    if "+" not in expr and "-" not in expr:
-        return None
-    # 3) 拆分: 按 + / - 分割，同时保留运算符顺序
-    import re as _re
-    parts = _re.split(r"([+\-])", expr)  # e.g. ['flow','+','giftFlow','-','tf']
-    values = []
-    for p in parts:
-        p = p.strip()
-        if p in ("+", "-"):
-            values.append(p)
-            continue
-        if not isinstance(extra_info, dict) or p not in extra_info:
-            return None  # 任一变量缺失 → 不计算
-        val = extra_info[p]
-        try:
-            values.append(float(val))
-        except (TypeError, ValueError):
-            return None  # 值不可运算
-    # 4) 顺序计算（纯从左到右，与模板书写顺序一致）
-    result = values[0] if isinstance(values[0], (int, float)) else 0.0
-    i = 1
-    while i < len(values):
-        op = values[i]
-        num = values[i + 1]
-        if op == "+":
-            result = result + num
-        else:
-            result = result - num
-        i += 2
-    return _fmt_num(result)
-
-
 def _script_step_cls():
     """延迟获取 ScriptStep 类（格式化工具的宿主，均为无实例状态的 static/classmethod）。"""
     from steps.script_step import ScriptStep
 
     return ScriptStep
+
+
+# ── 个性化润色触发判定 ───────────────────────────────────────────
+
+# 标签/画像类标准域变量（任一被注入上下文即触发润色规则）
+_PERSONA_VAR_KEYS = frozenset({"tags", "user_tags", "user_profile"})
+# 直传透传字段名中的性格/画像特征词（如 communication_style / portrait_style 展开的子字段）
+_PERSONA_KEY_HINTS = ("style", "persona", "portrait", "性格", "画像", "风格", "偏好")
+
+
+def _has_persona_context(emitted: set, passthrough_ctx: Dict[str, Any]) -> bool:
+    """已注入的上下文中是否包含用户标签/画像/性格类信息（决定是否追加润色规则）。"""
+    if emitted & _PERSONA_VAR_KEYS:
+        return True
+    # 子字段占位符（tags[xxx] / user_profile[xxx]）也算标签/画像类
+    for e in emitted:
+        root = str(e).split("[", 1)[0]
+        if root in _PERSONA_VAR_KEYS:
+            return True
+    for k in (passthrough_ctx or {}):
+        lk = str(k).lower()
+        if any(h in lk for h in _PERSONA_KEY_HINTS):
+            return True
+    return False
 
 
 # ── Prompt 构造（迁移自 ScriptStep，逐行等价） ─────────────────────
@@ -212,6 +192,79 @@ def _fmt_passthrough_value(v: Any) -> str:
         except (TypeError, ValueError):
             return str(v)
     return str(v)
+
+
+# ── 子字段路径占位符（{域[子键]} / {域[子键1][子键2]}）────────────────
+# 允许话术模板精确引用某个标准域字典下的具体字段（而非整块 JSON），实现字段级槽位对齐，
+# 让「入参字段 → 模板槽位」的匹配更精准。语法用方括号包裹子键（子键可含中文 / 括号 / 点号，
+# 方括号作边界比点号更稳），与前端调色板「展开域选子字段」插入的 token 完全一致。
+#   例：{usage[data_usage][近6月平均流量(GB)]}  {current_package[offerName]}  {tags[融合状态]}
+_SUBFIELD_TOKEN_RE = re.compile(r"\{(\w+)((?:\[[^\[\]]+\])+)\}")
+
+
+# 全角括号/空格 → 半角（键名归一第一档）
+_KEY_BRACKET_TRANS = str.maketrans({"（": "(", "）": ")", "【": "[", "】": "]", "　": " "})
+
+
+def _canon_key(s: str) -> str:
+    """键名归一第二档：去掉全部括号与空白，仅留核心文字。
+    「近6月平均流量((GB)）」「近6月平均流量(GB)」「近6月平均流量((GB))」→ 同一 canonical，
+    容忍接口映射 field_rename 产出的括号错乱（全/半角混用、双括号）与模板手写差异。"""
+    return re.sub(r"[()（）\[\]【】\s]+", "", str(s))
+
+
+def _dict_fuzzy_get(d: Dict[str, Any], key: str) -> Any:
+    """dict 取值三档匹配：精确 → 全/半角括号归一相等 → 去括号 canonical 相等。
+    保证映射后字段名与模板子键在括号形态不一致时仍能命中；取不到返回 None。"""
+    if key in d:
+        return d[key]
+    nk = str(key).translate(_KEY_BRACKET_TRANS)
+    for k, v in d.items():
+        if str(k).translate(_KEY_BRACKET_TRANS) == nk:
+            return v
+    ck = _canon_key(key)
+    if ck:
+        for k, v in d.items():
+            if _canon_key(k) == ck:
+                return v
+    return None
+
+
+def _subfield_get_child(obj: Any, key: str) -> Any:
+    """按单个子键取值：dict 三档模糊匹配；缺失时下探一层嵌套子字典
+    （容忍 usage 两级结构写成单级）；list 支持数字下标，或在成员 dict 中按键搜索。
+    取不到返回 None。"""
+    if isinstance(obj, dict):
+        v = _dict_fuzzy_get(obj, key)
+        if v is not None:
+            return v
+        for child in obj.values():
+            if isinstance(child, dict):
+                v = _dict_fuzzy_get(child, key)
+                if v is not None:
+                    return v
+        return None
+    if isinstance(obj, list):
+        try:
+            return obj[int(key)]
+        except (ValueError, IndexError):
+            pass
+        for item in obj:
+            if isinstance(item, dict):
+                v = _dict_fuzzy_get(item, key)
+                if v is not None:
+                    return v
+    return None
+
+
+def _subfield_walk(root_obj: Any, keys: List[str]) -> Any:
+    """按子键序列逐级下钻，任一级取不到即返回 None。"""
+    cur = root_obj
+    for k in keys:
+        cur = _subfield_get_child(cur, k)
+        if cur is None:
+            return None
+    return cur
 
 
 def append_prompt_extra_suffix(
@@ -262,7 +315,6 @@ def build_prompt(
         pkg_brief = step._fmt_package(pkg, fa)
     diff_str     = diff.summary_str()
     template_ref = re.sub(r"\{[^{}]+\}", "", template_text or "").strip()
-    template_ref = re.sub(r"\[[^\[\]]+\]", "", template_ref).strip()
 
     # 批量模式：用条目级 extra_info（已合并全局）；单条模式：用 ctx.extra_info
     effective_extra_info = extra_info_override if extra_info_override is not None else ctx.extra_info
@@ -309,11 +361,8 @@ def build_prompt(
                 return _fmt_passthrough_value(effective_extra_info.get(var_key))
             return ""
 
-        # 模板实际使用的占位符 token（锚点对齐依据），兼容 {变量} / [变量] / {a+b-c} 格式
-        tpl_tokens: List[str] = (
-            re.findall(r"\{([\w+\-]+)\}", template_text or "")
-            + re.findall(r"\[([\w+\-]+)\]", template_text or "")
-        )
+        # 模板实际使用的占位符 token（锚点对齐依据）
+        tpl_tokens: List[str] = re.findall(r"\{(\w+)\}", template_text or "")
         tpl_token_set = set(tpl_tokens)
 
         def _anchor_for(var_key: str) -> str:
@@ -353,15 +402,12 @@ def build_prompt(
             emitted.update(_var_alias_group(var_key))
             emitted.add(var_key)
             emitted.add(anchor)
-        # 直传透传通道：仅注入模板中实际引用的字段，模板未使用的字段不展示，
-        # 避免 LLM 看到模板不需要的裸数据后随意借用（如把 flowStandard=5 当成"5GB流量"）。
+        # 直传透传通道：把接口配置（direct_mode=passthrough）选定的入参字段逐条注入，
+        # 不依赖模板占位符风格（{xx} 或 **（xx）均可），确保【上下文数据】完整展示透传入参。
         passthrough_ctx = getattr(ctx, "passthrough_context", None) or {}
         if isinstance(passthrough_ctx, dict):
             for pk, pv in passthrough_ctx.items():
                 if pk in emitted:
-                    continue
-                # 只注入模板占位符中实际引用的字段，其余跳过
-                if pk not in tpl_token_set:
                     continue
                 val = _fmt_passthrough_value(pv)
                 if val.strip() == "":
@@ -392,13 +438,6 @@ def build_prompt(
                     emitted.add(token)
                     continue
                 if not isinstance(effective_extra_info, dict) or token not in effective_extra_info:
-                    # 复合占位符（如 flow+giftFlow-tf）：尝试从 extra_info 拆分计算
-                    if "+" in token or "-" in token:
-                        result = _try_compute_compound(token, effective_extra_info or {})
-                        if result is not None:
-                            label = VAR_LABELS.get(token, token)
-                            context_lines.append(f"{label} {{{token}}}：{result}")
-                            emitted.add(token)
                     continue
                 val = _fmt_passthrough_value(effective_extra_info.get(token))
                 if val.strip() == "":
@@ -406,6 +445,51 @@ def build_prompt(
                 label = VAR_LABELS.get(token, token)
                 context_lines.append(f"{label} {{{token}}}：{val}")
                 emitted.add(token)
+        # 子字段路径占位符：{域[子键]…} → 从「原始域字典」按路径精确取值，字段级注入。
+        # 原始域取自 ctx.resource_context（已过 field_transform/单位换算，键名=运行态映射后名），
+        # 推荐条取自 pkg，直传取自 effective_extra_info；锚点用完整 token，与模板严格同名对齐。
+        if template_text and "[" in template_text:
+            _rc = ctx.resource_context if isinstance(
+                getattr(ctx, "resource_context", None), dict) else {}
+            _subfield_roots: Dict[str, Any] = {
+                "current_package": _rc.get("current_package"),
+                "cur_brief": _rc.get("current_package"),
+                "cur_name": _rc.get("current_package"),
+                "usage": _rc.get("usage"),
+                "usage_line": _rc.get("usage"),
+                "tags": _rc.get("tags"),
+                "user_tags": _rc.get("tags"),
+                "user_info": _rc.get("user_info"),
+                "user_profile": _rc.get("user_profile"),
+                "domain_ext": _rc.get("domain_ext"),
+                "pkg_brief": pkg,
+                "pkg_name": pkg,
+                "recommended_package": pkg,
+                "extra_info": effective_extra_info,
+            }
+            # 直传/透传子字段支持：把透传字段与 extra_info 的「顶层字典字段」也登记为子字段根，
+            # 使 {字段名[子键]} 能像映射模式一样精确取值（参考映射模式填槽）。纯增量：
+            # 仅对模板显式写出的子字段 token 生效，不改变既有整块/标量字段的注入行为。
+            for _src in (passthrough_ctx, effective_extra_info):
+                if isinstance(_src, dict):
+                    for _fk, _fv in _src.items():
+                        if (isinstance(_fk, str) and not _fk.startswith("_")
+                                and isinstance(_fv, dict) and _fk not in _subfield_roots):
+                            _subfield_roots[_fk] = _fv
+            for _m in _SUBFIELD_TOKEN_RE.finditer(template_text):
+                _token = _m.group(0)[1:-1]          # 去花括号：root[k1][k2]
+                if _token in emitted:
+                    continue
+                _root = _m.group(1)
+                if _root not in _subfield_roots:
+                    continue
+                _keys = re.findall(r"\[([^\[\]]+)\]", _m.group(2))
+                _sval = _fmt_passthrough_value(_subfield_walk(_subfield_roots.get(_root), _keys))
+                if _sval.strip() == "":
+                    continue   # 取不到值的子字段不入 Prompt，避免模型对空槽臆造
+                _leaf_label = _keys[-1] if _keys else _root
+                context_lines.append(f"{_leaf_label} {{{_token}}}：{_sval}")
+                emitted.add(_token)
         # 主服务直传：未在关联变量中显式勾选时，仍注入非空的 extra_info / extra_context
         # 透传模式（passthrough_ctx 非空）下已逐字段展示，跳过整包 JSON 以免冗余。
         if "extra_info" not in emitted and ei_txt and not passthrough_ctx:
@@ -413,38 +497,27 @@ def build_prompt(
         if "extra_context" not in emitted and ec_txt:
             context_lines.append(f"{VAR_LABELS['extra_context']} {{extra_context}}：{ec_txt}")
 
-        # 清理模板正文中未被解析的占位符（简单或复合）：直接移除所在整句话，
-        # 避免 LLM 看到无值可填的占位符后张冠李戴（如把 internetAge=20 填到 totalFlow 里）。
-        if template_text:
-            import re as _re2
-            for token in tpl_tokens:
-                if token in emitted:
-                    continue
-                # 未解析的占位符 → 移除包含它的当前分句（以逗号/句号等为界）
-                _escaped = _re2.escape(token)
-                template_text = _re2.sub(
-                    rf"[^。！？\n，,]*[\{{\[]\s*{_escaped}\s*[\}}\]][^。！？\n，,]*[。！？\n，,，]?",
-                    "",
-                    template_text,
-                )
-            # 清理残留的句首/句尾标点与空白
-            template_text = _re2.sub(r'^[，,、。！？\s]+', '', template_text.strip())
-            template_text = _re2.sub(r'[，,、\s]+$', '', template_text)
-            # 模板所有句子均因占位符数据缺失被清除 → 返回空，
-            # 由调用方跳过 LLM 直接使用降级话术
-            if not template_text:
-                return ""
-            # 回扫：清理后模板里还剩下哪些占位符，上下文里也同步裁剪，
-            # 避免 internetAge 等被注入但对应句子因同句其他占位符缺失一并移除后，
-            # 变成孤立的"僵尸数据"游离在上下文中被 LLM 误用
-            remaining_tokens = set(
-                re.findall(r"\{([\w+\-]+)\}", template_text)
-                + re.findall(r"\[([\w+\-]+)\]", template_text)
+        # ── 槽位缺数据可观测性 ──────────────────────────────────
+        # 模板引用的「事实类」占位符（标准域/派生变量/子字段路径）若最终没有对应的
+        # 上下文数据行，模型将按规则 2 跳过甚至串填（生产曾出现拿套餐包含量冒充历史
+        # 用量）。此前完全静默，这里统一告警，便于在省份日志中直接定位缺数据的域。
+        _missing_slots: List[str] = []
+        for token in tpl_token_set:
+            if token in emitted or token not in _INJECTABLE_KNOWN:
+                continue
+            _missing_slots.append(token)
+        if template_text and "[" in template_text:
+            for _m in _SUBFIELD_TOKEN_RE.finditer(template_text):
+                _tok = _m.group(0)[1:-1]
+                if _tok not in emitted:
+                    _missing_slots.append(_tok)
+        if _missing_slots:
+            logger.warning(
+                f"[build_prompt] {getattr(ctx, 'province', '')}/{getattr(ctx, 'intent', '')} "
+                f"话术模板引用的槽位无上下文数据（将被跳过，勿被其他字段串填）: "
+                f"{sorted(_missing_slots)}；已注入={sorted(k for k in emitted if isinstance(k, str))}。"
+                f"请检查接口映射（response_extract/field_transform）与接口响应数据"
             )
-            context_lines = [
-                line for line in context_lines
-                if any(tok in remaining_tokens for tok in re.findall(r"\{([\w+\-]+)\}", line) + re.findall(r"\[([\w+\-]+)\]", line))
-            ]
 
         # 2) 分段拼装
         lines: List[str] = [SCRIPT_SYSTEM_HEADER]
@@ -455,8 +528,13 @@ def build_prompt(
             lines.append(SCRIPT_TEMPLATE_HEADER)
             lines.append(template_text)
         lines.append(SCRIPT_GEN_RULES)
+        # 个性化润色规则：上下文含用户标签/画像/性格类信息时自动追加（编号顺延）
+        rule_no = 5
+        if _has_persona_context(emitted, passthrough_ctx):
+            lines.append(f"{rule_no}. {SCRIPT_PERSONA_RULE}")
+            rule_no += 1
         if script_requirement:
-            lines.append(f"5. 话术要求：{script_requirement}")
+            lines.append(f"{rule_no}. 话术要求：{script_requirement}")
         lines.append(SCRIPT_OUTPUT_SUFFIX)
         return "\n".join(lines)
 

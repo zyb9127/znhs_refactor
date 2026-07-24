@@ -88,26 +88,32 @@ _ASSETS_PROD_DIR = _DIST_PROD_DIR / "assets"
 async def lifespan(app: FastAPI):
     """应用生命周期钩子：startup → yield → shutdown。"""
     from utils.config_loader import config_loader
+    from utils.skill_runtime import IS_DEV
 
     logger.info(f"🚀 启动环境: {ENV.upper()}  前缀: {SERVICE_PREFIX}  鉴权: {_AUTH_ENABLED}")
 
-    # ── 1. 初始化 ES 配置存储 ──────────────────────────────────
-    es_cfg = config_loader.get("elasticsearch")
-    if es_cfg:
-        try:
-            from services.es_config_store import es_config_store
-            es_config_store.init(es_cfg)
-        except Exception as e:
-            logger.warning(f"⚠️ ES 配置存储初始化失败（不影响启动）: {e}")
-
-    # ── 2. 初始化 Redis 配置总线 ───────────────────────────────
+    # 开发模式（app.environment=development）：跳过 ES/Redis 直连，配置读写走本地文件。
+    # 否则本机连不到内网 ES（172.19.89.x:9211）会每节点 5s 超时 × 重试，拖慢启动并刷大量堆栈。
     redis_bus_cfg = config_loader.get("redis_bus")
-    if redis_bus_cfg:
-        try:
-            from services.redis_config_bus import redis_config_bus
-            redis_config_bus.init(redis_bus_cfg)
-        except Exception as e:
-            logger.warning(f"⚠️ Redis 配置总线初始化失败（不影响启动）: {e}")
+    if IS_DEV:
+        logger.info("🛠 开发模式：跳过 ES 配置存储 / Redis 配置总线初始化（配置走本地文件）")
+    else:
+        # ── 1. 初始化 ES 配置存储 ──────────────────────────────────
+        es_cfg = config_loader.get("elasticsearch")
+        if es_cfg:
+            try:
+                from services.es_config_store import es_config_store
+                es_config_store.init(es_cfg)
+            except Exception as e:
+                logger.warning(f"⚠️ ES 配置存储初始化失败（不影响启动）: {e}")
+
+        # ── 2. 初始化 Redis 配置总线 ───────────────────────────────
+        if redis_bus_cfg:
+            try:
+                from services.redis_config_bus import redis_config_bus
+                redis_config_bus.init(redis_bus_cfg)
+            except Exception as e:
+                logger.warning(f"⚠️ Redis 配置总线初始化失败（不影响启动）: {e}")
 
     # ── 3. 加载技能包（从 ES/Redis 或本地文件）────────────────
     skill_registry.initialize()

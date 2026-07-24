@@ -1,5 +1,10 @@
 {
-  "北京测试接口_api": {
+  "_说明": [
+    "北京套餐推荐 完整接口节点配置（以本地 skills-runtime 为标准）",
+    "节点名：北京测试接口_api",
+    "如需整体覆盖：PUT 同一地址，body 为下方 node 字段内容"
+  ],
+  "node": {
     "enabled": true,
     "_comment": "营销推荐话术获取接口",
     "url": "http://restapi.ngcrmpfcore-bj.cs.bj.cmos:8080/ngcrmpfcore_bj/csf/business/productRecommend",
@@ -23,9 +28,9 @@
       }
     },
     "response_extract": {
+      "raw_tags": "bean.tags",
       "current_package": "bean.mainoffer",
-      "recommended_packages": "bean.recommend_results",
-      "raw_tags": "bean.tags"
+      "recommended_packages": "bean.recommend_results"
     },
     "field_transform": {
       "usage.data_usage": {
@@ -43,8 +48,8 @@
           "近6月平均流量(MB）": "mb_to_gb"
         },
         "field_rename": {
-          "近3月平均流量(MB）": "近3月平均流量(GB)",
-          "近6月平均流量(MB）": "近6月平均流量(GB)"
+          "近3月平均流量(MB）": "近3月平均流量((GB)）",
+          "近6月平均流量(MB）": "近6月平均流量((GB)）"
         }
       },
       "usage.voice_usage": {
@@ -56,7 +61,11 @@
           "近3月平均语音饱和度",
           "近3月平均主叫时长",
           "近6月平均主叫时长"
-        ]
+        ],
+        "unit_convert": {
+          "近3月平均主叫时长": "fen_to_yuan",
+          "近6月平均主叫时长": "fen_to_yuan"
+        }
       },
       "usage.consumption": {
         "from": "raw_tags",
@@ -92,16 +101,30 @@
         {
           "target_path": "usage.data_usage",
           "field": "近3月平均流量(MB）",
-          "new_field": "近3月平均流量(GB)",
+          "new_field": "近3月平均流量((GB)）",
           "converter": "mb_to_gb",
-          "desc": ""
+          "desc": "用户近3个月平均流量用量（单位：MB）"
         },
         {
           "target_path": "usage.data_usage",
           "field": "近6月平均流量(MB）",
-          "new_field": "近6月平均流量(GB)",
+          "new_field": "近6月平均流量((GB)）",
           "converter": "mb_to_gb",
-          "desc": ""
+          "desc": "用户近6个月平均流量用量（单位：MB）"
+        },
+        {
+          "target_path": "usage.voice_usage",
+          "field": "近3月平均主叫时长",
+          "new_field": "近3月平均主叫时长",
+          "converter": "fen_to_yuan",
+          "desc": "用户近3个月平均主叫时长（单位：分钟）"
+        },
+        {
+          "target_path": "usage.voice_usage",
+          "field": "近6月平均主叫时长",
+          "new_field": "近6月平均主叫时长",
+          "converter": "fen_to_yuan",
+          "desc": "用户近6个月平均主叫时长（单位：分钟）"
         }
       ]
     },
@@ -194,9 +217,6 @@
       },
       "beans": [],
       "object": null
-    },
-    "source_type": "api",
-    "updated_by": "admin",
-    "updated_at": "2026-07-22 17:06:49"
+    }
   }
 }

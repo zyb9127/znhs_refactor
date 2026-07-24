@@ -34,6 +34,13 @@ router = APIRouter(tags=["运营管理"])
 # 收尾修复 F2 后失败即状态完全不变（不再更新本实例内存），可放心重试
 _SAVE_FAIL_MSG = "配置保存失败：外部存储不可用（本次更改未生效，可修复后重试），请联系管理员检查 ES/Redis"
 
+# 7 大标准数据域（与 steps/data_step.py 的 _NODE_TO_CTX_FIELD 保持一致）
+# 用于「标准域映射防丢失」守护：见 update_interface
+STD_DOMAIN_KEYS = frozenset({
+    "current_package", "usage", "tags", "user_info",
+    "recommended_packages", "user_profile", "domain_ext",
+})
+
 
 def _lint_template_safe(template: Dict[str, Any], province: str, intent: str) -> Optional[Dict[str, Any]]:
     """对单条模板执行 lint（延迟 import，任何异常吞掉，不影响主流程）。"""
@@ -178,6 +185,83 @@ def _computed_var_availability(province: str, intent: str) -> Dict[str, bool]:
     return avail
 
 
+# 标准域变量 key → 该域在「示例上下文」(_build_sample_ctx_from_skill) 中对应的原始字典 key。
+# 用于把域的下一级子字段推导成可精确引用的占位符（{域[子键]}），供调色板展开选择。
+_SUBFIELD_ROOT_TO_SAMPLE: Dict[str, str] = {
+    "current_package": "current_package",
+    "usage": "usage",
+    "tags": "tags",
+    "user_info": "user_info",
+    "user_profile": "user_profile",
+    "domain_ext": "domain_ext",
+    "pkg_brief": "recommended_package",
+    "extra_info": "extra_info",
+}
+
+
+def _flatten_domain_subfields(
+    root_key: str, obj: Any, prefix: Optional[List[str]] = None,
+    out: Optional[List[Dict[str, Any]]] = None, depth: int = 0,
+    include_empty: bool = False,
+) -> List[Dict[str, Any]]:
+    """把某个标准域字典递归拍平成「可精确引用的子字段占位符」列表。
+
+    返回每项：{"token": "usage[data_usage][近6月平均流量(GB)]", "label": "近6月平均流量(GB)",
+              "path": "data_usage.近6月平均流量(GB)", "sample": 35}
+    - 标量叶子 → 生成一条占位符（token 用方括号包裹每级子键，与 build_prompt 解析一致）
+    - 跳过 _ 开头键、列表（下标不稳定），最多下钻 3 层
+    - include_empty=False（默认，映射模式标准域）：跳过空值叶子，避免展示「样例下注定取不到值」的子字段；
+      include_empty=True（透传/extra_info 骨架样例）：空值叶子仍按「键结构」产出占位符——
+      因为透传样例常是全空骨架（仅声明字段存在，值运行时才有），此时结构才是关键。
+    """
+    out = [] if out is None else out
+    prefix = prefix or []
+    if not isinstance(obj, dict) or depth > 3:
+        return out
+    for k, v in obj.items():
+        if not isinstance(k, str) or k.startswith("_"):
+            continue
+        keys = prefix + [k]
+        if isinstance(v, dict):
+            _flatten_domain_subfields(root_key, v, keys, out, depth + 1, include_empty)
+        elif isinstance(v, list):
+            continue
+        else:
+            if v in (None, "") and not include_empty:
+                continue
+            token = root_key + "".join(f"[{kk}]" for kk in keys)
+            out.append({
+                "token": token,
+                "label": keys[-1],
+                "path": ".".join(keys),
+                "sample": v,
+            })
+    return out
+
+
+def _compute_domain_subfields(province: str, intent: str) -> Dict[str, List[Dict[str, Any]]]:
+    """按该技能的接口 mock 映射样例，推导各标准域可选子字段（供调色板展开）。
+
+    复用 _build_sample_ctx_from_skill：其产出已过 response_extract/field_transform（含单位换算、
+    字段重命名），故子字段键名 = 运行态映射后名，保证「调色板可选项 == 运行时可取值」精准一致。
+    无技能 / 无 mock 时返回空 dict，前端仅展示整块域（向后兼容）。
+    """
+    sample = _build_sample_ctx_from_skill(province, intent)
+    if not isinstance(sample, dict) or not sample:
+        return {}
+    result: Dict[str, List[Dict[str, Any]]] = {}
+    for var_key, sample_key in _SUBFIELD_ROOT_TO_SAMPLE.items():
+        dom = sample.get(sample_key)
+        if isinstance(dom, dict) and dom:
+            # extra_info（主服务补充信息/直传骨架）常为全空样例，按键结构展开；
+            # 其余标准域（映射产出）保持跳过空值，避免展示注定取不到值的子字段。
+            subs = _flatten_domain_subfields(
+                var_key, dom, include_empty=(var_key == "extra_info"))
+            if subs:
+                result[var_key] = subs
+    return result
+
+
 @router.get("/api/skills/{province}/{intent}/context_vars")
 async def get_context_vars(province: str, intent: str):
     """从 api_nodes.json 推导该意图下所有可用的 context 变量列表。
@@ -265,6 +349,9 @@ async def get_context_vars(province: str, intent: str):
         "table":           ("差异表格",        "（仅话术展示，不打入LLM）"),
     }
 
+    # 各标准域可选子字段（{域[子键]}），按接口 mock 映射样例推导，供调色板展开精确匹配
+    subfields_map = _compute_domain_subfields(province, intent)
+
     result = []
     seen = set()
 
@@ -274,10 +361,13 @@ async def get_context_vars(province: str, intent: str):
             continue
         seen.add(key)
         label, desc = _META.get(key, (key, f"{{context.{key}}}"))
-        result.append({
+        item = {
             "key": key, "label": label, "source": source, "desc": desc,
             "api_names": api_producers.get(key, []),
-        })
+        }
+        if subfields_map.get(key):
+            item["subfields"] = subfields_map[key]
+        result.append(item)
 
     # 直传透传字段（入参字段直接作为 context，供话术模板引用 {字段名}）
     for key in passthrough_keys:
@@ -285,11 +375,21 @@ async def get_context_vars(province: str, intent: str):
             continue
         seen.add(key)
         label, desc = _META.get(key, (key, "直传入参字段"))
-        result.append({
+        item = {
             "key": key, "label": label, "source": "passthrough", "desc": desc,
             "sample": passthrough_samples.get(key),
             "api_names": passthrough_producers.get(key, []),
-        })
+        }
+        # 透传字段若为字典（如 portrait_style），拍平其子字段供调色板展开精确匹配
+        # （{字段[子键]}），与映射模式一致；子键名取自 mock_response 样例。
+        _sample = passthrough_samples.get(key)
+        if isinstance(_sample, dict) and _sample:
+            # 透传样例常为全空骨架（仅声明字段结构），故按键结构展开（include_empty），
+            # 使 {extra_info[current_package][package_name]} 这类子字段可选。
+            _subs = _flatten_domain_subfields(key, _sample, include_empty=True)
+            if _subs:
+                item["subfields"] = _subs
+        result.append(item)
 
     # pkg_brief / diff_str / pkg_fee 等是话术生成层计算产出；附 available 标志，
     # 供前端隐藏「该技能样例下注定取不到值」的计算变量（避免拖入后生成 xx/空值）
@@ -298,17 +398,24 @@ async def get_context_vars(province: str, intent: str):
         if key not in seen:
             seen.add(key)
             label, desc = _META[key]
-            result.append({
+            item = {
                 "key": key, "label": label, "source": "script_step", "desc": desc,
                 "available": computed_avail.get(key, True),
-            })
+            }
+            # pkg_brief 支持展开推荐条子字段（{pkg_brief[offerName]} 等）
+            if subfields_map.get(key):
+                item["subfields"] = subfields_map[key]
+            result.append(item)
 
     # 固定变量（主服务传入 / 通用）
     for key in ("user_info", "user_profile", "domain_ext", "extra_info", "extra_context"):
         if key not in seen:
             seen.add(key)
             label, desc = _META[key]
-            result.append({"key": key, "label": label, "source": "fixed", "desc": desc})
+            item = {"key": key, "label": label, "source": "fixed", "desc": desc}
+            if subfields_map.get(key):
+                item["subfields"] = subfields_map[key]
+            result.append(item)
 
     return {"code": 200, "data": result}
 
@@ -363,6 +470,107 @@ async def save_api_nodes(province: str, intent: str, body: SkillConfigRequest, r
     if not ok:
         raise HTTPException(500, _SAVE_FAIL_MSG)
     return {"code": 200, "message": "保存成功"}
+
+
+@router.post("/api/skills/{province}/{intent}/repair_config")
+async def repair_skill_config(province: str, intent: str, request: Request):
+    """基于 ES 当前配置自愈修复：重新校验 → 发现问题 → 自动生成修正配置 → 发布回 ES 生效。
+
+    不依赖本地文件/历史版本：修复依据是坏配置里的自证线索——field_transform 声明的
+    from 槽位（如 raw_tags）+ 节点自带 mock_response 里的同名字段（bean.tags），
+    按名探测补回 response_extract；同时补回可识别的标准域映射、规范化畸形重命名。
+    只增不删；无可修复项时不发布（幂等安全）。需同省份或本部权限。
+    """
+    check_province_write(request, province)
+    pkg = skill_registry.get(province, intent)
+    if pkg is None:
+        raise HTTPException(404, f"技能包不存在: {province}/{intent}")
+    from management.config_agent.repairer import repair_api_nodes
+
+    api_nodes = pkg.config.get("api_nodes") or {}
+    rep = repair_api_nodes(api_nodes, province, intent)
+    errors_before = [i.get("message") for i in rep["lint_before"].get("errors", [])]
+    errors_after = [i.get("message") for i in rep["lint_after"].get("errors", [])]
+    data = {
+        "fixes": rep["fixes"],
+        "unfixed": rep["unfixed"],
+        "errors_before": errors_before,
+        "errors_after": errors_after,
+        "published": False,
+    }
+
+    if not rep["fixes"]:
+        msg = ("校验通过，配置健康，无需修复" if not errors_before and not rep["unfixed"]
+               else "校验发现问题，但均无法自动修复（详见 unfixed），未发布")
+        return {"code": 200, "message": msg, "data": data}
+
+    operator = get_operator(request)
+    ok = skill_registry.save_api_nodes(province, intent, rep["config"])
+    if not ok:
+        raise HTTPException(500, f"修复配置已生成但发布失败：{_SAVE_FAIL_MSG}")
+    data["published"] = True
+    logger.warning(
+        f"[repair_config] {province}/{intent} by={operator} "
+        f"fixes={rep['fixes']} unfixed={rep['unfixed']}"
+    )
+    msg = f"已自动修复 {len(rep['fixes'])} 项并发布生效"
+    if rep["unfixed"]:
+        msg += f"；另有 {len(rep['unfixed'])} 项需人工处置"
+    return {"code": 200, "message": msg, "data": data}
+
+
+class RepublishLocalRequest(BaseModel):
+    """从本地标准配置重新发布到 ES 的请求体（config_types 缺省仅 api_nodes）。"""
+    config_types: List[str] = Field(default_factory=lambda: ["api_nodes"])
+
+
+@router.post("/api/skills/{province}/{intent}/republish_local")
+async def republish_local_config(
+    province: str, intent: str, request: Request,
+    body: Optional[RepublishLocalRequest] = None,
+):
+    """从本地标准配置整包重新发布到 ES（生产事故恢复）。
+
+    读取部署包里的 skills-runtime/{province}/{intent}/config/{type}.json（正确标准配置），
+    整包 publish_config 覆盖写 ES —— 用于修复 ES 里被误改/漏映射的配置（如北京 raw_tags
+    丢失导致 usage/tags 静默为空）。一键、幂等，无需人工写 ES。需同省份或本部权限。
+    """
+    check_province_write(request, province)
+    from services.skill_publisher import republish_local, ALLOWED_CONFIG_TYPES
+
+    req_types = (body.config_types if body and body.config_types else ["api_nodes"])
+    config_types = tuple(t for t in req_types if t in ALLOWED_CONFIG_TYPES)
+    if not config_types:
+        raise HTTPException(400, f"config_types 非法，仅支持: {list(ALLOWED_CONFIG_TYPES)}")
+
+    operator = get_operator(request)
+    results = republish_local(province, intent, config_types=config_types, operator=operator)
+
+    data = {
+        ct: {
+            "success": r.success,
+            "message": r.message,
+            "version": r.version,
+            "es_written": r.es_written,
+            "file_written": r.file_written,
+            "warnings": r.warnings,
+        }
+        for ct, r in results.items()
+    }
+    all_ok = all(r.success for r in results.values()) if results else False
+    ok_types = [ct for ct, r in results.items() if r.success]
+    fail_types = [ct for ct, r in results.items() if not r.success]
+    if all_ok:
+        msg = f"已从本地标准配置重新发布到 ES：{', '.join(ok_types)}"
+    elif ok_types:
+        msg = f"部分成功：{', '.join(ok_types)}；失败：{', '.join(fail_types)}"
+    else:
+        msg = f"重新发布失败：{', '.join(fail_types) or '无可发布配置'}"
+    logger.warning(
+        f"[republish_local] {province}/{intent} by={operator} types={list(config_types)} "
+        f"ok={ok_types} fail={fail_types}"
+    )
+    return {"code": 200 if all_ok else 500, "message": msg, "data": data}
 
 
 # ── Skill 测试用例 + 完整入参生成 ────────────────────────────────
@@ -1410,6 +1618,49 @@ async def get_interface(province: str, intent: str, api_name: str):
                                    "province": province, "intent": intent}}
 
 
+# 重命名字段名规范化（公共实现见 utils/field_naming.py；publish_config 写入 choke point
+# 已统一防护，此处保留在 update_interface 中提前清洗，便于把修正结果回显给保存者）
+from utils.field_naming import (  # noqa: E402
+    clean_rename_field as _clean_rename_field,
+    normalize_field_transform_renames as _normalize_field_transform_renames,
+)
+
+
+def _guard_response_extract(
+    old_ext: Dict[str, Any],
+    body_ext: Dict[str, Any],
+    field_transform: Any,
+) -> tuple:
+    """response_extract 保存防丢失守护（纯函数，供 update_interface 调用）。
+
+    两类槽位在新配置中缺失时自动保留旧映射（显式置空串/None = 有意删除，予以尊重）：
+    1. 标准域（current_package / recommended_packages 等 STD_DOMAIN_KEYS）
+       —— 北京事故第一形态：推荐产品映射被智能分析保存冲掉；
+    2. 被 field_transform 规则引用（from=xxx）的中间槽位（如 raw_tags）
+       —— 北京事故第二形态（2026-07-23）：raw_tags 被冲掉后 usage/tags 的
+          filter 规则静默产出为空，话术缺历史用量/用户标签。
+
+    Returns:
+        (合并后的 response_extract, 被保留的 key 列表)
+    """
+    new_ext = dict(body_ext or {})
+    removed = {k for k, v in new_ext.items() if v in ("", None)}
+    new_ext = {k: v for k, v in new_ext.items() if k not in removed}
+    preserved: List[str] = []
+    referenced: set = set()
+    if isinstance(field_transform, dict):
+        for tgt, rule in field_transform.items():
+            if str(tgt).startswith("_"):
+                continue
+            if isinstance(rule, dict):
+                referenced.add(str(rule.get("from") or tgt))
+    for key in list(STD_DOMAIN_KEYS) + sorted(referenced):
+        if key in old_ext and key not in new_ext and key not in removed:
+            new_ext[key] = old_ext[key]
+            preserved.append(key)
+    return new_ext, preserved
+
+
 @router.put("/api/interfaces/{province}/{intent}/{api_name}")
 async def update_interface(
     province: str, intent: str, api_name: str,
@@ -1423,6 +1674,40 @@ async def update_interface(
     api_nodes_cfg = dict(pkg.config.get("api_nodes", {}))
     existing = api_nodes_cfg.get(api_name) or {}
     merged = {**existing, **body}
+
+    # ── 重命名字段名规范化守护 ──────────────────────────────────
+    # field_rename / _unit_conversions.new_field 的目标名若含畸形括号（双括号、全半角混用），
+    # 运行时数据键将与模板子字段占位符无法同名对齐 → 槽位取不到值。保存时统一规范化。
+    if isinstance(merged.get("field_transform"), dict):
+        _renames_fixed = _normalize_field_transform_renames(merged["field_transform"])
+        if _renames_fixed:
+            logger.warning(
+                f"[接口保存守护] {province}/{intent}/{api_name} 重命名目标字段名已规范化: "
+                f"{_renames_fixed}"
+            )
+
+    # ── 标准域映射防丢失守护 ────────────────────────────────────
+    # 背景：response_extract 是整字典替换（非增量合并）。前端「智能分析/自动映射」
+    # 会用 LLM 重新生成映射并回填表单，若 LLM 输出漏掉某个标准域（如
+    # recommended_packages），一次保存就会把 ES 里原有映射静默冲掉——这正是
+    # 北京「套餐推荐」推荐产品丢失、只回 1 条兜底话术的事故根因（2026-07）。
+    # 规则：接口查询模式下，旧配置已映射的标准域 key 若在新配置中缺失，自动保留
+    # 旧映射并告警；确需删除时，将该 key 显式置为 ""（空串）即可真正移除。
+    preserved_domains: List[str] = []
+    if "response_extract" in body and (merged.get("source_type") or "api") != "direct":
+        ft_after = merged.get("field_transform") or existing.get("field_transform") or {}
+        new_ext, preserved_domains = _guard_response_extract(
+            existing.get("response_extract") or {},
+            body.get("response_extract") or {},
+            ft_after,
+        )
+        merged["response_extract"] = new_ext
+        if preserved_domains:
+            logger.warning(
+                f"[接口保存守护] {province}/{intent}/{api_name} 新映射缺失标准域/被引用中间槽位 "
+                f"{preserved_domains}，已自动保留旧映射（如需删除请将该 key 置为空串）"
+            )
+
     if api_name not in api_nodes_cfg:
         merged["created_by"] = get_operator(request, fallback=body.get("created_by", "admin"))
         merged.setdefault("created_at", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -1433,7 +1718,10 @@ async def update_interface(
     ok = skill_registry.save_api_nodes(province, intent, api_nodes_cfg)
     if not ok:
         raise HTTPException(500, "保存失败")
-    return {"code": 200, "message": "保存成功"}
+    msg = "保存成功"
+    if preserved_domains:
+        msg += f"（已自动保留标准域映射：{', '.join(preserved_domains)}，如需删除请将其显式置为空串）"
+    return {"code": 200, "message": msg}
 
 
 @router.delete("/api/interfaces/{province}/{intent}/{api_name}")

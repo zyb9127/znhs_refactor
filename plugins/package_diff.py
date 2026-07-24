@@ -13,6 +13,7 @@ PackageDiff — 套餐差异计算 + 差异表格展示
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -21,20 +22,63 @@ from typing import Any, Dict, List, Optional
 # 字段提取辅助（兼容多命名）
 # ══════════════════════════════════════════════════════════════
 
+# 从套餐名解析月费的正则（按优先级）：
+#   "云宽带139元档合约方案" → 139   "99元套餐" → 99   "128元5G畅享套餐"/"畅享39元套餐" → 128/39
+# 说明：仅当套餐【没有任何显式月费字段】时才用名字里的价兜底。合约/宽带类套餐名里的
+# "N元档"多为【宣传对外标价】（如"139元档"），实际执行月费（initFee 等字段）常低于标价
+# （如 129 元）。比价必须以客户【实付执行月费】为准，故显式费用字段优先、名字价仅兜底。
+_NAME_FEE_PATTERNS = (
+    re.compile(r"(\d+(?:\.\d+)?)\s*元档"),          # "139元档"
+    re.compile(r"(\d+(?:\.\d+)?)\s*元(?:档|套餐)"),  # "99元套餐"
+    re.compile(r"^\D{0,8}?(\d+(?:\.\d+)?)\s*元"),   # 前缀价："128元5G畅享套餐"/"畅享39元套餐"
+)
+
+# 套餐名字段候选（与 _fmt_package 的 pkg_name 别名保持一致）
+_NAME_KEYS = ("offerName", "package_name", "productName", "name", "curOfferName")
+
+
+def _fee_from_name(pkg: Dict[str, Any]) -> Optional[float]:
+    """从套餐名解析月费（元）；无可解析价时返回 None。"""
+    for key in _NAME_KEYS:
+        name = pkg.get(key)
+        if not name:
+            continue
+        s = str(name)
+        for pat in _NAME_FEE_PATTERNS:
+            m = pat.search(s)
+            if m:
+                try:
+                    return float(m.group(1))
+                except (TypeError, ValueError):
+                    pass
+    return None
+
+
 def _get_fee(pkg: Dict[str, Any]) -> Optional[float]:
-    """提取月费（元），支持分/角/元多单位"""
-    for key in ("initFee", "monthly_fee", "fee", "price", "curOfferFee"):
+    """提取月费（元，客户实付执行价）。
+
+    优先级：
+    1. 显式月费字段（monthly_fee / fee / price / curOfferFee / initFee）——运营商下发的
+       实际执行月费，客户实付即此值，最权威；>1000 推断为“分”单位自动转元。
+    2. 套餐名内的档位价（"N元档"/"N元套餐"/前缀"N元…"）——仅当无任何显式月费字段时兜底。
+
+    为何费用字段优先于名字价：合约/宽带类套餐名里的"N元档"多为宣传对外标价（如"139元档"），
+    实际执行月费常低于标价（如 129 元）。比价须与客户实付一致，否则会把"标价-现价"当成涨幅，
+    虚高月费差（139-128=+11），而真实涨幅应为执行价之差（129-128=+1）。
+    """
+    # 1) 显式月费字段（执行价，客户实付）
+    for key in ("monthly_fee", "fee", "price", "curOfferFee", "initFee"):
         v = pkg.get(key)
-        if v is not None:
+        if v is not None and str(v).strip() != "":
             try:
                 f = float(v)
-                # 若值 > 1000，推断为"分"单位，自动转换
-                if f > 1000:
+                if f > 1000:   # >1000 推断为"分"单位
                     f = f / 100
                 return f
             except (TypeError, ValueError):
                 pass
-    return None
+    # 2) 无任何费用字段时，才从套餐名解析档位价兜底
+    return _fee_from_name(pkg)
 
 
 def _get_flow(pkg: Dict[str, Any]) -> Optional[float]:

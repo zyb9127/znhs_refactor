@@ -873,17 +873,28 @@ class SkillExecutor:
         #     纯直传（direct）技能无 api 节点则保持 other_info=None，行为不变。
         strategy = self.package.config.get("biz_config", {}).get("strategy", {})
         expose = strategy.get("expose_raw_bean")
+        api_nodes = self.package.config.get("api_nodes", {}) or {}
+        # 启用的接口查询（source_type=api）节点名，按配置顺序
+        api_node_names = [
+            name for name, cfg in api_nodes.items()
+            if isinstance(cfg, dict)
+            and not str(name).startswith("_")
+            and cfg.get("enabled", True)
+            and cfg.get("source_type", "api") == "api"
+        ]
         if expose is None:
-            api_nodes = self.package.config.get("api_nodes", {}) or {}
-            expose = any(
-                isinstance(cfg, dict)
-                and not str(name).startswith("_")
-                and cfg.get("enabled", True)
-                and cfg.get("source_type", "api") == "api"
-                for name, cfg in api_nodes.items()
-            )
+            expose = bool(api_node_names)
         if expose:
-            first_raw = next(iter(ctx.raw_responses.values()), {})
+            # 选取透传源：优先 api 节点中第一个非空原始响应（跳过直传/失败节点的空响应），
+            # 再兜底任意非空响应，避免多节点场景下第一个空节点把 other_info 挤成 {}。
+            first_raw: Any = {}
+            for name in api_node_names:
+                r = ctx.raw_responses.get(name)
+                if r:
+                    first_raw = r
+                    break
+            if not first_raw:
+                first_raw = next((r for r in ctx.raw_responses.values() if r), {})
             result["other_info"] = (
                 first_raw.get("bean", first_raw)
                 if isinstance(first_raw, dict)
@@ -891,7 +902,8 @@ class SkillExecutor:
             )
             logger.info(
                 f"[SkillRuntime] other_info 透传：expose={expose} "
-                f"raw_nodes={list(ctx.raw_responses.keys())} "
+                f"api_nodes={api_node_names} "
+                f"raw_nodes={ {k: bool(v) for k, v in ctx.raw_responses.items()} } "
                 f"has_other_info={result.get('other_info') not in (None, {}, [])}"
             )
 

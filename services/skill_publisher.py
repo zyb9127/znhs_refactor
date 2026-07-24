@@ -139,7 +139,39 @@ def publish_config(
     if not isinstance(data, dict):
         return PublishResult(False, "配置数据必须是 JSON 对象")
 
+    # ── api_nodes 重命名字段名规范化守护（唯一写路径，覆盖全部保存入口）──
+    # field_rename / _unit_conversions.new_field 若含畸形括号（双括号、全/半角混用），
+    # 运行时数据键将与话术模板子字段占位符无法同名对齐 → 槽位取不到值。
     result = PublishResult(True, "")
+
+    if config_type == "api_nodes":
+        from utils.field_naming import normalize_api_nodes_renames  # 延迟 import
+
+        _renames_fixed = normalize_api_nodes_renames(data)
+        if _renames_fixed:
+            logger.warning(
+                f"[publish_config] {province}/{intent} api_nodes 重命名目标字段名已规范化: "
+                f"{_renames_fixed}"
+            )
+        # 保存时配置巡检（纯内存 lint，不阻断保存）：E201「from 槽位不存在」等问题
+        # 意味着运行时对应映射域将静默为空（话术缺历史用量/标签的根因形态），
+        # 在写入时就暴露给保存者与日志，而不是等生产话术出错才发现。
+        try:
+            from management.config_agent.linter import lint_api_nodes  # 延迟 import
+
+            _lint = lint_api_nodes(data, province, intent)
+            for _issue in _lint.get("errors", []) + _lint.get("warnings", []):
+                _msg = (f"[配置巡检 {_issue.get('code')}] {_issue.get('path')}: "
+                        f"{_issue.get('message')}")
+                result.warnings.append(_msg)
+            if _lint.get("errors"):
+                logger.warning(
+                    f"[publish_config] {province}/{intent} api_nodes 保存时巡检发现 "
+                    f"{len(_lint['errors'])} 个错误级问题（已保存，但运行时对应映射域将为空）: "
+                    f"{[i.get('message') for i in _lint['errors']]}"
+                )
+        except Exception as _lint_exc:  # noqa: BLE001 - 巡检失败不影响保存
+            logger.debug(f"[publish_config] 保存时 lint 跳过: {_lint_exc}")
 
     if IS_DEV:
         # dev 模式：本地文件是唯一存储，写失败即发布失败
@@ -240,6 +272,72 @@ def publish_package(
         )
     if reload and any(r.success for r in results.values()):
         # 只 reload 一次，warnings 记到每个成功项上
+        probe = PublishResult(True, "")
+        _reload_registry(province, intent, probe)
+        if probe.warnings:
+            for r in results.values():
+                if r.success:
+                    r.warnings.extend(probe.warnings)
+    return results
+
+
+def read_local_config(
+    province: str, intent: str, config_type: str
+) -> Optional[Dict[str, Any]]:
+    """读取本地技能包配置文件（skills-runtime/{province}/{intent}/config/{type}.json）。
+
+    不存在 / 非法路径段 / 非允许类型 / 解析失败 一律返回 None（调用方据此判断）。
+    """
+    if not (_is_safe_segment(province) and _is_safe_segment(intent)):
+        return None
+    if config_type not in ALLOWED_CONFIG_TYPES:
+        return None
+    path = _config_file_path(province, intent, config_type)
+    try:
+        if not path.exists():
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except Exception as e:
+        logger.warning(f"[SkillPublisher] 读取本地配置失败 {path}: {e}")
+        return None
+
+
+def republish_local(
+    province: str,
+    intent: str,
+    config_types: Tuple[str, ...] = ("api_nodes",),
+    operator: str = "system",
+    comment: str = "",
+) -> Dict[str, PublishResult]:
+    """把本地技能包配置文件整包重新发布到 ES（生产事故恢复专用）。
+
+    典型场景：生产 ES 里某省 skill 的 api_nodes 被误改/漏映射（如北京 raw_tags
+    中间槽位丢失，导致 usage/tags 静默为空），而本地部署包里的
+    skills-runtime/{province}/{intent}/config/api_nodes.json 仍是正确标准配置——
+    直接读它整包覆盖发布到 ES，一键幂等恢复，无需人工写 ES。
+
+    仅发布本地存在且可解析的 config_type；返回 {config_type: PublishResult}，
+    最后统一 reload 一次本实例内存。
+    """
+    results: Dict[str, PublishResult] = {}
+    for ct in config_types:
+        data = read_local_config(province, intent, ct)
+        if data is None:
+            results[ct] = PublishResult(False, f"本地配置文件不存在或无法解析: {ct}")
+            logger.warning(
+                f"[SkillPublisher] republish_local 跳过 {province}/{intent}/{ct}: "
+                f"本地文件不存在或无法解析"
+            )
+            continue
+        results[ct] = publish_config(
+            province, intent, ct, data,
+            operator=operator,
+            comment=comment or f"从本地标准配置重新发布({ct})",
+            reload=False, broadcast=True,
+        )
+    if any(r.success for r in results.values()):
         probe = PublishResult(True, "")
         _reload_registry(province, intent, probe)
         if probe.warnings:

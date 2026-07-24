@@ -11,7 +11,8 @@ from typing import Optional, Dict, Any
 import httpx
 from loguru import logger
 from utils.config_loader import config_loader
-from utils.observability import add_degrade_flag, record_stage
+from utils.observability import add_degrade_flag, record_stage, get_request_context, get_trace_id
+from utils import province_logger
 
 
 class LLMService:
@@ -184,9 +185,9 @@ class LLMService:
         url_str = str(self.llm_config.get("url", ""))
         model_str = str(self.llm_config.get("model", "") or self.llm_config.get("model_id", ""))
         if "deepseek" in url_str.lower() or "deepseek" in model_str.lower():
-            # 九天平台支持 reasoning_effort="none" 完全关闭推理（已验证），
-            # DeepSeek 官方 API 不支持 none 时可改为 "low"
-            data["reasoning_effort"] = "none"
+            # DeepSeek 推理模型无法完全关闭思考，reasoning_effort 合法值仅 high/low/medium/max/xhigh，
+            # 取 low 以最小化思考链 token 占用（none 会 400）
+            data["reasoning_effort"] = "low"
         else:
             # Qwen3 / DashScope 系列
             data["chat_template_kwargs"] = {"enable_thinking": False}
@@ -224,14 +225,20 @@ class LLMService:
                     raw_content = output["choices"][0]["message"]["content"]
                     content = self._clean_llm_output(raw_content)
                     logger.info(f"✅ 大模型生成成功 - 输出长度: {len(content)}")
+                    _llm_elapsed = (time.perf_counter() - start_time) * 1000
                     record_stage(
                         stage=stage,
-                        elapsed_ms=(time.perf_counter() - start_time) * 1000,
+                        elapsed_ms=_llm_elapsed,
                         cache_hit=False,
                         provider=provider,
                         degrade_flag=False,
                         prompt_len=len(prompt),
                         output_len=len(content),
+                    )
+                    # 分省日志：记录本次大模型调用的 prompt / 原始输出（细粒度排查）
+                    self._log_province_llm(
+                        province, stage, prompt, raw_content, _llm_elapsed,
+                        success=True,
                     )
                     return content
                 else:
@@ -253,15 +260,50 @@ class LLMService:
         # 所有重试都失败
         logger.error(f"❌ 大模型调用最终失败: {last_error}")
         add_degrade_flag(stage)
+        _llm_elapsed = (time.perf_counter() - start_time) * 1000
         record_stage(
             stage=stage,
-            elapsed_ms=(time.perf_counter() - start_time) * 1000,
+            elapsed_ms=_llm_elapsed,
             cache_hit=False,
             provider=provider,
             degrade_flag=True,
             error=last_error,
         )
+        # 分省日志：记录失败调用（含错误信息），便于分省定位大模型问题
+        self._log_province_llm(
+            province, stage, prompt, "", _llm_elapsed,
+            success=False, error=str(last_error),
+        )
         return ""
+
+    def _log_province_llm(
+        self,
+        province: str,
+        stage: str,
+        prompt: str,
+        output: str,
+        elapsed_ms: float,
+        *,
+        success: bool,
+        error: Optional[str] = None,
+    ) -> None:
+        """写分省大模型日志：province 缺省时回退请求上下文；trace_id/intent 从上下文取。"""
+        try:
+            rc = get_request_context()
+            prov = province or rc.get("province") or self.province_name or "unknown"
+            model = str(
+                self.llm_config.get("model")
+                or self.llm_config.get("model_id")
+                or ""
+            )
+            province_logger.log_llm(
+                prov, rc.get("intent", ""), get_trace_id(),
+                stage=stage, prompt=prompt, output=output,
+                elapsed_ms=elapsed_ms, model=model,
+                success=success, error=error,
+            )
+        except Exception:
+            pass
 
     @staticmethod
     def _clean_llm_output(raw: str) -> str:

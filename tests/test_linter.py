@@ -142,6 +142,53 @@ class TestLintTemplate(unittest.TestCase):
         ))
         self.assertNotIn("W104", _codes(report))
 
+    def test_subfield_known_root_no_warning(self):
+        """子字段占位符 {域[子键]} 根域为已知标准域 → 不告警。"""
+        report = self._lint(_make_template(
+            template_content="您当前{current_package[offerName]}，"
+                             "流量{usage[data_usage][近6月平均流量(GB)]}，标签{tags[融合状态]}",
+            linked_vars=[],
+        ))
+        self.assertNotIn("W104", _codes(report))
+
+    def test_subfield_unknown_root_warns(self):
+        """子字段占位符根域未知 → 触发 W104（提示无法取值）。"""
+        report = self._lint(_make_template(
+            template_content="乱写{zzz_bad_root[xx]}",
+            linked_vars=[],
+        ))
+        items = _items_of(report, "W104")
+        self.assertTrue(any("zzz_bad_root" in i["message"] for i in items))
+
+    def test_w108_malformed_rename_target(self):
+        """W108：field_rename / _unit_conversions.new_field 目标名含畸形括号 → 巡检告警。"""
+        from management.config_agent.linter import lint_api_nodes
+        api_nodes = {
+            "节点A": {
+                "response_extract": {"raw_tags": "bean.tags"},
+                "field_transform": {
+                    "usage.data_usage": {
+                        "from": "raw_tags", "type": "filter_include",
+                        "field_rename": {"近6月平均流量(MB）": "近6月平均流量((GB)）"},
+                    },
+                    "_unit_conversions": [
+                        {"target_path": "usage.data_usage", "field": "近6月平均流量(MB）",
+                         "new_field": "近6月平均流量((GB)）", "converter": "mb_to_gb"},
+                    ],
+                },
+            },
+        }
+        report = lint_api_nodes(api_nodes, "beijing", "套餐推荐")
+        items = _items_of(report, "W108")
+        self.assertEqual(len(items), 2)   # field_rename + _unit_conversions 各一条
+        self.assertTrue(all("近6月平均流量(GB)" in i["message"] for i in items))
+        # 规范名不告警
+        api_nodes["节点A"]["field_transform"]["usage.data_usage"]["field_rename"] = {
+            "近6月平均流量(MB）": "近6月平均流量(GB)"}
+        api_nodes["节点A"]["field_transform"]["_unit_conversions"][0]["new_field"] = "近6月平均流量(GB)"
+        report2 = lint_api_nodes(api_nodes, "beijing", "套餐推荐")
+        self.assertEqual(_items_of(report2, "W108"), [])
+
     def test_w105_unknown_linked_var(self):
         report = self._lint(_make_template(
             linked_vars=["cur_brief", "zzz_not_a_var"],
@@ -294,6 +341,23 @@ class TestLintApiNodes(unittest.TestCase):
                 "source_type": "direct",
                 "field_transform": {
                     "current_package": {"from": "whatever", "type": "passthrough"},
+                },
+            },
+        })
+        self.assertNotIn("E201", _codes(report))
+
+    def test_e201_ignores_underscore_meta_keys(self):
+        """field_transform 内下划线开头的 meta 键（_unit_conversions 是 list 而非转换规则）
+        不应触发 E201 —— 回归北京标准配置误报 from 槽位 '_unit_conversions' 不存在。"""
+        report = self._lint({
+            "main_api": {
+                "response_extract": {"raw_tags": "bean.tags"},
+                "field_transform": {
+                    "usage.data_usage": {"from": "raw_tags", "type": "filter_include"},
+                    "_unit_conversions": [
+                        {"target_path": "usage.data_usage", "field": "近3月平均流量(MB）",
+                         "new_field": "近3月平均流量(GB)", "converter": "mb_to_gb"},
+                    ],
                 },
             },
         })

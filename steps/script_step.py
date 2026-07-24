@@ -209,18 +209,18 @@ class ScriptStep:
                 fallback_prompt_tpl,
                 tpl_index=tpl_index,
             )
-            llm_success = False
+            llm_success = True
             raw = ""
-            if not prep.get("_skip_llm"):
-                try:
-                    raw = await self._generate_llm(
-                        prep["prompt"], ctx, "script_step.llm", sem
-                    )
-                    llm_success = True
-                except Exception as exc:
-                    logger.error(
-                        f"[ScriptStep] ❌ 产品[{prep.get('package_name', '')}]话术生成失败: {exc}"
-                    )
+            try:
+                raw = await self._generate_llm(
+                    prep["prompt"], ctx, "script_step.llm", sem
+                )
+            except Exception as exc:
+                logger.error(
+                    f"[ScriptStep] ❌ 产品[{prep.get('package_name', '')}]话术生成失败: {exc}"
+                )
+                llm_success = False
+                raw = ""
             text = self._post_process(raw)
             if not text:
                 llm_success = False
@@ -344,19 +344,18 @@ class ScriptStep:
                         fallback_prompt_tpl,
                         tpl_index=tpl_index,
                     )
-                    llm_success = False
+                    llm_success = True
                     raw = ""
-                    if not prep.get("_skip_llm"):
-                        try:
-                            raw = await self._generate_llm(
-                                prep["prompt"], ctx, "script_step.batch.expand.llm", sem
-                            )
-                            llm_success = True
-                        except Exception as exc:
-                            logger.error(
-                                f"[ScriptStep.batch.expand] ❌ 产品[{prep.get('package_name', '')}]"
-                                f" stage={bc_stage!r} scene={tpl_scene!r} 话术生成失败: {exc}"
-                            )
+                    try:
+                        raw = await self._generate_llm(
+                            prep["prompt"], ctx, "script_step.batch.expand.llm", sem
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            f"[ScriptStep.batch.expand] ❌ 产品[{prep.get('package_name', '')}]"
+                            f" stage={bc_stage!r} scene={tpl_scene!r} 话术生成失败: {exc}"
+                        )
+                        llm_success = False
                     text = self._post_process(raw)
                     if not text:
                         llm_success = False
@@ -435,19 +434,19 @@ class ScriptStep:
                     fallback_prompt_tpl,
                     tpl_index=tpl_index,
                 )
-                llm_success = False
+                llm_success = True
                 raw = ""
-                if not prep.get("_skip_llm"):
-                    try:
-                        raw = await self._generate_llm(
-                            prep["prompt"], ctx, "script_step.batch.llm", sem
-                        )
-                        llm_success = True
-                    except Exception as exc:
-                        logger.error(
-                            f"[ScriptStep.batch] ❌ 产品[{prep.get('package_name', '')}]"
-                            f" stage={bc_stage!r} scene={bc_scene!r} 话术生成失败: {exc}"
-                        )
+                try:
+                    raw = await self._generate_llm(
+                        prep["prompt"], ctx, "script_step.batch.llm", sem
+                    )
+                except Exception as exc:
+                    logger.error(
+                        f"[ScriptStep.batch] ❌ 产品[{prep.get('package_name', '')}]"
+                        f" stage={bc_stage!r} scene={bc_scene!r} 话术生成失败: {exc}"
+                    )
+                    llm_success = False
+                    raw = ""
                 text = self._post_process(raw)
                 if not text:
                     llm_success = False
@@ -581,7 +580,6 @@ class ScriptStep:
             "product_id":      product_id,
             "package_name":    package_name,
             "prompt":          prompt,
-            "_skip_llm":       not bool(prompt),  # prompt 为空时跳过 LLM，直接走降级话术
         }
         
     def _finalize_script_one(

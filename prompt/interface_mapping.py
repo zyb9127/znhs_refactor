@@ -30,6 +30,13 @@ _SKIP_FIELDS_RULE = """\
 phone/mobile/msisdn/phoneNo/phoneNumber、intent/intentCode、
 callId/sessionId/traceId/taskId/requestId/ioId、province/botName、topN/top"""
 
+_WHOLE_BLOCK_RULE = """\
+整块透传优先：若响应中某个对象/数组整体就对应一个标准域
+（如"当前套餐对象"→current_package、"推荐套餐数组"→recommended_packages），
+必须在 response_extract 中直接用该标准域名整块提取（key=标准域名、value=该对象/数组的路径），
+不要拆成单字段重组，也不要再在 field_transform 中对它写任何规则。
+只有"多类字段混在同一个对象里需要分拣"时才引入中间槽 + field_transform。"""
+
 _SPLIT_RULE = """\
 若响应中有一个对象同时包含多类字段（如用量统计和业务标签混在一起）：
 - 在 response_extract 中将该对象提取为临时中间槽（如 raw_tags）
@@ -37,6 +44,14 @@ _SPLIT_RULE = """\
 - 同一字段只能出现在一个域的 include_keys 中，不得重复
 - 最后用 filter_exclude 将所有已被 include 的字段排除，剩余字段归入 tags
 - 若某个域没有对应字段，直接不写该域，不得强行填入"""
+
+_UNIT_CONVERT_RULE = """\
+单位换算（unit_convert / 重命名）必须保守，宁缺勿滥：
+- mb_to_gb：仅当字段名或说明明确标注单位为 MB（如"近3月平均流量(MB)"）时使用
+- fen_to_yuan：仅用于金额字段且单位明确为"分"；时长/分钟类字段（如"平均主叫时长"）严禁使用
+- 重命名（field_rename / new_field）时新字段名只写一层括号（如"近3月平均流量(GB)"），
+  不得出现"((GB)）"这类重复括号
+- 单位不明确时不做任何换算，保留原值原字段名"""
 
 _OUTPUT_FORMAT = """\
 只返回如下 JSON，response_extract 和 field_transform 中只写响应里实际有的域：
@@ -68,8 +83,14 @@ AUTO_MAP_SYSTEM_PROMPT = f"""\
 ## 第二步：逐一判断响应中每个字段属于哪个域
 {_DOMAIN_RULES}
 
-## 第三步：拆分规则
+## 第三步：整块透传优先
+{_WHOLE_BLOCK_RULE}
+
+## 第四步：拆分规则（仅混合对象需要）
 {_SPLIT_RULE}
+
+## 第五步：单位换算约束
+{_UNIT_CONVERT_RULE}
 
 ## 输出格式
 {_OUTPUT_FORMAT}
@@ -98,8 +119,14 @@ PARSE_DOCX_SYSTEM_PROMPT = f"""\
 ## 第二步：逐一判断响应中每个字段属于哪个域
 {_DOMAIN_RULES}
 
-## 第三步：拆分规则
+## 第三步：整块透传优先
+{_WHOLE_BLOCK_RULE}
+
+## 第四步：拆分规则（仅混合对象需要）
 {_SPLIT_RULE}
+
+## 第五步：单位换算约束
+{_UNIT_CONVERT_RULE}
 
 ## 输出格式
 {_OUTPUT_FORMAT}
@@ -171,6 +198,11 @@ REFINE_MAPPING_SYSTEM_PROMPT = """\
 - 若用户期望某域包含特定字段，在 mock_response 中找到该字段所在路径，更新 response_extract
 - 若用户期望某域的字段集合发生变化，更新对应的 include_keys/exclude_keys
 - 若字段单位不对（如流量应为 GB 但实际是 MB），在 field_transform 对应规则中加 unit_convert
+
+**规则6：整块透传优先 + 换算保守**
+- 某对象/数组整体对应一个标准域时，在 response_extract 中直接用标准域名整块提取，不拆字段、不写 field_transform 规则
+- mb_to_gb 仅用于明确 MB 单位的流量字段；fen_to_yuan 仅用于明确"分"单位的金额字段，时长/分钟类字段严禁使用
+- 重命名的新字段名只写一层括号（如"近3月平均流量(GB)"），单位不明确时不换算
 
 只输出 JSON，格式如下，不要有其他文字：
 {{

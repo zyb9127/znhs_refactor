@@ -197,7 +197,7 @@
             <div style="font-size:12px;">{{ row.updated_at || '—' }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <div class="ops" @click.stop>
               <button class="btn-link" @click="openTest(row)">测试</button>
@@ -216,6 +216,14 @@
                   class="btn-link warn"
                   @click="doOffline(row)"
                 >下线</button>
+                <span class="ops-sep">|</span>
+                <!-- 基于 ES 当前配置自愈修复：重新校验 → 自动补回缺失映射 → 发布生效 -->
+                <el-tooltip
+                  content="重新校验 ES 当前接口配置，自动补回缺失的映射槽位/标准域、规范化字段名，并发布生效"
+                  placement="top"
+                >
+                  <button class="btn-link" @click="doRepairConfig(row)">修复</button>
+                </el-tooltip>
                 <span class="ops-sep">|</span>
                 <!-- 已发布时禁用删除，需先下线 -->
                 <el-tooltip
@@ -1147,6 +1155,52 @@ const [doOffline] = useLock(async (row) => {
   }
 })
 
+// ── 基于 ES 当前配置自愈修复（重新校验 → 自动修正 → 发布生效 + 防重锁）──
+// 修复依据是配置自证线索：field_transform 声明的 from 槽位（如 raw_tags）+
+// 节点 mock_response 里的同名字段（bean.tags）→ 探测补回 response_extract；
+// 同时补回可识别的标准域映射、规范化畸形字段名。只增不删，无问题时不发布。
+const [doRepairConfig] = useLock(async (row) => {
+  if (!authStore.canWrite(row.province)) {
+    $msg.warn('无权操作该省份的配置')
+    return
+  }
+  const ok = await $msg.confirm(
+    `确认对 ${row.province}/${row.intent} 的接口配置执行【校验并修复】？\n` +
+    `系统将基于 ES 当前配置重新校验，自动补回缺失的映射槽位/标准域并发布生效；` +
+    `只增不删，校验通过时不做任何变更。`,
+    { title: '校验并修复接口配置', type: 'warning', confirmText: '校验并修复' },
+  )
+  if (!ok) return
+  try {
+    const res = await apiFetch(
+      `/api/skills/${encodeURIComponent(row.province)}/${encodeURIComponent(row.intent)}/repair_config`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+    )
+    const json = await res.json()
+    const d = json.data || {}
+    if (json.code === 200) {
+      const fixes = d.fixes || []
+      const unfixed = d.unfixed || []
+      if (fixes.length) {
+        $msg.ok(`${json.message}：${fixes.slice(0, 3).join('；')}${fixes.length > 3 ? ' 等' : ''}`)
+      } else {
+        $msg.info(json.message || '校验通过，无需修复')
+      }
+      if (unfixed.length) {
+        $msg.warn(`需人工处置：${unfixed.slice(0, 2).join('；')}${unfixed.length > 2 ? ' 等' : ''}`)
+      }
+      uiLog.warn('SkillManager', `校验并修复：${row.province}/${row.intent}`, d)
+      if (d.published) loadSkills()
+    } else {
+      $msg.err(json.message || '修复失败')
+      uiLog.error('SkillManager', `修复失败：${row.province}/${row.intent}`, json)
+    }
+  } catch (e) {
+    const text = $msg.errOf(e, '修复失败')
+    uiLog.error('SkillManager', `修复失败：${row.province}/${row.intent}`, text)
+  }
+})
+
 // ── 编辑弹窗内「发布上线」：复用发布流程（含二次确认，规范 4）──
 async function publishFromEdit() {
   if (!current.value) return
@@ -1172,11 +1226,16 @@ async function doDelete() {
   }
   deleting.value = true
   try {
-    await acDeleteSkill(current.value.province, current.value.intent)
+    const { province: dp, intent: di } = current.value
+    await acDeleteSkill(dp, di)
     $msg.ok('删除成功')
-    uiLog.warn('SkillManager', `删除配置：${current.value.province}/${current.value.intent}`)
+    uiLog.warn('SkillManager', `删除配置：${dp}/${di}`)
     deleteVisible.value = false
-    loadSkills()
+    // 立即从列表与缓存中移除该行（乐观更新），避免后端列表短暂最终一致导致仍显示已删项；
+    // 随后再拉取一次以对齐真实状态。
+    skills.value = skills.value.filter(s => !(s.province === dp && s.intent === di))
+    allSkillsCache.value = (allSkillsCache.value || []).filter(s => !(s.province === dp && s.intent === di))
+    await loadSkills()
   } catch (e) {
     const text = $msg.errOf(e, '删除失败')
     uiLog.error('SkillManager', `删除失败：${current.value.province}/${current.value.intent}`, text)

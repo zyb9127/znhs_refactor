@@ -185,13 +185,23 @@ class DataStep:
         raw_responses: Dict[str, Any] = {}
         passthrough: Dict[str, Any] = {}
 
-        for (api_name, _), result in zip(enabled_nodes.items(), results):
+        for (api_name, node_cfg), result in zip(enabled_nodes.items(), results):
             if isinstance(result, Exception):
                 ctx.add_error(f"接口[{api_name}]失败: {result}")
                 logger.error(f"[DataStep] ❌ {api_name}: {result}")
                 continue
             raw_responses[api_name] = result.get("raw", {})
-            merged = self._deep_merge(merged, result.get("resources", {}))
+            node_res = result.get("resources", {}) or {}
+            # 节点级映射结果摘要（生产排障：定位哪个节点产出/丢失了哪些域）
+            _rec = node_res.get("recommended_packages")
+            logger.info(
+                f"[DataStep] 节点[{api_name}] 映射摘要: "
+                f"source_type={node_cfg.get('source_type', 'api')} "
+                f"raw非空={bool(result.get('raw'))} "
+                f"产出域={list(node_res.keys())} "
+                f"推荐产品数={len(_rec) if isinstance(_rec, list) else 0}"
+            )
+            merged = self._deep_merge(merged, node_res)
             if result.get("passthrough"):
                 passthrough.update(result["passthrough"])
 
@@ -199,9 +209,73 @@ class DataStep:
         if not merged.get("recommended_packages") and merged.get("candidate_products"):
             merged["recommended_packages"] = merged.pop("candidate_products")
 
+        # 兜底自愈：存在 api 节点、原始响应里有推荐列表，但映射后 recommended_packages 为空
+        # ——通常是 ES 配置的 response_extract 缺失/改名了 recommended_packages 映射（如北京生产问题）。
+        # 仅在「当前为空」时触发，绝不覆盖已成功映射的结果；direct 直传模式响应里不含
+        # bean.recommend_results，不会误触发，其他省份行为不变。仍打 WARNING 提示修正配置。
+        if not merged.get("recommended_packages"):
+            merged["recommended_packages"] = self._salvage_recommendations(raw_responses)
+
         return {"resources": merged, "raw_responses": raw_responses, "passthrough": passthrough}
 
+    @staticmethod
+    def _salvage_recommendations(raw_responses: Dict[str, Any]) -> list:
+        """从原始响应中按常见路径兜底提取推荐产品列表（映射缺失时的自愈）。
+
+        探测路径（按优先级）：bean.recommend_results / recommend_results / bean.recommendResults /
+        recommendResults / bean.recommendList / recommendList。命中即返回该列表并打 WARNING，
+        提示运营修正该节点的 response_extract（recommended_packages → bean.recommend_results）。
+        未命中返回 []（保持原行为）。
+        """
+        probe_keys = ("recommend_results", "recommendResults", "recommendList")
+        for api_name, raw in raw_responses.items():
+            if not isinstance(raw, dict):
+                continue
+            bean = raw.get("bean") if isinstance(raw.get("bean"), dict) else {}
+            for pk in probe_keys:
+                hits = bean.get(pk) if isinstance(bean.get(pk), list) else raw.get(pk)
+                if isinstance(hits, list) and hits:
+                    logger.warning(
+                        f"[DataStep] ⚠️ 兜底自愈：节点[{api_name}] 原始响应含推荐列表 "
+                        f"'{pk}'（{len(hits)} 条），但配置未映射 recommended_packages，"
+                        f"已自动采用该列表。请尽快修正该节点 response_extract："
+                        f"recommended_packages → bean.{pk}"
+                    )
+                    return hits
+        return []
+
     # ── 单接口调用 ────────────────────────────────────────────────
+
+    def _log_api_call(
+        self,
+        api_name: str,
+        api_cfg: Dict[str, Any],
+        ctx: FlowContext,
+        params: Any,
+        *,
+        response: Any,
+        elapsed_ms: float,
+        timeout_s: Optional[float] = None,
+        error: Optional[str] = None,
+    ) -> None:
+        """把接口查询模式下的一次下游调用（请求参数/响应结果）写入分省接口日志。
+        任何异常都被吞掉，绝不影响主流程。"""
+        try:
+            from utils.province_logger import log_api_call
+            log_api_call(
+                self.province, getattr(ctx, "intent", ""),
+                getattr(ctx, "trace_id", ""), getattr(ctx, "phone", ""),
+                api_name=api_name,
+                url=str(api_cfg.get("url") or ""),
+                method=str(api_cfg.get("method") or "POST"),
+                request=params,
+                response=response,
+                elapsed_ms=elapsed_ms,
+                timeout_s=timeout_s,
+                error=error,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[DataStep] 分省接口日志写入跳过: {e}")
 
     async def _call_one(
         self,
@@ -280,11 +354,30 @@ class DataStep:
 
         params = self._build_params(api_cfg, ctx, flattened_extra)
         timeout = float(api_cfg.get("timeout_seconds") or self.DEFAULT_TIMEOUT)
+        _api_t0 = time.perf_counter()
         try:
             raw = await asyncio.wait_for(api_client.call(api_cfg, params), timeout=timeout)
         except asyncio.TimeoutError:
+            self._log_api_call(
+                api_name, api_cfg, ctx, params,
+                response=None, elapsed_ms=(time.perf_counter() - _api_t0) * 1000,
+                timeout_s=timeout, error=f"timeout>{timeout}s",
+            )
             raise TimeoutError(f"接口 {api_name} 超时（>{timeout}s）")
+        except Exception as e:  # 其余网络/上游异常：先落分省接口日志再原样抛出
+            self._log_api_call(
+                api_name, api_cfg, ctx, params,
+                response=None, elapsed_ms=(time.perf_counter() - _api_t0) * 1000,
+                timeout_s=timeout, error=f"{type(e).__name__}: {e}",
+            )
+            raise
         raw = raw or {}
+        # 分省接口调用日志：请求参数 + 响应结果（便于按省排查接口查询链路）
+        self._log_api_call(
+            api_name, api_cfg, ctx, params,
+            response=raw, elapsed_ms=(time.perf_counter() - _api_t0) * 1000,
+            timeout_s=timeout, error=None,
+        )
 
         # ── 新式两步映射（response_extract + field_transform）──
         # 入口守卫：只要配了 response_extract 或 field_transform 任一即触发映射。
@@ -302,8 +395,43 @@ class DataStep:
             logger.debug(f"[DataStep] 两步映射完成: {api_name}")
             return {"raw": raw, "resources": resources}
 
-        logger.warning(f"[DataStep] {api_name} 未配置 response_extract / field_transform，无法映射")
-        return {"raw": raw, "resources": {}}
+        # 零配置兜底（与直传模式的零配置行为对齐）：未配置任何映射时，
+        # 从响应顶层及常见业务载体（bean/data/result）按同名标准域直接透传，
+        # 保证"未做智能映射"的接口也能让话术模板占位符拿到数据。
+        resources = self._zero_config_passthrough(raw)
+        if resources:
+            logger.info(
+                f"[DataStep] {api_name} 无映射规则，按同名标准域零配置透传: {list(resources.keys())}"
+            )
+        else:
+            logger.warning(f"[DataStep] {api_name} 未配置 response_extract / field_transform，且无同名标准域字段可透传")
+        return {"raw": raw, "resources": resources}
+
+    @staticmethod
+    def _zero_config_passthrough(raw: Any) -> Dict[str, Any]:
+        """接口查询模式零配置兜底：按同名标准域从原始响应透传。
+
+        探测层级：响应顶层 → bean / data / result 子对象（常见业务载体）。
+        另外识别常见推荐列表命名（recommend_results 等）归入 recommended_packages。
+        """
+        if not isinstance(raw, dict):
+            return {}
+        resources: Dict[str, Any] = {}
+        _rec_alias = ("recommend_results", "recommendResults", "recommendList")
+        layers = [raw] + [
+            raw[k] for k in ("bean", "data", "result") if isinstance(raw.get(k), dict)
+        ]
+        for layer in layers:
+            for field in _NODE_TO_CTX_FIELD:
+                if field not in resources and layer.get(field) not in (None, "", [], {}):
+                    resources[field] = layer[field]
+            if "recommended_packages" not in resources:
+                for ra in _rec_alias:
+                    v = layer.get(ra)
+                    if isinstance(v, list) and v:
+                        resources["recommended_packages"] = v
+                        break
+        return resources
 
     # ══════════════════════════════════════════════════════════════
     # 新式两步映射
@@ -389,9 +517,21 @@ class DataStep:
                     )
             else:
                 source = None
+            # 数据源为空时响亮告警（此前静默跳过，导致 usage/tags 缺失长期不可见）：
+            # 常见原因是 response_extract 丢失了被引用的中间槽位（如 raw_tags），
+            # 或接口响应中对应路径无数据。目标域将为空 → 话术槽位取不到值。
+            if source in (None, "", [], {}):
+                logger.warning(
+                    f"[DataStep] field_transform '{target_path}' 数据源为空: "
+                    f"from='{from_field}'（中间槽位存在={from_field in extracted}，"
+                    f"extracted 槽位={list(extracted.keys())}）→ 该映射域将缺失，"
+                    f"请检查 response_extract 是否包含该槽位、接口响应对应路径是否有数据"
+                )
             rule_type  = rule.get("type", "passthrough")
             value      = self._apply_field_rule(source, rule_type, rule)
-            if value is not None:
+            # 空容器（{} / []）不写入：空数据源经 filter 规则会产出空壳子字典，
+            # 若写入会让映射域看似"有值"（truthy 外壳），污染下游空域检测与预览
+            if value not in (None, {}, []):
                 self._set_path(resources, target_path, value)
 
         return resources
@@ -446,12 +586,21 @@ class DataStep:
                 result[field] = UnitConverterRegistry.apply(converter, result[field])
                 logger.debug(f"[DataStep] Applied unit convert: {field} with {converter}")
 
-        # 2. 然后执行字段重命名
+        # 2. 然后执行字段重命名（目标名就地规范化：即使存量配置含畸形括号
+        #    「近6月平均流量((GB)）」，产出的数据键也统一为「近6月平均流量(GB)」，
+        #    保证与话术模板子字段占位符/调色板 token 同名对齐）
+        from utils.field_naming import clean_rename_field
+
         for old_name, new_name in field_rename.items():
             if old_name in result:
                 value = result.pop(old_name)
-                result[new_name] = value
-                logger.info(f"[DataStep] Renamed field '{old_name}' → '{new_name}' after unit conversion")
+                cleaned = clean_rename_field(new_name)
+                if cleaned != new_name:
+                    logger.warning(
+                        f"[DataStep] 重命名目标名含畸形括号，已规范化: '{new_name}' → '{cleaned}'"
+                    )
+                result[cleaned] = value
+                logger.info(f"[DataStep] Renamed field '{old_name}' → '{cleaned}' after unit conversion")
 
         return result
 

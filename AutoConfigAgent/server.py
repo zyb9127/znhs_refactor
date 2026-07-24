@@ -1176,6 +1176,31 @@ class SkillStatusRequest(BaseModel):
     status: str               # "published" | "draft" | "offline"
 
 
+@router.get("/skills/exists")
+async def skill_exists(province: str = "", intent: str = ""):
+    """校验某省份下是否已存在同名「场景分类」（新建 skill 的前置重名校验）。
+
+    以运行时 registry（启动时按 Redis → ES → 本地优先级加载的生效配置）为准，
+    再以本地 skills-runtime 目录兜底——确保生产环境（ES 为准）也能准确拦截重名，
+    避免仅凭本地文件误判。返回 {exists, province, intent, source}。
+    """
+    province = (province or "").strip()
+    intent = (intent or "").strip()
+    if not province or not intent:
+        return {"exists": False, "province": province, "intent": intent, "source": ""}
+    # 1) 运行时 registry —— 反映 ES/Redis 生效配置（生产权威来源）
+    try:
+        from utils.skill_runtime import skill_registry
+        if skill_registry.get(province, intent) is not None:
+            return {"exists": True, "province": province, "intent": intent, "source": "registry"}
+    except Exception:
+        logger.warning("[skill_exists] registry 不可用，回退本地目录判断", exc_info=True)
+    # 2) 本地 skills-runtime 目录兜底
+    if (SKILLS_RUNTIME / province / intent).exists():
+        return {"exists": True, "province": province, "intent": intent, "source": "local"}
+    return {"exists": False, "province": province, "intent": intent, "source": ""}
+
+
 @router.get("/skills")
 async def list_skills(province: str = "", intent: str = ""):
     """

@@ -69,8 +69,22 @@
                   </el-select>
                   <el-tag v-if="!authStore.isHQ" size="small" type="info" style="margin-left:8px;">已锁定</el-tag>
                 </el-form-item>
-                <el-form-item label="场景意图" required>
-                  <el-input v-model="wizardData.intent" placeholder="如：套餐推荐" style="width:220px;" />
+                <el-form-item label="场景分类" required
+                  :error="intentDup.exists ? `该省份下已存在场景分类「${wizardData.intent.trim()}」，请改用其他名称` : ''">
+                  <el-input
+                    v-model="wizardData.intent"
+                    placeholder="如：套餐推荐"
+                    style="width:220px;"
+                    @blur="checkIntentDuplicate"
+                    @input="onIntentInput"
+                  />
+                  <span v-if="intentChecking" style="margin-left:8px;font-size:12px;color:var(--muted);">
+                    <el-icon class="is-loading"><Loading /></el-icon> 校验中…
+                  </span>
+                  <el-tag
+                    v-else-if="intentDupChecked && !intentDup.exists && wizardData.intent.trim()"
+                    size="small" type="success" style="margin-left:8px;"
+                  >✓ 名称可用</el-tag>
                 </el-form-item>
                 <el-form-item label="描述">
                   <el-input v-model="wizardData.description" placeholder="配置功能描述" style="width:320px;" />
@@ -88,7 +102,7 @@
                 <el-button
                   type="success" plain
                   :loading="quickCreating"
-                  :disabled="!wizardData.province || !wizardData.intent"
+                  :disabled="!wizardData.province || !wizardData.intent || intentChecking || intentDup.exists"
                   @click="quickCreate"
                 >⚡ 快速创建（暂不配置接口 / 话术，稍后再补）</el-button>
                 <span class="quick-create-hint">
@@ -109,7 +123,7 @@
               <!-- 优化4：先在 ① 填省份+意图，再进入与编辑完全一致的三 Tab 编辑器 -->
               <div v-if="!wizardReady" class="wizard-gate">
                 <div class="wizard-gate-icon">🔒</div>
-                <div class="wizard-gate-title">请先在上方 ① 基本信息中选择<strong>目标省份</strong>并填写<strong>场景意图</strong></div>
+                <div class="wizard-gate-title">请先在上方 ① 基本信息中选择<strong>目标省份</strong>并填写<strong>场景分类</strong></div>
                 <div class="wizard-gate-sub">填写完成后，将进入与「智能话术配置管理 → 编辑」完全一致的三 Tab 配置界面（接口配置 / 话术模板 / 数据流映射）。</div>
               </div>
               <template v-else>
@@ -118,8 +132,12 @@
                   <el-button
                     type="primary" size="large"
                     :loading="generating"
+                    :disabled="intentChecking || intentDup.exists"
                     @click="goPreviewFromWizard"
                   >下一步：生成预览 →</el-button>
+                  <div v-if="intentDup.exists" style="margin-top:8px;font-size:12px;color:var(--danger);">
+                    该省份下已存在场景分类「{{ wizardData.intent.trim() }}」，请返回上方修改名称后再继续。
+                  </div>
                 </div>
               </template>
             </div>
@@ -187,64 +205,6 @@
         <SkillConfigEditor v-model="previewConfig" />
       </div>
 
-      <el-row :gutter="16">
-        <el-col :span="24">
-          <div class="page-card">
-            <div class="section-title">🔍 跑通校验</div>
-            <el-alert type="info" :closable="false" style="margin-bottom:12px;font-size:12px;">
-              校验接口连通性、字段提取路径与话术槽位的一致性（可选步骤，不阻断发布；接口 / 话术可稍后在编辑页补配）。
-            </el-alert>
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
-              <el-checkbox v-model="validationOptions.runApiCall">连通真实接口</el-checkbox>
-              <el-input
-                v-if="validationOptions.runApiCall"
-                v-model="validationOptions.samplePhone"
-                size="small"
-                placeholder="测试手机号"
-                style="width:140px;"
-              />
-            </div>
-            <el-button type="primary" plain size="small" :loading="validating" @click="runValidation">
-              立即校验
-            </el-button>
-
-            <div v-if="validationReport" style="margin-top:16px;">
-              <el-alert
-                :type="validationReport.passed ? 'success' : 'error'"
-                :title="validationReport.passed
-                  ? `✅ 校验通过（${validationReport.score}/100 分）`
-                  : `❌ 校验未通过（${validationReport.score}/100 分）`"
-                :closable="false"
-                show-icon
-              />
-              <div v-if="validationReport.summary?.length" style="margin-top:10px;">
-                <div v-for="(s, i) in validationReport.summary" :key="i"
-                  style="font-size:12px;color:var(--muted);margin-bottom:4px;">· {{ s }}</div>
-              </div>
-              <div v-if="issueList.length" style="margin-top:10px;">
-                <div v-for="(issue, i) in issueList" :key="i"
-                  :class="issue.level === 'critical' ? 'badge badge--err' : 'badge badge--warn'"
-                  style="margin-bottom:4px;display:flex;gap:8px;align-items:flex-start;border-radius:6px;padding:6px 10px;"
-                >
-                  <span>{{ issue.level === 'critical' ? '❌' : '⚠️' }}</span>
-                  <span style="flex:1;font-size:12px;white-space:normal;">{{ issue.message }}</span>
-                </div>
-              </div>
-              <div v-if="validationReport.suggestions?.length" style="margin-top:12px;">
-                <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;">优化建议</div>
-                <div v-for="(s, i) in validationReport.suggestions" :key="i"
-                  style="font-size:12px;color:#1864ab;background:#e7f5ff;border-radius:4px;padding:6px 10px;margin-bottom:4px;">
-                  💡 {{ s }}
-                </div>
-              </div>
-            </div>
-            <div v-else style="margin-top:12px;font-size:12px;color:var(--muted);">
-              点击「立即校验」对配置进行全面检查
-            </div>
-          </div>
-        </el-col>
-      </el-row>
-
       <div style="text-align:center;margin-top:16px;display:flex;justify-content:center;gap:12px;">
         <el-button @click="step = 'config'">← 返回修改</el-button>
         <el-button type="primary" size="large" :disabled="!canPublish" @click="goPublishSection">
@@ -269,20 +229,15 @@
           style="margin-bottom:16px;"
         />
 
-        <el-form label-position="left" label-width="140px">
-          <el-form-item label="覆盖已有配置">
-            <el-switch v-model="publishOptions.overwrite" />
-            <span style="font-size:12px;color:var(--muted);margin-left:10px;">
-              {{ publishOptions.overwrite ? '将覆盖同名配置（原版本自动备份）' : '同名时中止' }}
-            </span>
-          </el-form-item>
-          <el-form-item label="发布后热重载">
-            <el-switch v-model="publishOptions.reload" />
-            <span style="font-size:12px;color:var(--muted);margin-left:10px;">
-              {{ publishOptions.reload ? '自动触发话术智能体热重载' : '仅写文件，不重载' }}
-            </span>
-          </el-form-item>
-        </el-form>
+        <!-- 重名校验已前移至第一步「场景分类」填写后即时校验；此处仅保留热重载提示 -->
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-bottom:16px;"
+          title="发布后将自动热重载生效"
+          description="配置写入后自动触发话术智能体热重载，无需额外操作。"
+        />
 
         <div v-if="publishProgress.length" style="margin:16px 0;">
           <div v-for="s in publishProgress" :key="s.key"
@@ -333,9 +288,9 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
 import {
   acGeneratePreview as generatePreview,
-  acValidateImport  as validateImport,
   acPublishSkill    as publishSkill,
   acListSkills      as listSkills,
+  acSkillExists     as skillExists,
 } from '@/api/autoConfig.js'
 import { $msg } from '@/utils/msg'
 import { PROVINCES, provinceNameOf } from '@/utils/provinces'
@@ -353,6 +308,8 @@ const ElMessage = {
 // 选中省份后自动回填中文名（省份只能选择，不能手动输入）
 function onWizardProvinceChange(code) {
   wizardData.province_name = provinceNameOf(code)
+  // 省份变化后重新校验重名（同一场景分类在不同省份下可各自独立存在）
+  checkIntentDuplicate()
 }
 
 // ── 权限 ──────────────────────────────────────────────
@@ -363,10 +320,15 @@ const router = useRouter()
 const quickCreating = ref(false)
 async function quickCreate() {
   if (!wizardData.province || !wizardData.intent) {
-    ElMessage.warning('请先选择目标省份并填写场景意图'); return
+    ElMessage.warning('请先选择目标省份并填写场景分类'); return
   }
   if (!authStore.canWrite(wizardData.province)) {
     ElMessage.error(`当前账号无权在省份 ${wizardData.province} 下创建配置`); return
+  }
+  // 重名前置拦截：确保用最新名称校验一次（防抖期间直接点按钮）
+  await checkIntentDuplicate()
+  if (intentDup.exists) {
+    ElMessage.error(`该省份下已存在场景分类「${wizardData.intent.trim()}」，请改用其他名称`); return
   }
   const tpl = {
     meta: {
@@ -444,20 +406,9 @@ const wizardConfig = ref({
   biz_config: {
     strategy: { default_strategy: 'direct', top_n: 3, max_script_length: 150, max_parallel_scripts: 3 },
     field_aliases: {},
-    script_templates_v2: [
-      {
-        template_id: 'tpl_01',
-        template_name: '推荐话术',
-        stage: '推荐环节',
-        scene: '',
-        product_id: '',
-        template_content: '为您推荐 {pkg_brief}，更适合您的使用习惯。',
-        linked_vars: ['pkg_brief', 'cur_brief'],
-        linked_apis: [],
-        status: 'online',
-        script_requirement: '直接输出话术文本，口语化，字数150字以内。',
-      },
-    ],
+    // 不预置默认话术模板：避免生成一条空的「推荐话术/推荐环节」兜底行落库成脏数据。
+    // 话术模板由用户在编辑页/模板管理里按需新增。
+    script_templates_v2: [],
   },
 })
 
@@ -472,9 +423,58 @@ const wizardData = reactive({
 
 const allSkills = ref([])
 
+// ── 场景分类重名前置校验（填写后即校验，权威来源为 ES/registry 生效配置）──────
+const intentChecking   = ref(false)   // 正在向后端校验
+const intentDupChecked  = ref(false)  // 是否已完成一次校验（用于展示「✓ 名称可用」）
+const intentDup = reactive({ exists: false, source: '', key: '' })  // 最近一次校验结果
+let _intentCheckTimer = null
+
+/** 输入变化：清空上次校验结论并防抖触发（避免边打字边报重名） */
+function onIntentInput() {
+  intentDup.exists = false
+  intentDupChecked.value = false
+  if (_intentCheckTimer) clearTimeout(_intentCheckTimer)
+  _intentCheckTimer = setTimeout(checkIntentDuplicate, 500)
+}
+
+/** 校验「省份 + 场景分类」是否已存在（后端以 registry/ES 为准，本地目录兜底）。 */
+async function checkIntentDuplicate() {
+  if (_intentCheckTimer) { clearTimeout(_intentCheckTimer); _intentCheckTimer = null }
+  const province = wizardData.province
+  const intent = (wizardData.intent || '').trim()
+  if (!province || !intent) {
+    intentDup.exists = false; intentDupChecked.value = false; return
+  }
+  const key = `${province}::${intent}`
+  intentChecking.value = true
+  try {
+    const data = await skillExists(province, intent)
+    // 校验期间用户可能又改了名，结果过期则丢弃
+    if (`${wizardData.province}::${(wizardData.intent || '').trim()}` !== key) return
+    intentDup.exists = !!data?.exists
+    intentDup.source = data?.source || ''
+    intentDup.key = key
+    intentDupChecked.value = true
+    if (intentDup.exists) {
+      ElMessage.warning(`该省份下已存在场景分类「${intent}」，请改用其他名称`)
+    }
+  } catch (_) {
+    // 校验接口异常时不阻断（发布端 overwrite=false 仍会最终兜底拦截）
+    intentDup.exists = false; intentDupChecked.value = false
+  } finally {
+    intentChecking.value = false
+  }
+}
+
 async function goPreviewFromWizard() {
   if (!wizardData.province || !wizardData.intent) {
     ElMessage.warning('请填写省份和意图')
+    return
+  }
+  // 重名前置拦截：进入预览前用最新名称再校验一次
+  await checkIntentDuplicate()
+  if (intentDup.exists) {
+    ElMessage.error(`该省份下已存在场景分类「${wizardData.intent.trim()}」，请改用其他名称后再继续`)
     return
   }
   // 从 SkillConfigEditor 双向绑定数据中提取首个接口节点 + 模板列表
@@ -523,16 +523,12 @@ const generating = ref(false)
 const parsedTemplate = ref(null)
 const parseErrors    = ref([])
 
-// ── 预览 & 校验状态 ──────────────────────────────────
-const validating       = ref(false)
+// ── 预览状态 ──────────────────────────────────────────
 const previewData      = ref(null)
 const previewConfig    = ref({ api_nodes: {}, biz_config: {} })
-const validationReport = ref(null)
-const validationOptions = reactive({ runApiCall: false, samplePhone: '13800138000' })
 
 // ── 发布状态 ──────────────────────────────────────────
 const publishing       = ref(false)
-const publishOptions   = reactive({ overwrite: false, reload: true })
 const publishResult    = ref(null)
 const publishProgress  = ref([])
 
@@ -542,13 +538,12 @@ const publishTargetProvince = computed(() => parsedTemplate.value?.meta?.provinc
 // ── 计算属性 ──────────────────────────────────────────
 const doneStages = computed(() => ({
   config:  !!parsedTemplate.value && parseErrors.value.length === 0,
-  preview: !!previewData.value && !!validationReport.value?.passed,
+  preview: !!previewData.value,
   publish: !!publishResult.value,
 }))
 
-// 校验为可选项：进入预览后即可发布（不强制「校验通过」）
+// 进入预览后即可发布（校验环节已移除；重名在发布步骤单独拦截）
 const canPublish = computed(() => !!previewData.value)
-const issueList  = computed(() => validationReport.value?.issues || [])
 // 优化4：省份+意图齐全后才进入三 Tab 编辑器
 const wizardReady = computed(() => !!wizardData.province && !!wizardData.intent)
 
@@ -567,7 +562,6 @@ async function goPreview() {
       api_nodes:  parseContent(data.files?.api_nodes?.content  ?? data.files?.api_nodes  ?? {}),
       biz_config: parseContent(data.files?.biz_config?.content ?? data.files?.biz_config ?? {}),
     }
-    validationReport.value = null
     step.value = 'preview'
   } catch (e) {
     // 422：后端 detail 为 { message, errors }，逐条提示，避免“点击无响应”
@@ -587,23 +581,6 @@ async function goPreview() {
   } finally {
     generating.value = false
   }
-}
-
-// ── 跑通校验 ──────────────────────────────────────────
-async function runValidation() {
-  if (!parsedTemplate.value) return
-  const merged = buildMergedTemplate()
-  validating.value = true
-  try {
-    const data = await validateImport(merged, {
-      run_api_call: validationOptions.runApiCall,
-      sample_phone: validationOptions.samplePhone,
-    })
-    validationReport.value = data
-    ElMessage[data.passed ? 'success' : 'error'](
-      data.passed ? '校验通过，可发布' : '校验未通过，请先修复阻断问题',
-    )
-  } finally { validating.value = false }
 }
 
 function buildMergedTemplate() {
@@ -655,6 +632,8 @@ async function doPublish() {
     ElMessage.error(`当前账号无权发布到省份 ${publishTargetProvince.value}`)
     return
   }
+  // 重名已在第一步「场景分类」填写后即时校验拦截；此处不再重复校验。
+  // 发布端 overwrite=false 仍会对已存在配置返回 409，作为最终兜底（错误会在 catch 中透出）。
   parsedTemplate.value = buildMergedTemplate()
   publishProgress.value = [
     { key: 'validate', label: '校验配置模板',    state: 'done' },
@@ -670,25 +649,23 @@ async function doPublish() {
   try {
     const data = await publishSkill({
       template: parsedTemplate.value,
-      overwrite: publishOptions.overwrite || !previewData.value?.already_exists,
-      reload: publishOptions.reload,
+      overwrite: false,                 // 不覆盖：重名已在前面拦截
+      reload: true,                     // 发布后默认自动热重载
       validate_before_publish: false,   // 校验为可选，不阻断发布（接口/话术可稍后补配）
-      validate_run_api_call: validationOptions.runApiCall,
+      validate_run_api_call: false,
       created_by: authStore.username,   // 注入当前用户
     })
     setStep('generate', 'done')
     setStep('write', 'done', `${data.files_written?.length || 0} 个文件`)
     setStep('reload',
-      publishOptions.reload ? (data.reload?.success ? 'done' : 'error') : 'done',
-      publishOptions.reload ? (data.reload?.success ? '成功' : '失败/不可达') : '已跳过',
+      data.reload?.success ? 'done' : 'error',
+      data.reload?.success ? '成功' : '失败/不可达',
     )
     publishResult.value = data
     ElMessage.success('发布成功！')
     loadAllSkills()
   } catch (err) {
     const detail = err.response?.data?.detail
-    const validation = detail?.validation
-    if (validation) validationReport.value = validation
     // 把后端失败原因透出到步骤详情 + toast，避免只显示「X生成配置代码」无从排查
     let reason = ''
     if (detail && typeof detail === 'object') reason = detail.message || ''
@@ -709,10 +686,11 @@ function resetAll() {
     version: '1.0.0', author: authStore.username,
   })
   parsedTemplate.value  = null; parseErrors.value     = []
-  previewData.value     = null; validationReport.value = null
+  previewData.value     = null
   previewConfig.value   = { api_nodes: {}, biz_config: {} }
   publishResult.value   = null; publishProgress.value  = []
-  publishOptions.overwrite = false; publishOptions.reload = true
+  intentDup.exists = false; intentDup.source = ''; intentDup.key = ''
+  intentDupChecked.value = false; intentChecking.value = false
 }
 
 // ── 初始化 ────────────────────────────────────────────

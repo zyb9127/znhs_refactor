@@ -8,7 +8,7 @@
 __pycache__/
 *.pyc
 *.pyo
-.venv/
+.venv
 venv/
 
 # Node
@@ -45,3 +45,8 @@ frontend/znhs@1.0.0
 
 # 本地 agent 配置备份
 config/agents_config.json.bak
+
+# 所有 .bak 备份文件
+*.bak
+*.bak2
+*.bak3

@@ -1,0 +1,12 @@
+{
+  "_说明": [
+    "北京套餐推荐 response_extract 修正片段（最小化）",
+    "用法：PUT /api/interfaces/beijing/套餐推荐/北京测试接口_api",
+    "浅合并语义：只覆盖 response_extract，headers/field_transform 等不受影响"
+  ],
+  "response_extract": {
+    "raw_tags": "bean.tags",
+    "current_package": "bean.mainoffer",
+    "recommended_packages": "bean.recommend_results"
+  }
+}

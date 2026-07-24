@@ -118,6 +118,8 @@ Step 实例按 `province:intent` 维度缓存（`StepBundle`），同省同意�
 
 **触发条件**：当 `/Users/zyb/Documents/python/` 下出现新的 `znhs_refactor*.zip` 压缩包时，执行以下流程。
 
+**原则**：Git 管理自定义修改，新包为唯一真实来源，直接全覆盖。
+
 ### 替换步骤
 
 ```bash

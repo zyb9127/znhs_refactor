@@ -11,8 +11,8 @@
     <header class="sd-head">
       <h1 class="sd-title">📖 智能话术配置用户手册</h1>
       <p class="sd-sub">
-        一个智能话术配置 = <b>省份 + 业务意图</b> 的完整话术能力包。
-        上线一个智能话术配置，你只需要准备两样材料：<b>接口文档</b>（含成功响应示例 JSON）和 <b>话术文案</b>（含适用环节/场景）。
+        一个智能话术配置 = <b>省份 + 场景分类</b> 的完整话术能力包。
+        上线一个智能话术配置，你只需要准备两样材料：<b>接口文档</b>（含请求头、成功响应示例 JSON）和 <b>话术文案</b>（含适用环节/场景）。
         本手册按配置顺序分四章，建议先读第一章了解整体流程，再按需查阅各章细节。
       </p>
       <nav class="sd-nav">
@@ -55,42 +55,42 @@
       <div class="sd-stage">
         <div class="sd-stage-num">1</div>
         <div class="sd-stage-name">创建智能话术配置</div>
-        <div class="sd-stage-do">填写省份代码、意图名称</div>
-        <div class="sd-stage-out">产出：空白 智能话术配置包</div>
+        <div class="sd-stage-do">填写省份、场景分类（即时重名校验）</div>
+        <div class="sd-stage-out">产出：空白配置包 / 快速创建骨架</div>
       </div>
       <div class="sd-stage-arrow">→</div>
       <div class="sd-stage">
         <div class="sd-stage-num">2</div>
         <div class="sd-stage-name">配置接口</div>
-        <div class="sd-stage-do">录入 URL / 请求模板 / Mock</div>
+        <div class="sd-stage-do">透传或查询；查询模式配 URL / 请求头 / 模板</div>
         <div class="sd-stage-out">产出：可调用的数据源</div>
       </div>
       <div class="sd-stage-arrow">→</div>
       <div class="sd-stage">
         <div class="sd-stage-num">3</div>
         <div class="sd-stage-name">数据映射</div>
-        <div class="sd-stage-do">响应字段 → 标准数据域</div>
-        <div class="sd-stage-out">产出：话术可用变量</div>
+        <div class="sd-stage-do">响应字段 → 标准域，或勾选透传字段</div>
+        <div class="sd-stage-out">产出：话术可用变量（含子字段）</div>
       </div>
       <div class="sd-stage-arrow">→</div>
       <div class="sd-stage">
         <div class="sd-stage-num">4</div>
         <div class="sd-stage-name">配置话术模板</div>
-        <div class="sd-stage-do">写话术 + 勾选关联变量</div>
+        <div class="sd-stage-do">写话术 + 拖入占位符 / 子字段</div>
         <div class="sd-stage-out">产出：话术生成规则</div>
       </div>
       <div class="sd-stage-arrow">→</div>
       <div class="sd-stage">
         <div class="sd-stage-num">5</div>
         <div class="sd-stage-name">检查与测试</div>
-        <div class="sd-stage-do">数据流闭环检查 + 测试弹窗</div>
+        <div class="sd-stage-do">列表「测试」弹窗验证话术</div>
         <div class="sd-stage-out">产出：验证通过的配置</div>
       </div>
       <div class="sd-stage-arrow">→</div>
       <div class="sd-stage hl">
         <div class="sd-stage-num">6</div>
         <div class="sd-stage-name">发布上线</div>
-        <div class="sd-stage-do">发布 + 热重载即时生效</div>
+        <div class="sd-stage-do">发布后自动热重载（不覆盖同名）</div>
         <div class="sd-stage-out">产出：线上可用智能话术配置</div>
       </div>
     </div>
@@ -286,11 +286,11 @@
       </section>
     </div>
 
-    <h3 class="sd-h3">数据流闭环检查</h3>
+    <h3 class="sd-h3">映射结果与自愈修复</h3>
     <ol class="sd-manual-list">
-      <li>「数据流映射」Tab 可视化展示 <b>接口产出 ↔ 话术消费</b> 的对应关系</li>
-      <li>左侧按接口分组展示产出的标准数据域及字段；右侧话术模板分「已关联 / 未关联」两组</li>
-      <li>出现红色「<b>变量未闭环</b>」提示，说明话术用到的变量没有接口为它供数——返回出参映射补配对应域即可</li>
+      <li>接口列表的「<b>映射结果</b>」可查看该接口写入的 7 大标准域取值</li>
+      <li>话术模板「可映射固定域」中带 <b>▾</b> 的标签可展开字典子字段，插入 <code>{域[子键]}</code> 精确占位符</li>
+      <li>若生产配置丢失标准域映射（如 <code>raw_tags</code> / <code>recommended_packages</code>），在列表点「<b>修复</b>」：基于 ES 当前配置自愈并发布生效</li>
     </ol>
 
     <!-- ═════════ 第四章 · 话术模板配置说明 ═════════ -->
@@ -375,7 +375,7 @@
     </div>
 
     <p class="sd-tip">
-      配置完成后，回到<b>第一章流程的第 5、6 步</b>：在「数据流映射」确认变量闭环 → 「测试」弹窗填手机号验证话术效果 → 「发布」上线。
+      配置完成后，回到<b>第一章流程的第 5、6 步</b>：列表「测试」弹窗填手机号验证话术效果 → 「发布」上线（自动热重载）。映射异常可点「修复」。
     </p>
   </div>
 </template>
@@ -383,24 +383,24 @@
 <script setup>
 // ── 第一章：整体流程各阶段说明 ─────────────────────────
 const STAGES = [
-  { num: 1, name: '创建智能话术配置', where: '创建 智能话术配置页（智能话术配置管理 → 导入新智能话术配置）',
-    what: '填写省份代码（如 guangdong）、意图名称（如 套餐推荐）',
-    key: '一个业务意图对应一个 智能话术配置包' },
+  { num: 1, name: '创建智能话术配置', where: '智能话术配置管理 → 创建新配置',
+    what: '填写目标省份、场景分类（填写后即时校验同省是否重名）；可用「快速创建」先建骨架',
+    key: '一个场景分类对应一个智能话术配置包；不支持覆盖同名' },
   { num: 2, name: '配置接口', where: '接口配置 Tab → 新建接口',
-    what: '录入 URL、请求方法、请求模板，或上传文档自动解析',
-    key: '接口未就绪可先开 Mock 模式联调（详见第二章）' },
-  { num: 3, name: '数据映射', where: '编辑接口 → ③ 出参映射',
-    what: '把接口响应字段填入标准数据域，推荐用智能自动映射',
-    key: '映射后话术变量才有真实值（详见第三章）' },
+    what: '选透传或接口查询；查询模式录入 URL、请求头、请求模板；或上传文档自动解析',
+    key: '省侧渠道头（如北京 x-Channel-ID）在「请求头」配置；未就绪可开 Mock' },
+  { num: 3, name: '数据映射', where: '编辑接口 → 出参映射 / 透传字段',
+    what: '接口查询：响应字段填入标准域；透传：勾选要暴露的入参字段',
+    key: '映射后话术变量才有真实值；可用「修复」自愈缺失映射' },
   { num: 4, name: '配置话术模板', where: '话术模板 Tab → 添加模板',
-    what: '填写环节/场景/产品 ID，编写含占位符的话术并勾选关联变量',
-    key: '占位符与关联变量需配套（详见第四章）' },
-  { num: 5, name: '检查与测试', where: '数据流映射 Tab + 列表「测试」按钮',
-    what: '确认无「变量未闭环」红色提示；测试弹窗填手机号验证话术效果',
-    key: '测试通过再发布，避免线上空变量' },
-  { num: 6, name: '发布上线', where: '智能话术配置管理列表「发布」按钮',
-    what: '发布后可选自动热重载，配置立即生效',
-    key: '后续修改会回到「编辑中」，需重新发布' },
+    what: '填写场景分类名称/环节/产品 ID，编写含占位符的话术；可展开子字段精确匹配',
+    key: '占位符与关联变量需配套；建议 150 字以内' },
+  { num: 5, name: '检查与测试', where: '列表「测试」按钮',
+    what: '智能填充测试参数 → 执行推荐，核对 Step1～3 与话术变量是否有值',
+    key: '测试通过再发布，避免线上空变量或仅 1 条兜底' },
+  { num: 6, name: '发布上线', where: '列表「发布」或创建流程确认发布',
+    what: '发布后自动热重载立即生效；重名须改场景分类名称',
+    key: '后续修改需重新发布；异常映射可点「修复」' },
 ]
 
 // ── 第二章：接口文档要素与字段说明 ──────────────────────
@@ -408,6 +408,7 @@ const IFC_DOC_ITEMS = [
   { name: '接口名称', required: '必须', desc: '英文标识，如 marketing_recommend_api，作为接口节点的唯一名称' },
   { name: '接口描述', required: '建议', desc: '一句话说明接口用途，如「营销推荐主接口」' },
   { name: 'URL + 请求方式', required: '必须', desc: '完整地址与 GET/POST，如 POST http://10.0.0.1:8080/api/recommend' },
+  { name: '请求头', required: '按需', desc: '省侧渠道/鉴权头。例：北京查询接口需带 x-Channel-ID: ngbusi（在编辑弹窗「请求头」配置）' },
   { name: '请求参数说明', required: '必须', desc: '字段名、类型、含义，如 phone(string) 用户手机号' },
   { name: '成功响应示例 JSON', required: '必须', desc: '一份真实/模拟的完整响应。出参映射和智能解析全靠它，缺失则无法自动映射' },
   { name: '响应字段说明', required: '建议', desc: '关键字段的业务含义，帮助智能映射更准确' },
@@ -417,22 +418,23 @@ const IFC_FIELDS = [
   { key: 'api_name', label: '接口名称', desc: '英文唯一标识，如 marketing_recommend_api' },
   { key: 'description', label: '接口描述', desc: '用途说明，显示在接口列表中' },
   { key: 'url', label: '请求地址', desc: '完整 URL，如 http://host:port/api/recommend' },
-  { key: 'method', label: '请求方式', desc: 'GET 或 POST' },
-  { key: 'request_template', label: '请求模板', desc: '请求体 JSON，支持 {phone}、{province} 等变量，运行时自动替换为真实值' },
+  { key: 'method', label: '请求方式', desc: 'GET / POST / PUT' },
+  { key: 'headers', label: '请求头', desc: '键值对；运行时叠加在默认 Content-Type/Accept 之上。例：x-Channel-ID=ngbusi' },
+  { key: 'request_template', label: '请求模板', desc: '请求体 JSON，支持 {{PHONE}}、{{PROVINCE}}、{{INTENT}}、{{extra_data.xxx}}' },
   { key: 'response_extract', label: '响应提取', desc: '按 JSON 路径取数写入标准域（第三章详述）' },
-  { key: 'field_transform', label: '字段加工', desc: '字段筛选 / 单位换算后写入标准域（第三章详述）' },
+  { key: 'field_transform', label: '字段加工', desc: '字段筛选 / 单位换算 / 重命名后写入标准域（第三章详述）' },
   { key: 'mock_mode', label: 'Mock 开关', desc: 'true 时不调真实接口，直接返回 mock_response' },
   { key: 'mock_response', label: 'Mock 响应', desc: '模拟响应 JSON，结构需与真实接口一致' },
 ]
 
 // ── 第四章：话术模板字段说明 ───────────────────────────
 const TPL_FIELDS = [
-  { name: '模板名称', required: '必须', desc: '便于识别的名称，如「营销推荐」「挽留话术」「开场白」' },
-  { name: '应用环节', required: '必须', desc: '话术在通话流程中的位置，如 开场环节 / 推荐环节 / 挽留环节' },
+  { name: '场景分类名称', required: '必须', desc: '模板标识，如「套餐推荐话术_5G升档」' },
+  { name: '应用环节', required: '按需', desc: '话术在通话流程中的位置，如 开场环节 / 推荐环节 / 挽留环节' },
   { name: '应用场景', required: '可选', desc: '细分触发场景，如 流量不足 / 合约到期；留空表示该环节通用' },
-  { name: '产品 ID', required: '可选', desc: '关联的推荐产品编码（如 P200），同一话术可关联多个产品；留空表示不限产品' },
-  { name: '话术内容', required: '必须', desc: '固定文案 + {变量} 占位符，如「为您推荐{pkg_brief}，性价比更高」' },
-  { name: '关联变量', required: '按需', desc: '勾选话术用到的变量，生成时系统把变量真实值注入大模型 Prompt' },
+  { name: '产品 ID', required: '可选', desc: '关联的推荐产品编码；多个用英文逗号或换行；留空表示兜底模板' },
+  { name: '话术内容', required: '必须', desc: '固定文案 + {变量} 或 {域[子键]} 占位符；建议 150 字以内' },
+  { name: '关联变量', required: '按需', desc: '系统按占位符自动推荐勾选；生成时注入大模型 Prompt' },
   { name: '状态', required: '必须', desc: 'online（启用）/ offline（停用），停用的模板不参与话术生成' },
 ]
 
@@ -467,8 +469,8 @@ const GENERATED_VARS = [
 ]
 
 // ── 导入文件样例与模板 ─────────────────────────────────
-const TPL_CSV_SAMPLE = `模板名称,应用环节,应用场景,产品ID,话术内容,关联变量,状态
-营销推荐,推荐环节,流量不足,P200,"您目前使用的是{cur_brief}，结合您近期的用量情况，为您推荐{pkg_brief}，性价比更高。",pkg_brief|usage|current_package,online
+const TPL_CSV_SAMPLE = `场景分类名称,环节,意图,产品ID,话术内容,关联变量(可留空),状态(online/offline)
+套餐推荐,推荐环节,流量不足,P200,"您目前使用的是{cur_brief}，结合您近期的用量情况，为您推荐{pkg_brief}，性价比更高。",pkg_brief|usage|current_package,online
 挽留话术,挽留环节,,,"理解您的顾虑，{pkg_brief}首月还有专属优惠，您可以先体验一个月看看效果。",pkg_brief,online
 开场白,开场环节,,,您好，我是中国电信客服专员，本次来电是为您做一次套餐使用情况的免费检测。,,online`
 
@@ -477,6 +479,10 @@ const IFC_JSON_SAMPLE = `{
   "description": "营销推荐主接口",
   "url": "http://host:port/api/recommend",
   "method": "POST",
+  "headers": {
+    "Content-Type": "application/json",
+    "x-Channel-ID": "ngbusi"
+  },
   "request_template": {
     "phone": "{{PHONE}}",
     "province": "{{PROVINCE}}",

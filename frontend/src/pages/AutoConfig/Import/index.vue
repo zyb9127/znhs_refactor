@@ -32,12 +32,11 @@
       <div class="wizard-banner">
         <span class="wizard-banner-icon">🛠️</span>
         <div>
-          <div class="wizard-banner-title">创建智能话术配置三步走：① 基本信息 → ② 接口配置 · 标准数据关联 · 话术模板 → ③ 预览发布</div>
+          <div class="wizard-banner-title">创建智能话术配置三步走：① 基本信息 → ② 接口 / 话术模板 → ③ 预览发布</div>
           <div class="wizard-banner-sub">
-            编辑界面与 <strong>智能话术配置管理 → 编辑</strong> 完全一致，分三个 Tab 操作：
-            <strong>接口配置</strong>（接口地址 + 出参映射到标准数据域）→
-            <strong>话术模板</strong>（编写话术并勾选关联变量）→
-            <strong>数据流映射</strong>（检查 接口产出 ↔ 话术变量 是否闭环）。
+            编辑界面与 <strong>智能话术配置管理 → 编辑</strong> 完全一致，两个 Tab：
+            <strong>接口配置</strong>（透传或查询；查询模式可配请求头 + 出参映射）→
+            <strong>话术模板</strong>（编写话术并拖入占位符 / 子字段）。也可先点「快速创建」建骨架再补配。
           </div>
         </div>
       </div>
@@ -116,7 +115,7 @@
               <div class="section-title">
                 ② 接口 / 话术模板配置
                 <span style="margin-left:10px;font-size:12px;font-weight:400;color:var(--muted);">
-                  下方编辑器与「智能话术配置管理 → 编辑」完全一致，含数据流映射检查
+                  下方编辑器与「智能话术配置管理 → 编辑」完全一致（接口配置 / 话术模板）
                 </span>
               </div>
 
@@ -124,7 +123,7 @@
               <div v-if="!wizardReady" class="wizard-gate">
                 <div class="wizard-gate-icon">🔒</div>
                 <div class="wizard-gate-title">请先在上方 ① 基本信息中选择<strong>目标省份</strong>并填写<strong>场景分类</strong></div>
-                <div class="wizard-gate-sub">填写完成后，将进入与「智能话术配置管理 → 编辑」完全一致的三 Tab 配置界面（接口配置 / 话术模板 / 数据流映射）。</div>
+                <div class="wizard-gate-sub">填写完成后（名称校验通过），将进入与「智能话术配置管理 → 编辑」一致的双 Tab 配置界面（接口配置 / 话术模板）。</div>
               </div>
               <template v-else>
                 <SkillConfigEditor v-model="wizardConfig" />
@@ -150,31 +149,26 @@
               <div class="section-title">📖 操作指南</div>
               <div class="guide-steps">
                 <div class="guide-step"><div class="guide-num">1</div>
-                  <div class="guide-text"><strong>基本信息</strong><br>填写省份代码（如 guangdong）、意图名称（如 套餐推荐）</div>
+                  <div class="guide-text"><strong>基本信息</strong><br>选择目标省份、填写场景分类（填写后即时校验同省是否重名）</div>
                 </div>
                 <div class="guide-step"><div class="guide-num">2</div>
                   <div class="guide-text"><strong>接口配置</strong>（Tab ①）<br>
-                    填写接口 URL、请求模板。接口地址未确定时可先开启 <strong>Mock 模式</strong>，录入模拟响应 JSON 即可联调
+                    默认透传模式；接口查询模式需填 URL、请求模板、<strong>请求头</strong>（如北京 <code>x-Channel-ID</code>）。未就绪可开 Mock
                   </div>
                 </div>
                 <div class="guide-step"><div class="guide-num">3</div>
-                  <div class="guide-text"><strong>标准数据关联</strong>（接口编辑 → 出参映射）<br>
-                    把接口响应字段映射到 7 大标准数据域（当前套餐 / 历史用量 / 用户标签 等），推荐用「智能自动映射」一键生成规则
+                  <div class="guide-text"><strong>出参映射 / 透传字段</strong><br>
+                    查询模式：映射到 7 大标准域（可用智能分析）；透传模式：勾选要暴露的入参字段
                   </div>
                 </div>
                 <div class="guide-step"><div class="guide-num">4</div>
                   <div class="guide-text"><strong>话术模板</strong>（Tab ②）<br>
-                    至少添加一条话术；内容用 <code>{pkg_brief}</code>、<code>{usage}</code> 等占位符，并在「关联变量」中勾选对应变量（系统会自动推荐）
+                    编写含 <code>{pkg_brief}</code> 等占位符的话术；带 ▾ 的域可展开选子字段精确匹配
                   </div>
                 </div>
                 <div class="guide-step"><div class="guide-num">5</div>
-                  <div class="guide-text"><strong>数据流映射检查</strong>（Tab ③）<br>
-                    确认每条话术需要的变量都有接口供应，出现"变量未闭环"提示时返回上两步补配
-                  </div>
-                </div>
-                <div class="guide-step"><div class="guide-num">6</div>
-                  <div class="guide-text"><strong>生成预览 → 校验 → 发布</strong><br>
-                    校验通过后发布到 skills-runtime，可选择自动热重载使其立即生效
+                  <div class="guide-text"><strong>生成预览 → 发布</strong><br>
+                    发布后自动热重载；不支持覆盖同名配置。也可第一步直接「快速创建」先建骨架
                   </div>
                 </div>
               </div>

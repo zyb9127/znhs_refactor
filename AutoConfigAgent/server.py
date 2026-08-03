@@ -94,6 +94,18 @@ def _enforce_province_write(request: Request, target_province: str) -> None:
         return  # 独立启动模式：无鉴权体系，放行
     check_province_write(request, target_province)
 
+
+def _get_user_province_safe(request: Request) -> Optional[str]:
+    """获取当前账号所属省份 code；本部/鉴权未启用/独立启动模式返回 None（无省份限制）。"""
+    try:
+        from utils.auth_utils import get_user_province
+    except Exception:
+        return None
+    try:
+        return get_user_province(request)
+    except Exception:
+        return None
+
 # 独立启动时的 FastAPI 应用（兼容旧用法，推荐 python main.py 统一启动）
 app = FastAPI(
     title="自动配置智能体",
@@ -1644,13 +1656,28 @@ async def skill_context_audit(province: str, intent: str):
 
 
 @router.get("/skills/export")
-async def export_all_skills(province: str = "", intent: str = "", download: bool = True):
+async def export_all_skills(
+    request: Request, province: str = "", intent: str = "", download: bool = True
+):
     """一键导出全部技能包配置（接口 + 话术模板 + 结构化信息）。
 
     数据以「运行时生效配置」为准（skill_registry，来源 ES/Redis，
     与 SkillManager 同步后的内容一致）；registry 不可用时回退本地文件。
     可选 province/intent 过滤。download=true 时返回带下载头的附件。
+
+    分省权限：省份账号只能导出**本省**配置（即便传了其它 province 也会被拒/收敛到本省）；
+    本部账号或鉴权未启用时可按 province/intent 自由过滤、导出全部。
     """
+    # ── 分省权限收敛：非本部账号强制只导出本省，避免越权拿到其它省配置 ──
+    user_province = _get_user_province_safe(request)
+    if user_province is not None:
+        if province and province != user_province:
+            raise HTTPException(
+                status_code=403,
+                detail=f"无权导出其他省份配置（您的省份：{user_province}，请求省份：{province}）",
+            )
+        province = user_province
+
     now = datetime.now()
     export: Dict[str, Any] = {
         "export_meta": {
@@ -1755,6 +1782,145 @@ async def export_all_skills(province: str = "", intent: str = "", download: bool
             headers={"Content-Disposition": f'attachment; filename="{fname}"'},
         )
     return Response(content=body, media_type="application/json; charset=utf-8")
+
+
+class SkillsImportRequest(BaseModel):
+    """/skills/import 请求体：直接把 /skills/export 导出的 JSON 原样回传即可。
+
+    export 文件顶层是 {export_meta, skills:[...]}，其字段与本模型对应；
+    多余字段（export_meta 等）忽略。也可只传 skills 列表。"""
+    skills: Optional[List[Dict[str, Any]]] = None
+    export_meta: Optional[Dict[str, Any]] = None      # 兼容直接回传导出文件
+    config_types: Optional[List[str]] = None          # 默认 ["api_nodes", "biz_config"]
+    dry_run: bool = False                             # 只校验、不写入
+
+
+@router.post("/skills/import")
+async def import_all_skills(req: SkillsImportRequest, request: Request):
+    """批量导入技能包配置（接口 api_nodes + 话术模板 biz_config），与 /skills/export 往返对称。
+
+    直接把导出的 JSON 文件回传即可整批还原到 ES（唯一写路径 publish_config，
+    保存即自愈：usage 字段「实际→规范名」重命名、中间集转直连、畸形括号规范化等都会自动应用）。
+
+    - 逐技能包按 config_type 写入，broadcast/reload 关闭，最后按受影响技能包统一热重载+广播一次，
+      避免逐条广播风暴；
+    - 省份写权限逐技能包校验：无权限的技能包记为 skipped，不阻断其余导入；
+    - dry_run=true 只校验不写入，用于导入前预检。
+    """
+    skills = req.skills or []
+    if not skills:
+        raise HTTPException(status_code=400, detail="导入内容为空：需要 skills 列表（可直接回传导出文件）")
+
+    config_types = req.config_types or ["api_nodes", "biz_config"]
+    invalid_ct = [c for c in config_types if c not in ("api_nodes", "biz_config")]
+    if invalid_ct:
+        raise HTTPException(status_code=400, detail=f"不支持的 config_type: {invalid_ct}")
+
+    try:
+        from services.skill_publisher import publish_config  # 延迟 import
+    except ImportError:
+        raise HTTPException(status_code=503, detail="发布器不可用（独立启动模式不支持批量导入到 ES）")
+
+    operator = "skills_import"
+    results: List[Dict[str, Any]] = []
+    affected: List[Tuple[str, str]] = []
+    ok_count = skip_count = fail_count = 0
+
+    for idx, skill in enumerate(skills):
+        if not isinstance(skill, dict):
+            fail_count += 1
+            results.append({"index": idx, "status": "failed", "error": "技能包不是对象"})
+            continue
+        province = str(skill.get("province") or "").strip()
+        intent = str(skill.get("intent") or "").strip()
+        if not province or not intent:
+            fail_count += 1
+            results.append({"index": idx, "status": "failed",
+                            "error": "缺少 province/intent"})
+            continue
+
+        # 省份写权限：无权限只跳过该技能包，不影响其余
+        try:
+            _enforce_province_write(request, province)
+        except HTTPException:
+            skip_count += 1
+            results.append({"province": province, "intent": intent,
+                            "status": "skipped", "error": "无该省份写权限"})
+            continue
+
+        entry: Dict[str, Any] = {"province": province, "intent": intent,
+                                 "status": "ok", "written": [], "notes": []}
+        skill_ok = True
+        for ct in config_types:
+            data = skill.get(ct)
+            if not isinstance(data, dict) or not data:
+                continue   # 该技能包没有这类配置，跳过（不视为失败）
+            if req.dry_run:
+                entry["written"].append(f"{ct}(dry_run)")
+                continue
+            try:
+                pub = publish_config(
+                    province, intent, ct, data,
+                    operator=operator, comment="批量导入还原",
+                    reload=False, broadcast=False,   # 批量收尾统一热重载+广播
+                )
+            except Exception as e:  # noqa: BLE001
+                skill_ok = False
+                entry["notes"].append(f"{ct}: 写入异常 {e}")
+                continue
+            if pub.success:
+                entry["written"].append(ct)
+                # publish_config 的 warnings 含「保存即自愈」明细（实际→规范名等）
+                for w in (pub.warnings or []):
+                    entry["notes"].append(f"{ct}: {w}")
+            else:
+                skill_ok = False
+                entry["notes"].append(f"{ct}: 写入失败 {pub.message}")
+
+        if not entry["written"] and not req.dry_run:
+            skill_ok = False
+            if not entry["notes"]:
+                entry["notes"].append("无可导入的 api_nodes/biz_config")
+
+        if skill_ok:
+            ok_count += 1
+            if not req.dry_run and (province, intent) not in affected:
+                affected.append((province, intent))
+        else:
+            fail_count += 1
+            entry["status"] = "failed"
+        results.append(entry)
+
+    # 收尾：受影响技能包统一热重载 + 广播一次（避免逐条广播风暴）
+    if affected:
+        try:
+            from utils.skill_runtime import skill_registry as _reg, IS_DEV  # 延迟 import
+        except ImportError:
+            _reg, IS_DEV = None, True
+        for p, i_ in affected:
+            try:
+                if _reg is not None:
+                    _reg.reload(p, i_)
+                if not IS_DEV:
+                    from services.redis_config_bus import redis_config_bus  # 延迟 import
+                    if redis_config_bus.enabled:
+                        redis_config_bus.publish_change(p, i_)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[import] 收尾热重载/广播失败 %s/%s: %s", p, i_, e)
+
+    logger.info(
+        "[import] 批量导入完成：成功 %d 跳过 %d 失败 %d（dry_run=%s）",
+        ok_count, skip_count, fail_count, req.dry_run,
+    )
+    return {
+        "success": fail_count == 0,
+        "message": (f"{'预检' if req.dry_run else '导入'}完成："
+                    f"成功 {ok_count}，跳过 {skip_count}，失败 {fail_count}"),
+        "dry_run": req.dry_run,
+        "summary": {"ok": ok_count, "skipped": skip_count, "failed": fail_count,
+                    "total": len(skills)},
+        "results": results,
+    }
 
 
 @router.get("/skills/{province}/{intent}/as-template")

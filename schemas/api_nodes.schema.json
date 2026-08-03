@@ -19,11 +19,11 @@
         },
         "response_extract": {
           "type": "object",
-          "description": "第 1 步：{槽位名: 点分路径}，从原始响应取值到中间槽位；路径空或 $result 取整个响应；槽位名属于 7 大标准域时自动透传"
+          "description": "第 1 步：{标准域名: 点分路径}，从原始响应整块取值；路径空或 $result 取整个响应；槽位名属于 7 大标准域时自动透传。需拆分的混合对象无需在此预先提取，交给 field_transform 用真实路径直取"
         },
         "field_transform": {
           "type": "object",
-          "description": "第 2 步：{目标路径: 规则}，规则字段 from/type(passthrough|filter_include|include|filter_exclude|exclude|constant)/include_keys/exclude_keys/unit_convert/field_rename/value"
+          "description": "第 2 步：{目标路径: 规则}，规则字段 from/type(passthrough|filter_include|include|filter_exclude|exclude|constant)/include_keys/exclude_keys/unit_convert/field_rename/value；from 直接写源对象在响应中的真实路径（如 bean.tags），不建 raw_xxx 中间槽位"
         }
       }
     }

@@ -29,7 +29,11 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict, List, Optional, Tuple
 
-from management.config_agent.linter import lint_api_nodes
+from management.config_agent.linter import (
+    _STANDARD_DOMAIN_KEYS,
+    is_direct_response_path,
+    lint_api_nodes,
+)
 from utils.field_naming import normalize_api_nodes_renames
 
 # mock_response 中常见的业务载体容器 key（与 data_step 零配置透传探测一致）
@@ -62,6 +66,68 @@ def _probe_path(raw: Any, names: Tuple[str, ...]) -> Optional[str]:
             if isinstance(sub, dict) and sub.get(name) not in _EMPTY:
                 return f"{ck}.{name}"
     return None
+
+
+def inline_intermediate_slots(api_nodes: Dict[str, Any]) -> List[str]:
+    """就地把 ``from: raw_xxx`` 中间集写法改写成 ``from: <响应路径>`` 直连写法。
+
+    中间集的问题是「一个契约要两处同名才成立」：``response_extract.raw_tags`` 与
+    ``field_transform.*.from`` 必须字符串相等，而 ``raw_tags`` 这个名字本身不携带
+    「数据从哪来」的信息。任一边丢失，相关映射域一起静默为空——北京两次事故都是
+    这个形态。直连写法只有一处、且自描述，物理上不存在「另一半丢了」。
+
+    改写是等价变换：中间集路径下 ``source = extracted[S] = _get_path(raw, P)``，
+    直连路径下 ``source = _get_path(raw, P)``，两者恒等（见 DataStep._transform_fields）。
+
+    安全边界（任一不满足即跳过该槽位，宁可不转）：
+    - 标准域槽位不动：它们在 _transform_fields 第①步靠 response_extract 自动透传，
+      删掉会丢域；
+    - 仅当该槽位的引用**全部**是显式 ``from`` 时才删：省略 ``from`` 的规则运行时不走
+      路径回退，改写会变更语义；
+    - 目标路径与现存槽位名撞名时跳过：改写后会被中间槽位分支优先命中，语义漂移；
+    - 路径必须能在节点自带样例出参中取到非空值：与 E201 的直连判定同一条谓词，
+      否则转完的配置反而会被巡检判成悬空引用（没样例就无从自证）。
+
+    Returns:
+        改写说明列表（"节点: from raw_tags → bean.tags（已移除中间槽位）"）。
+    """
+    notes: List[str] = []
+    if not isinstance(api_nodes, dict):
+        return notes
+    for node_name, node in api_nodes.items():
+        if str(node_name).startswith("_") or not isinstance(node, dict):
+            continue
+        ext = node.get("response_extract")
+        ft = node.get("field_transform")
+        if not isinstance(ext, dict) or not isinstance(ft, dict):
+            continue
+        for slot in list(ext.keys()):
+            slot_name = str(slot)
+            if slot_name.startswith("_") or slot_name in _STANDARD_DOMAIN_KEYS:
+                continue
+            path = ext.get(slot)
+            if not isinstance(path, str) or not path or path in ext:
+                continue
+            if not is_direct_response_path(node, path):
+                continue
+            explicit_refs, implicit_refs = [], 0
+            for target, rule in ft.items():
+                if str(target).startswith("_") or not isinstance(rule, dict):
+                    continue
+                if rule.get("from") == slot:
+                    explicit_refs.append(target)
+                elif rule.get("from") is None and str(target) == slot_name:
+                    implicit_refs += 1
+            if not explicit_refs or implicit_refs:
+                continue
+            for target in explicit_refs:
+                ft[target]["from"] = path
+            ext.pop(slot, None)
+            notes.append(
+                f"{node_name}: from {slot_name} → {path}（已移除中间槽位，"
+                f"影响规则 {', '.join(explicit_refs)}）"
+            )
+    return notes
 
 
 def repair_api_nodes(
@@ -100,8 +166,12 @@ def repair_api_nodes(
         for target, rule in ft.items():
             if str(target).startswith("_"):
                 continue
-            frm = str(rule.get("from") or target) if isinstance(rule, dict) else str(target)
+            explicit_from = rule.get("from") if isinstance(rule, dict) else None
+            frm = str(explicit_from or target)
             if frm in ext:
+                continue
+            # 直连写法（from 直接是响应路径，如 bean.tags）无需中间槽位，不是待修问题
+            if explicit_from is not None and is_direct_response_path(node, frm):
                 continue
             names: Tuple[str, ...] = (frm,)
             if frm.startswith("raw_"):

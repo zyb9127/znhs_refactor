@@ -20,39 +20,31 @@
           "package_name": "",
           "actual_price": "",
           "voice_minutes": "",
-          "baseFlow": "",
-          "equity": "",
-          "broadband": ""
+          "baseFlow": ""
         },
         "final_recommendations": {
           "recommend_package_name": "",
-          "recommend_original_price": 35,
-          "recommend_actual_price": 25,
+          "recommend_original_price": "",
+          "recommend_actual_price": "",
           "recommend_discount_amount": "",
-          "recommend_base_flow": 65,
-          "recommend_bonus_flow": 35,
-          "recommend_total_flow": 100,
+          "recommend_base_flow": "",
+          "recommend_bonus_flow": "",
+          "recommend_total_flow": "",
           "recommend_voice_minutes": "",
-          "recommend_preferential_period": 4,
-          "recommend_equity": "",
-          "recommend_broadband": 100
+          "recommend_preferential_period": ""
         },
         "diff": {
           "diff_actual_price": "",
           "base_flow_diff": "",
           "bonus_flow_diff": "",
           "voice_minutes_diff": ""
-        },
-        "portrait_style": {
-          "communication_style": "",
-          "business_conte": ""
         }
       },
       "batch_contexts": [
         {
-          "product_id": "提速",
-          "stage": "家庭市场",
-          "scence": "开口话术"
+          "product_id": "xx",
+          "stage": "个人市场",
+          "scene": "开口话术"
         }
       ]
     },
@@ -61,8 +53,6 @@
       "extra_info"
     ],
     "created_by": "admin",
-    "created_at": "2026-07-16 18:10:08",
-    "updated_by": "admin",
-    "updated_at": "2026-07-28 15:35:56"
+    "created_at": "2026-07-16 18:10:08"
   }
 }

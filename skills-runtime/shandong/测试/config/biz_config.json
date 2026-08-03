@@ -1,0 +1,58 @@
+{
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 3,
+    "intent_strategies": {},
+    "max_script_length": 150,
+    "max_parallel_scripts": 3
+  },
+  "field_aliases": {
+    "_comment": "套餐字段别名（按优先级从高到低列出），ScriptStep 按此映射取值，无需硬编码字段名",
+    "pkg_name": [
+      "offerName",
+      "package_name",
+      "productName",
+      "name"
+    ],
+    "pkg_fee": [
+      "initFee",
+      "monthly_fee",
+      "price",
+      "fee"
+    ],
+    "pkg_flow": [
+      "offerFlow",
+      "data_quota",
+      "dataGB",
+      "flow"
+    ],
+    "pkg_voice": [
+      "offerVoice",
+      "voice_quota",
+      "voiceMinutes",
+      "voice"
+    ]
+  },
+  "script_templates_v2": [
+    {
+      "template_id": "tpl_1785467859201_04pj",
+      "template_name": "测试模版",
+      "intent": "测试",
+      "province": "shandong",
+      "product_id": "",
+      "scene": "",
+      "stage": "",
+      "template_content": "好",
+      "prompt_template": "你是移动套餐营销推荐坐席。\n请基于以下用户信息和话术模板生成个性化套餐营销推荐话术：\n\n话术模板：{template_content}\n\n直接输出话术文本，不需要前缀，口语化；营销推荐话术贴合用户痛点，字数{max_length}字以内。",
+      "linked_vars": [
+        "pkg_brief",
+        "diff_str"
+      ],
+      "script_requirement": "结合【上下文数据】中的当前套餐、历史用量与用户标签，先点出最突出的用户痛点，再用推荐套餐对应字段的真实值说明如何解决；只讲有数据支撑的卖点，口语化、可直接对客播报，150字以内，结尾自然引导办理。",
+      "linked_apis": [],
+      "status": "online",
+      "created_by": "auto_config_agent",
+      "created_at": "2026-07-31 11:17:43"
+    }
+  ]
+}

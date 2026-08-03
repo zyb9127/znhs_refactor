@@ -143,6 +143,36 @@ def _item(code: str, level: str, path: str, message: str) -> Dict[str, str]:
     return {"code": code, "level": level, "path": path, "message": message}
 
 
+def resolve_response_path(sample: Any, path: str) -> Any:
+    """按 ``.`` 分隔路径在响应样例中取值（语义与 DataStep._get_path 一致，取不到返回 None）。
+
+    供 E201 判定「直连映射」用：``from`` 若能在 mock_response 里按路径取到非空值，
+    说明它是直接指向原始响应的路径（如 ``bean.tags``）而非中间槽位名，不算悬空。
+    """
+    if not isinstance(sample, dict) or not path:
+        return None
+    cur: Any = sample
+    for key in str(path).split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(key)
+    return cur
+
+
+def is_direct_response_path(node: Dict[str, Any], from_field: str) -> bool:
+    """``from`` 是否为「直连原始响应」的路径（凭节点自带的 mock_response 判定）。
+
+    直连写法免去 response_extract 里的中间槽位：``{"from": "bean.tags", ...}`` 一处
+    自描述，不再依赖「槽位名两处必须同名」这条隐式契约——北京两次事故都是这条契约
+    单边丢失（response_extract 的 raw_tags 被保存冲掉）导致映射域静默为空。
+    运行时早已支持（DataStep._transform_fields 的 JSON 路径回退），此处让校验层同样承认它。
+
+    判定必须依赖样例出参：没存样例就无从区分「直连路径」与「写错的槽位名」，
+    此时保持 E201 报错，避免放过真正的悬空引用。
+    """
+    return resolve_response_path(node.get("mock_response"), from_field) not in (None, "", [], {})
+
+
 def _empty_report() -> Dict[str, Any]:
     """空报告骨架。"""
     return {"errors": [], "warnings": [], "info": [], "stats": {}}
@@ -436,19 +466,24 @@ def lint_api_nodes(api_nodes: Dict[str, Any], province: str, intent: str) -> Dic
             if str(target).startswith("_"):
                 continue
             # from 缺省等于目标路径（与 data_step.py L327 语义一致）
-            if isinstance(rule, dict):
-                effective_from = str(rule.get("from") or target)
-            else:
-                effective_from = str(target)
+            explicit_from = rule.get("from") if isinstance(rule, dict) else None
+            effective_from = str(explicit_from or target)
             referenced_slots.add(effective_from)
             if skip_e201:
                 continue
-            if effective_from not in response_extract:
-                report["errors"].append(_item(
-                    "E201", "error",
-                    f"{node_name}.field_transform.{target}",
-                    f"from 槽位 {effective_from!r} 在 response_extract 中不存在",
-                ))
+            if effective_from in response_extract:
+                continue
+            # 直连写法：显式 from 指向原始响应路径（如 bean.tags），无需中间槽位。
+            # 仅当 from 是显式配置的才认（省略 from 时运行时不会走路径回退，语义不同）。
+            if explicit_from is not None and is_direct_response_path(node, effective_from):
+                continue
+            report["errors"].append(_item(
+                "E201", "error",
+                f"{node_name}.field_transform.{target}",
+                f"from 槽位 {effective_from!r} 在 response_extract 中不存在，"
+                f"且在样例出参中按该路径也取不到数据"
+                f"（补回 response_extract 中间槽位，或把 from 直接改成响应路径如 bean.tags）",
+            ))
 
         # W106 response_extract 槽位悬空（既非 7 大标准域也无 field_transform 引用）
         for slot in response_extract:

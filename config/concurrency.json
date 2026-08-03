@@ -1,0 +1,6 @@
+{
+  "_comment": "话术生成 LLM 并发配置（全局）。同时向大模型发起的话术生成请求上限；多产品/批量场景共用。",
+  "_override": "覆盖优先级：biz_config.strategy.llm_max_concurrency > 环境变量 ZNHS_LLM_MAX_CONCURRENCY > 本文件 > 代码默认 8。修改本文件后需重启服务或调用配置热重载。",
+
+  "llm_max_concurrency": 8
+}

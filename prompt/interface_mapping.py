@@ -35,32 +35,52 @@ _WHOLE_BLOCK_RULE = """\
 （如"当前套餐对象"→current_package、"推荐套餐数组"→recommended_packages），
 必须在 response_extract 中直接用该标准域名整块提取（key=标准域名、value=该对象/数组的路径），
 不要拆成单字段重组，也不要再在 field_transform 中对它写任何规则。
-只有"多类字段混在同一个对象里需要分拣"时才引入中间槽 + field_transform。"""
+只有"多类字段混在同一个对象里需要分拣"时才写 field_transform。"""
 
 _SPLIT_RULE = """\
 若响应中有一个对象同时包含多类字段（如用量统计和业务标签混在一起）：
-- 在 response_extract 中将该对象提取为临时中间槽（如 raw_tags）
-- 在 field_transform 中用 filter_include 将各类字段分拣到对应域
+- field_transform 的 from 直接写该对象在响应中的真实路径（如 "bean.tags"），
+  不要在 response_extract 里另建 raw_xxx 中间槽再引用它
+- 用 filter_include 将各类字段分拣到对应域
 - 同一字段只能出现在一个域的 include_keys 中，不得重复
 - 最后用 filter_exclude 将所有已被 include 的字段排除，剩余字段归入 tags
 - 若某个域没有对应字段，直接不写该域，不得强行填入"""
 
+_USAGE_NAMING_RULE = """\
+用量域（usage.*）字段命名对齐（最关键）：话术模板按「域[子键]」精确取子字段，
+源字段名与模板占位符必须归一，否则映射看似成功、话术却整片填不上。
+- include_keys 写响应里的**原始字段名**（括号形态、"实际"前缀都原样照抄），保证命中数据源；
+- **同时**为每个数值型用量字段补一条 field_rename，把它改成「规范名」，让产出键与模板占位符同形：
+  · 去掉"实际"前缀：实际近6月平均流量（GB） → 近6月平均流量(GB)；实际近6月平均消费（元） → 近6月平均月消费；
+  · 全角括号统一半角：（GB）→(GB)、（分钟）→(分钟)、（元）→(元)；
+  · MB 流量：先 mb_to_gb 换算，再 field_rename 改成带 (GB) 的名字（近6月平均流量(MB) → 近6月平均流量(GB)）；
+  · 语音时长统一叫「近N月平均主叫时长」，消费统一叫「近N月平均月消费」，流量统一叫「近N月平均流量(GB)」。
+- 已经是 GB/元/分钟 的字段**不要**再 unit_convert，只需 field_rename 去前缀/规范括号；
+- 只把「标量数值」放进 usage.*：空对象（如 超套流量:{}）、逐月明细串
+  （如 套外语音（分钟）:"202607:0,202606:0,..."）、非数值字段一律不放进 usage.*，
+  归入 tags 或直接忽略（这类值进了 usage 会污染上下文、诱导模型臆造）。"""
+
 _UNIT_CONVERT_RULE = """\
 单位换算（unit_convert / 重命名）必须保守，宁缺勿滥：
-- mb_to_gb：仅当字段名或说明明确标注单位为 MB（如"近3月平均流量(MB)"）时使用
+- mb_to_gb：仅当字段名或说明明确标注单位为 MB（如"近3月平均流量(MB)"）时使用；
+  字段名已是 (GB)/（GB）的严禁再 mb_to_gb（会把 37GB 误除成 0.036GB）
 - fen_to_yuan：仅用于金额字段且单位明确为"分"；时长/分钟类字段（如"平均主叫时长"）严禁使用
-- 重命名（field_rename / new_field）时新字段名只写一层括号（如"近3月平均流量(GB)"），
-  不得出现"((GB)）"这类重复括号
+- 重命名（field_rename / new_field）时新字段名只写一层半角括号（如"近3月平均流量(GB)"），
+  不得出现"((GB)）"这类重复或全角括号
 - 单位不明确时不做任何换算，保留原值原字段名"""
 
 _OUTPUT_FORMAT = """\
 只返回如下 JSON，response_extract 和 field_transform 中只写响应里实际有的域：
 {
   "response_extract": {
-    "实际有数据的域名或中间槽名": "响应中的真实路径（如 result.xxx 或 bean.yyy）"
+    "标准域名": "响应中的真实路径（如 result.xxx 或 bean.yyy）"
   },
   "field_transform": {
-    "目标域名": {"from":"中间槽名","type":"filter_include","include_keys":["字段名1","字段名2"]}
+    "usage.data_usage": {"from":"bean.tags","type":"filter_include",
+                "include_keys":["实际近6月平均流量（GB）"],
+                "field_rename":{"实际近6月平均流量（GB）":"近6月平均流量(GB)"}},
+    "tags": {"from":"bean.tags","type":"filter_exclude",
+                "exclude_keys":["实际近6月平均流量（GB）","超套流量","套外语音（分钟）"]}
   },
   "analysis": "一句话说明：响应中实际包含哪些域的数据"
 }"""
@@ -89,7 +109,10 @@ AUTO_MAP_SYSTEM_PROMPT = f"""\
 ## 第四步：拆分规则（仅混合对象需要）
 {_SPLIT_RULE}
 
-## 第五步：单位换算约束
+## 第五步：用量域字段命名对齐（决定话术能否填上，务必执行）
+{_USAGE_NAMING_RULE}
+
+## 第六步：单位换算约束
 {_UNIT_CONVERT_RULE}
 
 ## 输出格式
@@ -125,7 +148,10 @@ PARSE_DOCX_SYSTEM_PROMPT = f"""\
 ## 第四步：拆分规则（仅混合对象需要）
 {_SPLIT_RULE}
 
-## 第五步：单位换算约束
+## 第五步：用量域字段命名对齐（决定话术能否填上，务必执行）
+{_USAGE_NAMING_RULE}
+
+## 第六步：单位换算约束
 {_UNIT_CONVERT_RULE}
 
 ## 输出格式
@@ -190,8 +216,12 @@ REFINE_MAPPING_SYSTEM_PROMPT = """\
 - user_profile：用户画像（老年人/学生/流量偏好/使用场景）
 - domain_ext：扩展域（合约/家庭/活动/订购）
 
-**规则4：不改变字段名**
-- 字段名必须与 mock_response 中的原始字段名完全一致，不得重命名
+**规则4：include_keys 用原始名，用量域另补 field_rename 归一**
+- include_keys / exclude_keys 里的字段名必须与 mock_response 原始字段名完全一致（保证命中数据源）
+- 但 usage.* 数值字段必须**额外**补一条 field_rename，把产出键改成话术模板占位符用的规范名：
+  · 去"实际"前缀、全角括号转半角：实际近6月平均流量（GB）→近6月平均流量(GB)
+  · 语音时长统一「近N月平均主叫时长」、消费统一「近N月平均月消费」、流量统一「近N月平均流量(GB)」
+- 空对象、逐月明细串、非数值字段不得进 usage.*（归 tags 或忽略）
 
 **规则5：反推逻辑**
 - 对比用户期望结果与 mock_response 的实际数据，找到正确的取数路径

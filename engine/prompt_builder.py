@@ -27,6 +27,7 @@ prompt_builder — 话术 Prompt 组装（从 steps/script_step.py 迁移的 Pro
 from __future__ import annotations
 
 import copy
+import difflib
 import re
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -35,12 +36,15 @@ from loguru import logger
 from prompt.script_generation import (
     SCRIPT_CONTEXT_HEADER,
     SCRIPT_GEN_RULES,
+    SCRIPT_MISSING_FACTS_HEAD,
+    SCRIPT_MISSING_FACTS_TAIL,
     SCRIPT_LEGACY_USER_TEMPLATE,
     SCRIPT_OUTPUT_SUFFIX,
     SCRIPT_PERSONA_RULE,
     SCRIPT_SYSTEM_HEADER,
     SCRIPT_TEMPLATE_HEADER,
 )
+from utils.field_naming import canon_key, dict_fuzzy_get
 
 if TYPE_CHECKING:
     from core.context import FlowContext
@@ -202,32 +206,9 @@ def _fmt_passthrough_value(v: Any) -> str:
 _SUBFIELD_TOKEN_RE = re.compile(r"\{(\w+)((?:\[[^\[\]]+\])+)\}")
 
 
-# 全角括号/空格 → 半角（键名归一第一档）
-_KEY_BRACKET_TRANS = str.maketrans({"（": "(", "）": ")", "【": "[", "】": "]", "　": " "})
-
-
-def _canon_key(s: str) -> str:
-    """键名归一第二档：去掉全部括号与空白，仅留核心文字。
-    「近6月平均流量((GB)）」「近6月平均流量(GB)」「近6月平均流量((GB))」→ 同一 canonical，
-    容忍接口映射 field_rename 产出的括号错乱（全/半角混用、双括号）与模板手写差异。"""
-    return re.sub(r"[()（）\[\]【】\s]+", "", str(s))
-
-
-def _dict_fuzzy_get(d: Dict[str, Any], key: str) -> Any:
-    """dict 取值三档匹配：精确 → 全/半角括号归一相等 → 去括号 canonical 相等。
-    保证映射后字段名与模板子键在括号形态不一致时仍能命中；取不到返回 None。"""
-    if key in d:
-        return d[key]
-    nk = str(key).translate(_KEY_BRACKET_TRANS)
-    for k, v in d.items():
-        if str(k).translate(_KEY_BRACKET_TRANS) == nk:
-            return v
-    ck = _canon_key(key)
-    if ck:
-        for k, v in d.items():
-            if _canon_key(k) == ck:
-                return v
-    return None
+# 键名归一 / 模糊取值的单一实现在 utils.field_naming（DataStep 的 filter 规则共用同一套
+# 规则，保证「配置键名 ↔ 接口出参键名 ↔ 模板子键」三方在括号形态上的容忍度完全一致）
+_dict_fuzzy_get = dict_fuzzy_get
 
 
 def _subfield_get_child(obj: Any, key: str) -> Any:
@@ -267,6 +248,47 @@ def _subfield_walk(root_obj: Any, keys: List[str]) -> Any:
     return cur
 
 
+def _subfield_missing_hint(subfield_roots: Dict[str, Any], token: str) -> str:
+    """针对「映射产出里父级域有数据、但末级子键取不到」这种静默失配给出可读诊断。
+
+    典型场景（北京生产）：field_transform 映射成功，usage.consumption 产出
+    ``近6月平均月消费``，而话术模板占位符写的是 ``近6月平均消费``（少一个「月」字）。
+    此时该槽位既非「域为空」也非「上游没返回」，普通缺失告警只会说「无数据」，运营无从下手。
+    本函数下钻到「失配叶子的父级字典」，若父级确有键，则计算最接近的候选键返回提示；
+    父级不存在/为空（=真·无数据）返回空串，交给常规缺失逻辑。
+
+    注意：仅用于诊断/日志/测试页展示，绝不写入发给模型的 Prompt 正文
+    （避免把相近但错误的候选值喂给模型导致串填）。
+    """
+    m = _SUBFIELD_TOKEN_RE.fullmatch("{" + str(token) + "}")
+    if not m:
+        return ""
+    root = m.group(1)
+    keys = re.findall(r"\[([^\[\]]+)\]", m.group(2))
+    if root not in subfield_roots or not keys:
+        return ""
+    parent = _subfield_walk(subfield_roots.get(root), keys[:-1]) if len(keys) > 1 else subfield_roots.get(root)
+    if not isinstance(parent, dict) or not parent:
+        return ""   # 父级域本身为空 → 真·无数据，非失配，交常规缺失处理
+    leaf = keys[-1]
+    produced = [str(k) for k in parent.keys()]
+    canon_leaf = canon_key(leaf)
+    # 去括号归一后已相等 = 运行态 dict_fuzzy_get 本就能取到，不算失配（若仍进缺失列表
+    # 另有他因），直接返回空串，避免给出误导性的「未命中」提示。
+    if any(canon_key(k) == canon_leaf for k in produced):
+        return ""
+    # 候选优先级：一方为另一方子串 → difflib 相似度
+    contained = [k for k in produced if canon_leaf and (canon_leaf in canon_key(k) or canon_key(k) in canon_leaf)]
+    ranked = difflib.get_close_matches(leaf, produced, n=3, cutoff=0.4)
+    best_list = contained or ranked
+    best = best_list[0] if best_list else ""
+    parent_path = ".".join([root] + keys[:-1])
+    hint = (f"{parent_path} 已产出 {produced}，但模板子键『{leaf}』未命中")
+    if best:
+        hint += f"；最接近产出键：『{best}』——请核对是模板占位符写错、还是接口映射 field_rename 目标名不一致"
+    return hint
+
+
 def append_prompt_extra_suffix(
     tpl_raw: str, body: str, ei_txt: str, ec_txt: str
 ) -> str:
@@ -280,6 +302,45 @@ def append_prompt_extra_suffix(
     return out
 
 
+def _fill_prompt_parts(
+    parts_out: Optional[Dict[str, str]],
+    *,
+    full: str,
+    context_data: str = "",
+    template: str = "",
+    script_requirement: str = "",
+    other: str = "",
+    missing_facts: str = "",
+    missing_slots: Optional[List[str]] = None,
+    missing_slot_hints: Optional[Dict[str, str]] = None,
+) -> None:
+    """写入测试页可展示的提示词分段（就地更新 parts_out）。"""
+    if parts_out is None:
+        return
+    parts_out.clear()
+    parts_out.update({
+        "full": full or "",
+        "context_data": context_data or "",
+        "template": template or "",
+        "script_requirement": script_requirement or "",
+        "other": other or "",
+        "missing_facts": missing_facts or "",
+        "missing_slots": list(missing_slots or []),
+        # {token: 诊断提示}——仅「父域有数据但叶子子键失配」的槽位才有值（供测试页排障）
+        "missing_slot_hints": dict(missing_slot_hints or {}),
+    })
+
+
+def _slot_label(token: str) -> str:
+    """槽位占位符 → 可读标签：子字段取末级子键，标准域取中文标签。"""
+    root = str(token).split("[", 1)[0]
+    if "[" in token:
+        keys = re.findall(r"\[([^\[\]]+)\]", token)
+        if keys:
+            return keys[-1]
+    return _DERIVED_PKG_VAR_LABELS.get(root) or VAR_LABELS.get(root, root)
+
+
 def build_prompt(
     user_prompt_tpl: str,
     template_text: str,
@@ -291,6 +352,8 @@ def build_prompt(
     extra_info_override: Optional[Dict[str, Any]] = None,
     field_aliases: Optional[Dict[str, Any]] = None,
     max_length: int = 100,
+    slot_facts_out: Optional[Dict[str, str]] = None,
+    parts_out: Optional[Dict[str, str]] = None,
 ) -> str:
     """组装 LLM Prompt（迁移自 ScriptStep._build_prompt，逐行等价）。
 
@@ -302,6 +365,10 @@ def build_prompt(
     - ``extra_info_override``：批量模式下条目级 extra_info（已合并全局），优先于 ctx.extra_info。
     - ``field_aliases`` / ``max_length``：原实现取自 ScriptStep 实例状态
       （self.field_aliases / self.max_length），迁移后改为显式参数，缺省值与实例默认一致。
+    - ``slot_facts_out``：若传入 dict，则同步写入注入【上下文数据】的 ``占位符 → 事实值``，
+      供 ScriptStep 在 LLM 输出后做确定性填槽（含子域 ``{域[子键]}``）。
+    - ``parts_out``：若传入 dict，则写入分段结果（context_data / template /
+      script_requirement / other / full），供测试页展示最终发给大模型的提示词。
 
     优先级：
     1. 若 linked_vars 非空或存在话术模板正文 → 新格式自动构造
@@ -381,6 +448,16 @@ def build_prompt(
         # 1) 汇集事实上下文（映射域）；空值不入 Prompt，避免模型对空槽臆造或串填
         context_lines: List[str] = []
         emitted: set = set()
+
+        def _record_slot_fact(token: str, val: str) -> None:
+            """同步写入确定性填槽字典（与【上下文数据】行一一对应）。"""
+            if slot_facts_out is None:
+                return
+            t = str(token or "").strip()
+            v = str(val or "")
+            if t and v.strip():
+                slot_facts_out[t] = v
+
         for var_key in linked_vars or []:
             if var_key == "table":
                 continue   # 差异表格不进 LLM，在前端另行展示
@@ -399,6 +476,7 @@ def build_prompt(
                 or _DERIVED_PKG_VAR_LABELS.get(var_key) or VAR_LABELS.get(var_key, var_key)
             )
             context_lines.append(f"{label} {{{anchor}}}：{var_val}")
+            _record_slot_fact(anchor, var_val)
             emitted.update(_var_alias_group(var_key))
             emitted.add(var_key)
             emitted.add(anchor)
@@ -414,6 +492,7 @@ def build_prompt(
                     continue
                 label = VAR_LABELS.get(pk, pk)
                 context_lines.append(f"{label} {{{pk}}}：{val}")
+                _record_slot_fact(pk, val)
                 emitted.add(pk)
         # 模板引用但未注入的占位符自动补齐（两类，均只注入真实存在的非空事实，安全且不臆造）：
         # ① 已知变量（标准域/派生变量）被模板引用但漏勾 linked_vars → 补注入，
@@ -434,6 +513,7 @@ def build_prompt(
                         continue
                     label = _DERIVED_PKG_VAR_LABELS.get(token) or VAR_LABELS.get(token, token)
                     context_lines.append(f"{label} {{{token}}}：{val}")
+                    _record_slot_fact(token, val)
                     emitted.update(_var_alias_group(token))
                     emitted.add(token)
                     continue
@@ -444,6 +524,7 @@ def build_prompt(
                     continue
                 label = VAR_LABELS.get(token, token)
                 context_lines.append(f"{label} {{{token}}}：{val}")
+                _record_slot_fact(token, val)
                 emitted.add(token)
         # 子字段路径占位符：{域[子键]…} → 从「原始域字典」按路径精确取值，字段级注入。
         # 原始域取自 ctx.resource_context（已过 field_transform/单位换算，键名=运行态映射后名），
@@ -489,28 +570,43 @@ def build_prompt(
                     continue   # 取不到值的子字段不入 Prompt，避免模型对空槽臆造
                 _leaf_label = _keys[-1] if _keys else _root
                 context_lines.append(f"{_leaf_label} {{{_token}}}：{_sval}")
+                _record_slot_fact(_token, _sval)
                 emitted.add(_token)
         # 主服务直传：未在关联变量中显式勾选时，仍注入非空的 extra_info / extra_context
         # 透传模式（passthrough_ctx 非空）下已逐字段展示，跳过整包 JSON 以免冗余。
         if "extra_info" not in emitted and ei_txt and not passthrough_ctx:
             context_lines.append(f"{VAR_LABELS['extra_info']} {{extra_info}}：{ei_txt}")
+            _record_slot_fact("extra_info", ei_txt)
         if "extra_context" not in emitted and ec_txt:
             context_lines.append(f"{VAR_LABELS['extra_context']} {{extra_context}}：{ec_txt}")
+            _record_slot_fact("extra_context", ec_txt)
 
-        # ── 槽位缺数据可观测性 ──────────────────────────────────
+        # ── 槽位缺数据：告警 + 写入 Prompt 的显式负向约束 ────────────
         # 模板引用的「事实类」占位符（标准域/派生变量/子字段路径）若最终没有对应的
-        # 上下文数据行，模型将按规则 2 跳过甚至串填（生产曾出现拿套餐包含量冒充历史
-        # 用量）。此前完全静默，这里统一告警，便于在省份日志中直接定位缺数据的域。
+        # 上下文数据行，模型不仅会跳过，还倾向于抓手边最像的数字顶上（北京生产把当前
+        # 套餐的 128 元/30GB/200 分钟当成月均消费/流量/通话播报）。除了告警定位，
+        # 还把缺口显式列进 Prompt——负向约束比让模型自行推断"哪些信息不存在"可靠得多。
         _missing_slots: List[str] = []
-        for token in tpl_token_set:
+        for token in sorted(tpl_token_set):
             if token in emitted or token not in _INJECTABLE_KNOWN:
                 continue
             _missing_slots.append(token)
         if template_text and "[" in template_text:
             for _m in _SUBFIELD_TOKEN_RE.finditer(template_text):
                 _tok = _m.group(0)[1:-1]
-                if _tok not in emitted:
+                if _tok not in emitted and _tok not in _missing_slots:
                     _missing_slots.append(_tok)
+        # 失配诊断：区分「域为空（真·无数据）」与「域有数据但叶子子键写错」两种缺失。
+        # 后者是北京生产漏槽的隐蔽来源（映射成功却因键名差一字填不上），单独给出候选键提示。
+        _missing_hints: Dict[str, str] = {}
+        _roots_for_hint = locals().get("_subfield_roots")
+        if isinstance(_roots_for_hint, dict):
+            for _tok in _missing_slots:
+                if "[" not in _tok:
+                    continue
+                _h = _subfield_missing_hint(_roots_for_hint, _tok)
+                if _h:
+                    _missing_hints[_tok] = _h
         if _missing_slots:
             logger.warning(
                 f"[build_prompt] {getattr(ctx, 'province', '')}/{getattr(ctx, 'intent', '')} "
@@ -518,31 +614,69 @@ def build_prompt(
                 f"{sorted(_missing_slots)}；已注入={sorted(k for k in emitted if isinstance(k, str))}。"
                 f"请检查接口映射（response_extract/field_transform）与接口响应数据"
             )
+            for _tok, _h in _missing_hints.items():
+                logger.warning(f"[build_prompt] 槽位失配 {{{_tok}}}：{_h}")
+        missing_block = ""
+        if _missing_slots and template_text:
+            missing_block = (
+                SCRIPT_MISSING_FACTS_HEAD
+                + "、".join(f"{_slot_label(t)}{{{t}}}" for t in _missing_slots)
+                + SCRIPT_MISSING_FACTS_TAIL
+            )
 
         # 2) 分段拼装
         lines: List[str] = [SCRIPT_SYSTEM_HEADER]
+        context_block = ""
         if context_lines:
             lines.append(SCRIPT_CONTEXT_HEADER)
             lines.extend(context_lines)
+            context_block = SCRIPT_CONTEXT_HEADER + "\n" + "\n".join(context_lines)
+        if missing_block:
+            lines.append(missing_block)
         if template_text:
             lines.append(SCRIPT_TEMPLATE_HEADER)
             lines.append(template_text)
+        other_parts: List[str] = [SCRIPT_SYSTEM_HEADER, SCRIPT_GEN_RULES]
         lines.append(SCRIPT_GEN_RULES)
         # 个性化润色规则：上下文含用户标签/画像/性格类信息时自动追加（编号顺延）
         rule_no = 5
         if _has_persona_context(emitted, passthrough_ctx):
-            lines.append(f"{rule_no}. {SCRIPT_PERSONA_RULE}")
+            persona_line = f"{rule_no}. {SCRIPT_PERSONA_RULE}"
+            lines.append(persona_line)
+            other_parts.append(persona_line)
             rule_no += 1
+        req_text = ""
         if script_requirement:
-            lines.append(f"{rule_no}. 话术要求：{script_requirement}")
+            req_line = f"{rule_no}. 话术要求：{script_requirement}"
+            lines.append(req_line)
+            req_text = script_requirement
+        other_parts.append(SCRIPT_OUTPUT_SUFFIX)
         lines.append(SCRIPT_OUTPUT_SUFFIX)
-        return "\n".join(lines)
+        full = "\n".join(lines)
+        _fill_prompt_parts(
+            parts_out,
+            full=full,
+            context_data=context_block,
+            template=template_text or "",
+            script_requirement=req_text,
+            other="\n".join(other_parts),
+            missing_facts=missing_block,
+            missing_slots=_missing_slots,
+            missing_slot_hints=_missing_hints,
+        )
+        return full
 
     # ── 旧格式：user_prompt_tpl（向后兼容） ──────────────────────
     tpl = user_prompt_tpl or SCRIPT_LEGACY_USER_TEMPLATE
     try:
         out = tpl.format_map(fmt_vars)
-        return append_prompt_extra_suffix(tpl, out, ei_txt, ec_txt)
+        full = append_prompt_extra_suffix(tpl, out, ei_txt, ec_txt)
+        _fill_prompt_parts(
+            parts_out, full=full, other=full,
+            script_requirement=script_requirement or "",
+            template=template_text or "",
+        )
+        return full
     except (KeyError, ValueError):
         fb = (
             f"用户当前套餐：{rp['current_package']}\n推荐套餐：{pkg_brief}\n"
@@ -553,7 +687,13 @@ def build_prompt(
             f"意图：{ctx.intent}\n\n"
             f"请用中文写一句{max_length}字以内的营销推荐话术。\n话术："
         )
-        return append_prompt_extra_suffix(tpl, fb, ei_txt, ec_txt)
+        full = append_prompt_extra_suffix(tpl, fb, ei_txt, ec_txt)
+        _fill_prompt_parts(
+            parts_out, full=full, other=full,
+            script_requirement=script_requirement or "",
+            template=template_text or "",
+        )
+        return full
 
 
 # ── Prompt 预览（新增，供预览端点使用） ────────────────────────────

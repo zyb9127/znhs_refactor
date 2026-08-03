@@ -71,6 +71,47 @@ class RecommendRequest(BaseModel):
     )
 
 
+# 允许「顶层直传」的业务标准域/兼容块白名单。
+# 背景：对外规范要求这些字段放在 extra_info 内，但部分下游（如广东现网）习惯把它们与
+# phone/province 平级写在顶层；RecommendRequest 未开启 extra="allow"，Pydantic 会静默丢弃，
+# 表现为「传了推荐产品却只生成一条兜底话术」。这里按白名单折叠进 extra_info，
+# 两种写法都能跑。只收白名单键（不是全部未知字段），避免把网关元数据等噪声灌进话术上下文。
+_TOP_LEVEL_EXTRA_INFO_KEYS = (
+    # 7 大标准域
+    "current_package", "recommended_packages", "usage", "tags",
+    "user_info", "user_profile", "domain_ext",
+    # 广东旧版单产品兼容块（final_recommendations 为单产品对象，diff 为其差异）
+    "final_recommendations", "diff",
+)
+
+
+def _fold_top_level_extra_info(body: Dict[str, Any]) -> List[str]:
+    """把顶层直传的标准域键就地折叠进 body["extra_info"]，返回被折叠的键名列表。
+
+    规则（保守、幂等、不覆盖）：
+    - 仅处理 _TOP_LEVEL_EXTRA_INFO_KEYS 白名单内的键；
+    - extra_info 内已有同名键时**以 extra_info 为准**，顶层同名值忽略（不覆盖既有约定写法）；
+    - 空值（None/""/[]/{}）不折叠，避免用空对象顶掉后续兜底逻辑。
+    """
+    folded: List[str] = []
+    ei = body.get("extra_info")
+    if not isinstance(ei, dict):
+        ei = {}
+    for key in _TOP_LEVEL_EXTRA_INFO_KEYS:
+        if key not in body:
+            continue
+        val = body.get(key)
+        if val in (None, "", [], {}):
+            continue
+        if key in ei:          # extra_info 优先，顶层重复写法忽略
+            continue
+        ei[key] = val
+        folded.append(key)
+    if folded:
+        body["extra_info"] = ei
+    return folded
+
+
 def _unwrap_params_body(raw: Any) -> Any:
     """兼容下游/网关把入参包在最外层 params 里的写法：
     {"params": {...业务字段...}} → 解包为 {...业务字段...}；
@@ -85,13 +126,56 @@ def _unwrap_params_body(raw: Any) -> Any:
     return raw
 
 
+def _wants_debug(request: Request) -> bool:
+    """运营测试页排障开关：?debug=1|true|yes|on 时附带内部字段。"""
+    return str(request.query_params.get("debug", "")).strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+def _build_success_payload(
+    *,
+    call_id: str,
+    phone: str,
+    intent: str,
+    province: str,
+    recommend_results: list,
+    other_info: Any,
+    debug: bool = False,
+    resource_context: Optional[Dict[str, Any]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    api_calls: Optional[list] = None,
+    llm_prompts: Optional[list] = None,
+) -> Dict[str, Any]:
+    """组装对外成功响应：默认仅规范字段；debug 时附加排障字段。"""
+    payload: Dict[str, Any] = {
+        "code": 200,
+        "message": "success",
+        "data": {
+            "callId": call_id,
+            "phone": phone,
+            "intent": intent,
+            "province": province,
+            "recommend_results": recommend_results,
+        },
+        "other_info": other_info,
+    }
+    if debug:
+        payload["resource_context"] = resource_context or {}
+        payload["metadata"] = metadata or {}
+        payload["api_calls"] = api_calls or []
+        payload["llm_prompts"] = llm_prompts or []
+    return payload
+
+
 @router.post("/marketing/recommend")
 async def recommend(request: Request):
     """营销话术推荐主接口（实时对外服务，无需灵运 satoken）。
 
     入参格式参见接口文档（callId / intent / phone / topN / extra_data）。
     兼容两种 body：顶层直接放业务字段，或最外层包一层 {"params": {...}}。
-    出参：{code, message, data: {callId, phone, intent, province, recommend_results}}
+    出参：{code, message, data: {callId, phone, intent, province, recommend_results}, other_info}。
+    查询参数 debug=1 时额外返回 resource_context / metadata / api_calls / llm_prompts（运营测试页用）。
     """
     # 读取并（按需）解包 params，再做 Pydantic 校验，兼容网关包裹写法
     try:
@@ -101,6 +185,9 @@ async def recommend(request: Request):
     body_data = _unwrap_params_body(raw_body)
     if not isinstance(body_data, dict):
         raise HTTPException(status_code=400, detail="请求体格式错误：需为 JSON 对象")
+    # 顶层直传的标准域（recommended_packages / current_package 等）折叠进 extra_info，
+    # 兼容把业务字段与 phone/province 平级写的下游，避免被 Pydantic 静默丢弃
+    _folded = _fold_top_level_extra_info(body_data)
     try:
         req = RecommendRequest(**body_data)
     except ValidationError as ve:
@@ -112,11 +199,21 @@ async def recommend(request: Request):
         trace_id=trace_id, route="recommend-main",
         province=req.province, intent=req.intent,
     )
+    # 运营测试页 / TestConsole：分省日志额外双写到 logs/provinces/test/
+    _extra_log_token = None
+    if province_logger.is_test_trace(trace_id):
+        _extra_log_token = province_logger.set_extra_log_province("test")
+        logger.info(f"[recommend] 测试请求，分省日志双写 province=test  trace_id={trace_id}")
     t0 = time.perf_counter()
     logger.info(
         f"[recommend] ▶ 请求开始  trace_id={trace_id} "
         f"province={req.province} intent={req.intent} phone={req.phone[:3]}****"
     )
+    if _folded:
+        logger.info(
+            f"[recommend] 顶层直传字段已折叠进 extra_info: {_folded}  trace_id={trace_id}"
+            "（建议下游按对外规范放进 extra_info）"
+        )
 
     try:
         # 省份编码转换：支持下游传入数字编码（如 "200" → "guangdong"）
@@ -157,19 +254,24 @@ async def recommend(request: Request):
             recommend_results=recommend_results,
             other_info=result.get("other_info"),
             metadata=obs_summary,
+            llm_prompts=result.get("llm_prompts") or [],
         )
-        return JSONResponse({
-            "code": 200,
-            "message": "success",
-            "data": {
-                "callId": trace_id,
-                "phone": req.phone,
-                "intent": req.intent,
-                "province": req.province,
-                "recommend_results": recommend_results,
+        return JSONResponse(_build_success_payload(
+            call_id=trace_id,
+            phone=req.phone,
+            intent=req.intent,
+            province=req.province,
+            recommend_results=recommend_results,
+            other_info=result.get("other_info"),
+            debug=_wants_debug(request),
+            resource_context=result.get("resource_context") or {},
+            metadata={
+                **(result.get("metadata") or {}),
+                **(obs_summary or {}),
             },
-            "other_info": result.get("other_info"),
-        })
+            api_calls=result.get("api_calls") or [],
+            llm_prompts=result.get("llm_prompts") or [],
+        ))
 
     except HTTPException:
         raise
@@ -187,4 +289,6 @@ async def recommend(request: Request):
             pass
         return JSONResponse({"code": 500, "message": str(exc), "data": None}, status_code=500)
     finally:
+        if _extra_log_token is not None:
+            province_logger.reset_extra_log_province(_extra_log_token)
         reset_request_context(obs_token)

@@ -165,16 +165,46 @@ def infer_linked_vars(template_content: str) -> List[str]:
                 matched.add(ctx_var)
                 break  # 该规则已命中，不需要再检查其他关键词
 
-    # ── 返回有序列表（保持固定顺序便于展示） ─────────────────────
-    _ORDER = [
-        "current_package", "pkg_brief", "pkg_fee", "pkg_flow", "pkg_voice",
-        "usage", "tags",
-        "diff_str", "user_info", "user_profile", "domain_ext",
-        "extra_info", "extra_context", "table",
-    ]
+    return _ordered(matched)
+
+
+# ── 返回顺序（固定，便于展示与断言） ──────────────────────────
+_ORDER: List[str] = [
+    "current_package", "pkg_brief", "pkg_fee", "pkg_flow", "pkg_voice",
+    "usage", "tags",
+    "diff_str", "user_info", "user_profile", "domain_ext",
+    "extra_info", "extra_context", "table",
+]
+
+
+def _ordered(matched: Set[str]) -> List[str]:
+    """按 _ORDER 固定顺序输出，表外的键追加在后（理论上没有，保险起见）。"""
     result = [v for v in _ORDER if v in matched]
-    # 追加 _ORDER 中没有的（理论上不会有，保险起见）
     for v in sorted(matched):
         if v not in result:
             result.append(v)
     return result
+
+
+# 占位符 token（含子字段形态）：{usage}、{usage[consumption][近6月平均月消费]}
+_PLACEHOLDER_TOKEN_RE = re.compile(r"\{(\w+)(?:\[[^\[\]{}]+\])*\}")
+
+
+def infer_placeholder_vars(template_content: str) -> List[str]:
+    """只按模板里真实写出的占位符推断关联变量（零猜测）。
+
+    与 :func:`infer_linked_vars` 的分工：后者第二层会按中文关键词猜测，适合前端
+    「建议勾选」；本函数用于**保存时补齐** linked_vars，必须零误报，因此只认占位符。
+
+    额外覆盖子字段占位符的根名：模板写 ``{usage[consumption][近6月平均月消费]}`` 时，
+    ``usage`` 同样要落进 linked_vars —— 否则配置页看不出这条模板依赖 usage 域，
+    运营排查"话术没带上月均消费"时会误以为该域本就没被引用。
+    """
+    if not template_content or not template_content.strip():
+        return []
+    matched: Set[str] = set()
+    for root in _PLACEHOLDER_TOKEN_RE.findall(template_content):
+        ctx_var = _KEY_ALIAS.get(str(root).lower())
+        if ctx_var:
+            matched.add(ctx_var)
+    return _ordered(matched)

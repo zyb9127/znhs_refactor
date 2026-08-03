@@ -83,14 +83,19 @@ def _random_fixture(seed: int, n_templates: int = 200, n_queries: int = 120):
 
 
 class TestSelectTemplateIndexEquivalence(unittest.TestCase):
-    """select_template(index=...) 与 select_template_linear 的等价性。"""
+    """索引实现与线性实现的严格档位等价性。
+
+    注意：等价性的主体是两个**底层实现**（TemplateIndex.select vs select_template_linear），
+    而不是包装层 select_template —— 后者在严格 12 档未命中后还会追加「宽松兜底」策略档
+    （见 TestSelectTemplateLooseFallback），两条路径经包装层后行为一致但不等于裸线性结果。
+    """
 
     def test_random_equivalence_index_vs_linear(self) -> None:
         templates, queries = _random_fixture(seed=20260703)
         index = TemplateIndex(templates, INTENT)
         for pid, stage, scene in queries:
             expected = select_template_linear(templates, INTENT, pid, stage=stage, scene=scene)
-            actual = select_template(templates, INTENT, pid, stage=stage, scene=scene, index=index)
+            actual = index.select(pid, stage=stage, scene=scene)
             self.assertIs(
                 actual, expected,
                 msg=(
@@ -106,17 +111,30 @@ class TestSelectTemplateIndexEquivalence(unittest.TestCase):
         index = TemplateIndex(templates, INTENT)
         for pid, stage, scene in queries:
             self.assertIs(
-                select_template(templates, INTENT, pid, stage=stage, scene=scene, index=index),
+                index.select(pid, stage=stage, scene=scene),
                 select_template_linear(templates, INTENT, pid, stage=stage, scene=scene),
             )
 
-    def test_index_none_falls_back_to_linear(self) -> None:
-        """index=None 时结果与 select_template_linear 完全相同（同一对象）。"""
+    def test_wrapper_same_result_with_and_without_index(self) -> None:
+        """包装层 select_template 走索引与走线性，对外结果必须一致（含宽松兜底档）。"""
         templates, queries = _random_fixture(seed=7, n_templates=60, n_queries=30)
+        index = TemplateIndex(templates, INTENT)
         for pid, stage, scene in queries:
             self.assertIs(
+                select_template(templates, INTENT, pid, stage=stage, scene=scene, index=index),
                 select_template(templates, INTENT, pid, stage=stage, scene=scene, index=None),
-                select_template_linear(templates, INTENT, pid, stage=stage, scene=scene),
+            )
+
+    def test_index_none_delegates_to_linear_when_matched(self) -> None:
+        """index=None 且严格档位命中时，包装层返回线性实现的同一对象（不改写既有命中）。"""
+        templates, queries = _random_fixture(seed=7, n_templates=60, n_queries=30)
+        for pid, stage, scene in queries:
+            expected = select_template_linear(templates, INTENT, pid, stage=stage, scene=scene)
+            if expected is None:
+                continue
+            self.assertIs(
+                select_template(templates, INTENT, pid, stage=stage, scene=scene, index=None),
+                expected,
             )
 
     def test_empty_templates(self) -> None:

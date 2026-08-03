@@ -315,7 +315,7 @@ async function runTest() {
   const t0 = Date.now()
 
   try {
-    const res = await fetch('/znhs/marketing/recommend', {
+    const res = await fetch('/znhs/marketing/recommend?debug=1', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     })
@@ -385,8 +385,9 @@ function renderScripts(scripts, finalRecs) {
   const pkgMap = {}
   finalRecs.forEach(p => { const pid = p.offerId || p.product_id || ''; if (pid) pkgMap[pid] = p.offerName || p.package_name || '' })
   return scripts.map((s, i) => {
-    const pkgName = pkgMap[s.product_id] || s.package_name || ''
-    const subtitle = pkgName ? escHtml(pkgName) : (s.product_id ? escHtml(s.product_id) : '')
+    const assocId = s.offerId || s.product_id || ''
+    const pkgName = pkgMap[assocId] || s.package_name || ''
+    const subtitle = pkgName ? escHtml(pkgName) : (assocId ? escHtml(assocId) : '')
     let tableHtml = ''
     if (s.diff_table?.rows?.length) {
       const hds = s.diff_table.headers || []

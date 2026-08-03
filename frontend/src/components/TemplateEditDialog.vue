@@ -23,7 +23,7 @@
           </el-col>
           <el-col :span="12">
             <el-form-item prop="intent" required>
-              <template #label><span class="fl">意图<span class="req-star">*</span></span></template>
+              <template #label><span class="fl">场景分类<span class="req-star">*</span></span></template>
               <el-select v-model="form.intent" placeholder="请先选择省份" style="width:100%" :disabled="!form.province">
                 <el-option v-for="i in editIntents" :key="i" :value="i" :label="i" />
               </el-select>
@@ -32,7 +32,7 @@
         </el-row>
       </template>
 
-      <!-- ── Skill 模式：省份 + 意图（只读） ── -->
+      <!-- ── Skill 模式：省份 + 场景分类（只读） ── -->
       <template v-if="mode === 'skill'">
         <el-row v-if="multiProduct && form.province" :gutter="16">
           <el-col :span="12">
@@ -43,7 +43,7 @@
           </el-col>
           <el-col :span="12">
             <el-form-item>
-              <template #label><span class="fl">所属意图</span></template>
+              <template #label><span class="fl">场景分类</span></template>
               <el-input :value="form.intent || form.template_name" disabled />
             </el-form-item>
           </el-col>
@@ -62,7 +62,7 @@
       <el-form-item v-if="multiProduct" prop="product_ids_text">
         <template #label>
           <span class="fl">产品 ID</span>
-          <span class="fh">该模板适用的套餐产品编码；多个用逗号 / 换行分隔；留空 = 该意图兜底模板（无匹配产品时使用）</span>
+          <span class="fh">该模板适用的套餐产品编码；多个用逗号 / 换行分隔；留空 = 该场景分类兜底模板（无匹配产品时使用）</span>
         </template>
         <el-input v-model="form.product_ids_text" type="textarea"
           :autosize="{ minRows: 2, maxRows: 6 }"

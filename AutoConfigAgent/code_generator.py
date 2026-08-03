@@ -31,10 +31,10 @@ code_generator.py — Skill 包代码生成器
     "request_template": {...},
     "response_extract": {
       "recommended_packages": "bean.recommend_results",
-      "current_package": "bean.mainoffer",
-      "raw_tags": "bean.tags"
+      "current_package": "bean.mainoffer"
     },
-    "field_transform": {...},        # 可选，字段转换规则
+    # 可选，字段转换规则；from 直接写响应路径（如 bean.tags），无需中间槽位
+    "field_transform": {"tags": {"from": "bean.tags", "type": "filter_exclude", "exclude_keys": [...]}},
     "mock_response": {...}           # 可选，Mock 数据
   },
   "strategy": {
@@ -335,7 +335,17 @@ EXAMPLE_TEMPLATE: Dict[str, Any] = {
         "response_extract": {
             "recommended_packages": "bean.recommend_results",
             "current_package": "bean.mainoffer",
-            "raw_tags": "bean.tags",
+        },
+        # 直连映射：from 直接写响应路径，不再建 raw_xxx 中间槽位再引用
+        "field_transform": {
+            "usage.consumption": {
+                "from": "bean.tags", "type": "filter_include",
+                "include_keys": ["近3月平均月消费"],
+            },
+            "tags": {
+                "from": "bean.tags", "type": "filter_exclude",
+                "exclude_keys": ["近3月平均月消费"],
+            },
         },
         "mock_response": {
             "rtnCode": "0",

@@ -1,4 +1,7 @@
 {
+  "_domain_fallbacks": {
+    "current_package": "extra_data.currentMainOffer"
+  },
   "北京测试接口_api": {
     "enabled": true,
     "_comment": "营销推荐话术获取接口",
@@ -24,19 +27,20 @@
     },
     "response_extract": {
       "current_package": "bean.mainoffer",
-      "recommended_packages": "bean.recommend_results",
-      "raw_tags": "bean.tags"
+      "recommended_packages": "bean.recommend_results"
     },
     "field_transform": {
       "usage.data_usage": {
-        "from": "raw_tags",
+        "from": "bean.tags",
         "type": "filter_include",
         "include_keys": [
           "近3月流量饱和度",
           "近6月平均流量饱和度",
           "近3月平均流量(MB）",
           "近6月平均流量(MB）",
-          "近3月平均流量饱和度"
+          "近3月平均流量饱和度",
+          "实际近3月平均流量（GB）",
+          "实际近6月平均流量（GB）"
         ],
         "unit_convert": {
           "近3月平均流量(MB）": "mb_to_gb",
@@ -44,32 +48,46 @@
         },
         "field_rename": {
           "近3月平均流量(MB）": "近3月平均流量(GB)",
-          "近6月平均流量(MB）": "近6月平均流量(GB)"
+          "近6月平均流量(MB）": "近6月平均流量(GB)",
+          "实际近3月平均流量（GB）": "近3月平均流量(GB)",
+          "实际近6月平均流量（GB）": "近6月平均流量(GB)"
         }
       },
       "usage.voice_usage": {
-        "from": "raw_tags",
+        "from": "bean.tags",
         "type": "filter_include",
         "include_keys": [
           "近3月语音饱和度",
           "近6月平均语音饱和度",
           "近3月平均语音饱和度",
           "近3月平均主叫时长",
-          "近6月平均主叫时长"
-        ]
+          "近6月平均主叫时长",
+          "实际近3月平均语音（分钟）",
+          "实际近6月平均语音（分钟）"
+        ],
+        "field_rename": {
+          "实际近3月平均语音（分钟）": "近3月平均主叫时长",
+          "实际近6月平均语音（分钟）": "近6月平均主叫时长"
+        }
       },
       "usage.consumption": {
-        "from": "raw_tags",
+        "from": "bean.tags",
         "type": "filter_include",
         "include_keys": [
           "近6月平均折后收入",
           "近3月平均折后收入",
           "近3月平均月消费",
-          "近6月平均月消费"
-        ]
+          "近6月平均月消费",
+          "实际近3月平均消费（元）",
+          "实际近6月平均消费（元）"
+        ],
+        "field_rename": {
+          "实际近3月平均消费（元）": "近3月平均月消费",
+          "实际近6月平均消费（元）": "近6月平均月消费"
+        }
       },
       "tags": {
-        "from": "raw_tags",
+        "from": "bean.tags",
         "type": "filter_exclude",
         "exclude_keys": [
           "近3月流量饱和度",
@@ -77,15 +95,23 @@
           "近3月平均流量(MB）",
           "近6月平均流量(MB）",
           "近3月平均流量饱和度",
+          "实际近3月平均流量（GB）",
+          "实际近6月平均流量（GB）",
           "近3月语音饱和度",
           "近6月平均语音饱和度",
           "近3月平均语音饱和度",
           "近3月平均主叫时长",
           "近6月平均主叫时长",
+          "实际近3月平均语音（分钟）",
+          "实际近6月平均语音（分钟）",
           "近6月平均折后收入",
           "近3月平均折后收入",
           "近3月平均月消费",
-          "近6月平均月消费"
+          "近6月平均月消费",
+          "实际近3月平均消费（元）",
+          "实际近6月平均消费（元）",
+          "超套流量",
+          "套外语音（分钟）"
         ]
       },
       "_unit_conversions": [
@@ -197,6 +223,6 @@
     },
     "source_type": "api",
     "updated_by": "admin",
-    "updated_at": "2026-07-22 17:06:49"
+    "updated_at": "2026-07-30 15:13:01"
   }
 }

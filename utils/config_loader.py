@@ -1,9 +1,10 @@
 """
 配置加载器（精简版）
 
-只加载两个文件：
-  - config/config.json      → 应用级配置（端口、日志、缓存等）
-  - config/agents_config.json → 全局共性配置（当前仅含 llm_gateway）
+加载三个全局文件：
+  - config/config.json         → 应用级配置（端口、日志、缓存等）
+  - config/agents_config.json  → 全局共性配置（当前仅含 llm_gateway）
+  - config/concurrency.json    → 话术生成 LLM 并发上限（默认 8）
 
 业务个性化配置（话术模板、接口映射、Prompt）全部由
 skills-runtime/{province}/{intent}/config/ 统一管理，
@@ -19,6 +20,9 @@ from loguru import logger
 
 _CONFIG_DIR = Path(__file__).parent.parent / "config"
 
+# 话术生成并发默认值（concurrency.json 缺失或字段非法时兜底）
+_DEFAULT_LLM_MAX_CONCURRENCY = 8
+
 
 class ConfigLoader:
     """配置加载器（单例）"""
@@ -27,6 +31,7 @@ class ConfigLoader:
     _initialized: bool = False
     _app_config:    Dict[str, Any] = {}
     _agents_config: Dict[str, Any] = {}
+    _concurrency_config: Dict[str, Any] = {}
 
     def __new__(cls) -> "ConfigLoader":
         if cls._instance is None:
@@ -37,6 +42,7 @@ class ConfigLoader:
         if not self._initialized:
             self._load_app_config()
             self._load_agents_config()
+            self._load_concurrency_config()
             ConfigLoader._initialized = True
 
     def _load_app_config(self) -> None:
@@ -61,6 +67,24 @@ class ConfigLoader:
         except Exception as e:
             logger.warning(f"⚠️ 加载 agents_config.json 失败，使用默认值: {e}")
             ConfigLoader._agents_config = {}
+
+    def _load_concurrency_config(self) -> None:
+        path = _CONFIG_DIR / "concurrency.json"
+        try:
+            with open(path, encoding="utf-8") as f:
+                ConfigLoader._concurrency_config = json.load(f) or {}
+            logger.info(
+                f"✅ 成功加载并发配置: {path} "
+                f"llm_max_concurrency={self.get_script_llm_max_concurrency()}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"⚠️ 加载 concurrency.json 失败，使用默认值 "
+                f"llm_max_concurrency={_DEFAULT_LLM_MAX_CONCURRENCY}: {e}"
+            )
+            ConfigLoader._concurrency_config = {
+                "llm_max_concurrency": _DEFAULT_LLM_MAX_CONCURRENCY,
+            }
 
     def get(self, key: str, default: Any = None) -> Any:
         """读取 config.json 中的值，支持点号路径（如 'app.port'）"""
@@ -130,13 +154,37 @@ class ConfigLoader:
         """省份配置已迁移至 skills-runtime，此处返回空字典以保持接口兼容。"""
         return {}
 
+    def get_concurrency_config(self) -> Dict[str, Any]:
+        """返回 concurrency.json 全文（已过滤下划线注释键）。"""
+        return {
+            k: v
+            for k, v in (self._concurrency_config or {}).items()
+            if not str(k).startswith("_")
+        }
+
+    def get_script_llm_max_concurrency(self) -> int:
+        """话术生成 LLM 并发上限（来自 config/concurrency.json，默认 8）。
+
+        非法 / 缺失 / <=0 时回退到 _DEFAULT_LLM_MAX_CONCURRENCY。
+        调用方可再被 biz_config.strategy.llm_max_concurrency 或环境变量覆盖
+        （见 steps.script_step.ScriptStep._load_biz）。
+        """
+        raw = (self._concurrency_config or {}).get("llm_max_concurrency")
+        try:
+            n = int(raw) if raw is not None and str(raw).strip() != "" else 0
+        except (TypeError, ValueError):
+            n = 0
+        return n if n > 0 else _DEFAULT_LLM_MAX_CONCURRENCY
+
     def reload(self) -> None:
         """热重载配置文件"""
         ConfigLoader._initialized = False
         ConfigLoader._app_config = {}
         ConfigLoader._agents_config = {}
+        ConfigLoader._concurrency_config = {}
         self._load_app_config()
         self._load_agents_config()
+        self._load_concurrency_config()
         ConfigLoader._initialized = True
         logger.info("✅ 配置已热重载")
 

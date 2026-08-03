@@ -108,6 +108,12 @@ class FlowContext:
     北京场景：透传 bean 到 other_info 时使用
     """
 
+    api_call_traces: List[Dict[str, Any]] = field(default_factory=list)
+    """接口查询模式下各节点的调用轨迹（入参/出参/耗时/错误），供测试页排障。
+    每项含：api_name / source_type / url / method / mock_mode / request / response /
+    elapsed_ms / error。直传节点也会记录（request 为 extra_info 摘要）。
+    """
+
     # ─── Step2 输出：推荐筛选结果 ─────────────────────────────────
     final_recommendations: List[Dict[str, Any]] = field(default_factory=list)
     """经策略筛选后的推荐产品列表（TopN，含rank字段）"""
@@ -156,17 +162,34 @@ class FlowContext:
         is_batch = bool(self.batch_contexts)
         results: List[Dict[str, Any]] = []
         for idx, item in enumerate(self.marketing_scripts):
-            entry: Dict[str, Any] = {
-                "product_id":     item.get("product_id", ""),
-                "rank":           item.get("rank", idx + 1),
-                "marketing_text": item.get("marketing_text", ""),
-                "diff_table":     item.get("diff_table"),
-            }
+            # 字段顺序对齐对外规范样例：批量模式 stage/scence 在前
+            entry: Dict[str, Any] = {}
             if is_batch:
                 entry["stage"]  = item.get("stage", "")
                 entry["scence"] = item.get("scence", "")
+            entry["product_id"] = item.get("product_id", "")
+            entry["offerId"] = item.get("offerId", "")
+            entry["rank"] = item.get("rank", idx + 1)
+            entry["marketing_text"] = item.get("marketing_text", "")
+            entry["diff_table"] = item.get("diff_table")
             results.append(entry)
         return results
+
+    def _build_llm_prompts(self) -> List[Dict[str, Any]]:
+        """从 marketing_scripts 提取发给大模型的最终提示词分段（测试页排障用）。"""
+        out: List[Dict[str, Any]] = []
+        for item in self.marketing_scripts:
+            p = item.get("_llm_prompt")
+            if not isinstance(p, dict):
+                continue
+            entry = dict(p)
+            # 批量模式可能在 finalize 之后覆写 stage/scence，以话术结果为准
+            if item.get("stage") is not None:
+                entry["stage"] = item.get("stage") or ""
+            if item.get("scence") is not None:
+                entry["scence"] = item.get("scence") or ""
+            out.append(entry)
+        return out
 
     def to_result(self) -> Dict[str, Any]:
         """构建标准对外响应结构"""
@@ -184,6 +207,9 @@ class FlowContext:
             # 批量模式下每条结果回显 stage/scence；单维度模式不含这两个字段
             "recommend_results": self._build_recommend_results(),
             "errors":   self.errors,
+            "api_calls": list(self.api_call_traces),
+            # 每条话术对应的最终 LLM 提示词分段（上下文数据/模板/话术要求/其他）
+            "llm_prompts": self._build_llm_prompts(),
             "metadata": {
                 **self.metadata,
                 "elapsed_ms":            round(self.elapsed_ms, 1),

@@ -2392,3 +2392,143 @@ communication_style / business_conte 作为独立上下文行（带 {锚点}）�
 4、新建skill的最后一步，需要校验名称，如有重名的需要提示修改名称，不让发布，不需要覆盖重命名选项；
 5、发布后重热载，是默认的，不需要选；
 6、首页删除某个skill的话，需要刷新页面，显示删除后的列表
+
+
+
+
+辽宁话术有问题
+
+低消推荐话术(A生成.仅供参老):感便假您讲-下，我们特地推出了一款优惠，现在只需要保持当的消费，可享受100G国内治量，另享受干光态带服务，我看您当箭套贺为(CUVrent pacdkageiGU10ferDesc])，这款产品时活合想，现在始您办理使用好吗?
+
+
+
+
+
+
+
+
+测试页面报错如下：
+
+A模板引用但本次无数据的槽位:usage[data_usage][近6月平均流里(GB)]、usage[voice_usage][近6月平均语音饱和度]这些槽位不会进入上下文数据，已在提示词[缺失事实】段显式禁止编造与串填;若本应有数据，请看下方接口调用里的「字段映射诊断」。
+键名失配(映射有数据、子键对不上，很可能是模板占位符或fieldrename目标名写错):usage[data_usage][近6月平均流里(GB)]-usage.data_usage已产出[超套流量’，'实际近3月平均流量(GB)‘实际近6月平均流量(GB)]，但模板子键[近6月平均流量(GB)]未命中;最接近产出键:[实际近6月平均流量(GB)」--请核对是模板占位符写错、还是接口映射field_rename 目标名不一致
+usage [voice_usage][近6月平均语音饱和度]一usage.voice_usage已产出[套外语音(分钟)'实际近6月平均语音(分钟)实际近3月平均语音(分钟)]，但模板子键[近6月平均语音饱和度』未命中;最接近产出键:[实际近6月平均语音(分钟)]一一请核对是模板占位符写错、还是接口映射field_rename目标名不一致
+
+
+
+接口查询结果反馈的tags如下
+"tags": {
+    "实际近3月平均消费（元）": 29,
+    "超套流量": {},
+    "套外语音（分钟）": "202607:0,202606:0,202605:0,202604:0,202603:0,202602:0,202601:0",
+    "实际近6月平均语音（分钟）": 12.83,
+    "实际近6月平均消费（元）": 29.02,
+    "实际近3月平均流量（GB）": 0.21,
+    "实际近6月平均流量（GB）": 0.4,
+    "实际近3月平均语音（分钟）": 5.67
+}
+
+
+接口智能映射 usage部分映射结果如下
+{
+  "voice_usage": {
+    "实际近3月平均语音（分钟）": 5.67,
+    "实际近6月平均语音（分钟）": 12.83,
+    "套外语音（分钟）": "202607:0,202606:0,202605:0,202604:0,202603:0,202602:0,202601:0"
+  },
+  "consumption": {
+    "实际近3月平均消费（元）": 29,
+    "实际近6月平均消费（元）": 29.02
+  }
+}
+
+
+
+
+广东单个产品的话术入参如下：
+{ "callId": "", "extra_info": { "portrait_style": { "communication_style": "", "business_conte": "" } }, "final_recommendations": { "recommend_base_flow": "", "recommend_original_price": "", "recommend_broadband": "", "recommend_discount_amount": "", "recommend_preferential_period": "", "recommend_equity": "", "recommend_package_name": "", "recommend_actual_price": "", "recommend_voice_minutes": "", "recommend_bonus_flow": "", "recommend_total_flow": "" }, "diff": { "bonus_flow_diff": "", "diff_actual_price": "", "voice_minutes_diff": "", "base_flow_diff": "" }, "current_package": { "baseFlow": "", "actual_price": "139元", "broadband": "300M", "package_name": "139元全家享套餐（2022）", "voice_minutes": "400分钟", "equity": "无" }, "province": "200", "phone": "139****9249", "intent": "营销活动", "batch_contexts": [ { "stage": "个人市场", "scence": "开口话术", "product_id": "统一营销流量月包-3GB" } ], "topN": "1" }
+
+
+现在项目需要适配，个产品的推荐的入参，样例大致如下
+{ "callId": "", "extra_info": { "portrait_style": { "communication_style": "", "business_conte": "" } }, "recommended_packages": [ { "offerName": "【广州】【纯裸升】升169套餐-2606", "recommend_broadband": "有", "recommend_equity": "无", "recommend_package_name": "【广州】【纯裸升】升169套餐-2606", "recommend_bonus_flow": "0GB/月", "recommend_total_flow": 40, "recommend_base_flow": "40GB/月", "recommend_original_price": "169元", "recommend_discount_amount": "0元", "recommend_preferential_period": "0个月", "offerId": "2026060810324218501011930", "recommend_actual_price": "169元", "recommend_voice_minutes": "500分钟/月" } ], "current_package": { "baseFlow": "", "actual_price": "139元", "broadband": "300M", "package_name": "139元全家享套餐（2022）", "voice_minutes": "400分钟", "equity": "无" }, "province": "200", "phone": "139****9249", "extra_data": {}, "intent": "营销活动", "batch_contexts": [ { "个人市场": "个人市场", "scence": "开口话术", "product_id": "" } ], "topN": "1" }
+
+响应参数里面offerId是匹配话术结果的
+要求：
+1、响应参数可以参考之前的设计《营销话术推荐服务接口规范（对外标准版）v1.0.md》；
+2、多个产品同时生成话术，需要并发异步处理，同时返回结果，需要优化生成性能；
+3、多个产品的话术生成，不影响现在单个产品的生成话术的入参和出参；
+
+
+
+测试参数如：
+
+{
+  "callId": "gd-multi-20260802001",
+  "intent": "营销活动",
+  "phone": "13900009249",
+  "topN": 2,
+  "province": "200",
+  "extra_data": {},
+  "extra_info": {
+    "portrait_style": {
+      "communication_style": "直接爽快",
+      "business_conte": "关注性价比，近期有升档意向"
+    },
+    "current_package": {
+      "package_name": "139元全家享套餐（2022）",
+      "actual_price": "139元",
+      "broadband": "300M",
+      "voice_minutes": "400分钟",
+      "equity": "无",
+      "baseFlow": ""
+    },
+    "recommended_packages": [
+      {
+        "offerId": "2026060810324218501011930",
+        "offerName": "【广州】【纯裸升】升169套餐-2606",
+        "recommend_package_name": "【广州】【纯裸升】升169套餐-2606",
+        "recommend_original_price": "169元",
+        "recommend_actual_price": "169元",
+        "recommend_discount_amount": "0元",
+        "recommend_base_flow": "40GB/月",
+        "recommend_bonus_flow": "0GB/月",
+        "recommend_total_flow": 40,
+        "recommend_voice_minutes": "500分钟/月",
+        "recommend_preferential_period": "0个月",
+        "recommend_equity": "无",
+        "recommend_broadband": "有",
+        "rank": 1
+      },
+      {
+        "offerId": "2026060810324218501011931",
+        "offerName": "【广州】流量扩容包-20G",
+        "recommend_package_name": "【广州】流量扩容包-20G",
+        "recommend_original_price": "20元",
+        "recommend_actual_price": "20元",
+        "recommend_discount_amount": "0元",
+        "recommend_base_flow": "20GB/月",
+        "recommend_bonus_flow": "0GB/月",
+        "recommend_total_flow": 20,
+        "recommend_voice_minutes": "0分钟/月",
+        "recommend_preferential_period": "12个月",
+        "recommend_equity": "无",
+        "recommend_broadband": "无",
+        "rank": 2
+      }
+    ]
+  },
+  "batch_contexts": [
+    {
+      "product_id": "",
+      "stage": "个人市场",
+      "scence": "开口话术"
+    }
+  ]
+}
+
+但是响应的结果有问题
+1、响应参数不带offerid，需要带上；
+2、同时只生成的一个产品的话术；
+
+入参中：batch_contexts.product_id优先作为业务类型匹配话术模板的；
+
+请检查存在的问题

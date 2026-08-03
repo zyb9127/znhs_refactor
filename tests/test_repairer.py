@@ -16,8 +16,24 @@ _BEIJING_FILE = "skills-runtime/beijing/套餐推荐/config/api_nodes.json"
 
 
 def _load_beijing():
+    """北京节点配置，还原成**存量中间集写法**（from: raw_tags + response_extract 槽位）。
+
+    出厂配置已统一为直连映射（from 直接写 bean.tags），但修复器要修的正是历史遗留的
+    中间集形态，夹具需自己造出旧形态，避免用例依赖出厂配置的写法风格。
+    """
     with open(_BEIJING_FILE, encoding="utf-8") as f:
-        return json.load(f)
+        cfg = json.load(f)
+    for name, node in cfg.items():
+        if str(name).startswith("_") or not isinstance(node, dict):
+            continue
+        ft = node.get("field_transform") or {}
+        hit = [r for r in ft.values() if isinstance(r, dict) and r.get("from") == "bean.tags"]
+        if not hit:
+            continue
+        node.setdefault("response_extract", {})["raw_tags"] = "bean.tags"
+        for rule in hit:
+            rule["from"] = "raw_tags"
+    return cfg
 
 
 class TestRepairApiNodes(unittest.TestCase):

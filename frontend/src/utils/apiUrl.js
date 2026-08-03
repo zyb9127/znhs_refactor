@@ -68,25 +68,77 @@ export function apiFetch(path, options) {
 }
 
 /**
+ * 安全解析响应体为 JSON。
+ *
+ * 背景：推荐链路（外部接口 + LLM 生成）耗时较长，一旦超过网关/Ingress 超时，
+ * 网关会返回自己的 HTML 错误页（502/504 等）。此时直接 res.json() 会抛出
+ * 「Unexpected token < in JSON at position 0」这种难以定位的异常。
+ *
+ * 本函数在解析前先判断 HTTP 状态与 Content-Type，非 JSON 时读取文本并抛出
+ * 带上下文（HTTP 状态 + 超时/网关提示 + 片段）的可读错误，便于用户与排查。
+ *
+ * @param {Response} res
+ * @returns {Promise<any>} 解析后的 JSON
+ */
+export async function readJsonOrThrow(res) {
+  const ctype = (res.headers.get('content-type') || '').toLowerCase()
+  const looksJson = ctype.includes('application/json') || ctype.includes('+json')
+
+  if (looksJson) {
+    return res.json()
+  }
+
+  // 非 JSON：读取文本用于诊断（HTML 错误页 / 空响应 / 网关文案）
+  let text = ''
+  try { text = await res.text() } catch { /* ignore */ }
+  const snippet = (text || '').trim().replace(/\s+/g, ' ').slice(0, 160)
+  const isHtml = /^\s*</.test(text || '')
+
+  let hint
+  if (res.status === 504 || res.status === 502 || res.status === 503) {
+    hint = `网关超时或服务不可用（HTTP ${res.status}）：推荐生成耗时可能超过网关超时，请稍后重试或减少 topN`
+  } else if (isHtml) {
+    hint = `服务返回了非 JSON 内容（HTTP ${res.status}，疑似网关错误页/登录页），请检查服务状态或登录态`
+  } else if (!res.ok) {
+    hint = `请求失败（HTTP ${res.status}）`
+  } else {
+    hint = `响应不是 JSON（HTTP ${res.status}, content-type=${ctype || '未知'}）`
+  }
+
+  const err = new Error(snippet ? `${hint}｜响应片段：${snippet}` : hint)
+  err.httpStatus = res.status
+  err.nonJson = true
+  throw err
+}
+
+/**
  * 营销推荐接口路径（实时对外服务，固定 /znhs 前缀，与环境 BASE_URL 无关）
  * 默认 dev/gray/prod 均为 /znhs/marketing/recommend
+ * @param {{ debug?: boolean }} [opts] debug=true 时附带 resource_context / llm_prompts 等排障字段
  */
-export function marketingRecommendUrl() {
-  return import.meta.env.VITE_MARKETING_RECOMMEND_PATH || '/znhs/marketing/recommend'
+export function marketingRecommendUrl(opts) {
+  const base = import.meta.env.VITE_MARKETING_RECOMMEND_PATH || '/znhs/marketing/recommend'
+  if (opts && opts.debug) {
+    const sep = base.includes('?') ? '&' : '?'
+    return `${base}${sep}debug=1`
+  }
+  return base
 }
 
 /**
  * 营销推荐 fetch 封装（路径固定 /znhs/marketing/recommend，仍注入 satoken）
- * @param {RequestInit} [options]
+ * 运营测试页默认带 debug=1，拿到排障字段；对外下游不传则仅返回规范出参。
+ * @param {RequestInit & { debug?: boolean }} [options]
  * @returns {Promise<Response>}
  */
 export function marketingRecommendFetch(options) {
   const satoken = resolveSatoken()
-  return fetch(marketingRecommendUrl(), {
+  const { debug = true, ...fetchOpts } = options || {}
+  return fetch(marketingRecommendUrl({ debug }), {
     credentials: 'include',
-    ...options,
+    ...fetchOpts,
     headers: {
-      ...(options?.headers || {}),
+      ...(fetchOpts?.headers || {}),
       ...(satoken ? { satoken } : {}),
     },
   })

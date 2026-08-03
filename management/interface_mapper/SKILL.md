@@ -156,13 +156,17 @@ api_nodes.json 中的接口节点 key 命名规则：`{接口名称}`（全小�
 "current_package": {"from": "current_package", "type": "passthrough"}
 ```
 
-2. **拆分**（从 raw_tags 中按字段含义拆出 usage 子域）：
+2. **拆分**（从混合对象按字段含义拆出 usage 子域）：`from` 直接写该对象在响应中的
+   真实路径（如 `bean.tags`），**不要**在 `response_extract` 里另建 `raw_xxx` 中间槽再引用：
 ```json
-"usage.data_usage": {"from": "raw_tags", "type": "filter_include", "include_keys": ["avgFlow3M", "curFlow"]},
-"usage.voice_usage": {"from": "raw_tags", "type": "filter_include", "include_keys": ["avgVoice3M"]},
-"usage.consumption": {"from": "raw_tags", "type": "filter_include", "include_keys": ["avgFee3M"]},
-"tags": {"from": "raw_tags", "type": "filter_exclude", "exclude_keys": ["avgFlow3M", "curFlow", "avgVoice3M", "avgFee3M"]}
+"usage.data_usage": {"from": "bean.tags", "type": "filter_include", "include_keys": ["avgFlow3M", "curFlow"]},
+"usage.voice_usage": {"from": "bean.tags", "type": "filter_include", "include_keys": ["avgVoice3M"]},
+"usage.consumption": {"from": "bean.tags", "type": "filter_include", "include_keys": ["avgFee3M"]},
+"tags": {"from": "bean.tags", "type": "filter_exclude", "exclude_keys": ["avgFlow3M", "curFlow", "avgVoice3M", "avgFee3M"]}
 ```
+中间槽写法要求 `response_extract` 的槽位名与 `from` 两处同名才成立，任一边丢失都会让
+相关映射域静默为空；直连写法只有一处且自描述，不存在这个失效形态。存量中间集配置在
+保存时会被自动转成直连（等价变换）。
 
 **拆分规则约束**：
 - `filter_include` 的 `include_keys` 中每个字段名，在所有域的 `include_keys` 中只能出现一次
@@ -172,7 +176,7 @@ api_nodes.json 中的接口节点 key 命名规则：`{接口名称}`（全小�
 3. **单位转换**（在对应规则中加 unit_convert）：
 ```json
 "usage.data_usage": {
-  "from": "raw_tags", "type": "filter_include",
+  "from": "bean.tags", "type": "filter_include",
   "include_keys": ["avgFlow3M"],
   "unit_convert": {"avgFlow3M": "mb_to_gb"}
 }

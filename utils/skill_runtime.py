@@ -267,26 +267,36 @@ class SkillRuntimeLoader:
             from services.redis_config_bus import redis_config_bus
             from services.es_config_store import es_config_store
 
-            # production 模式：Redis → ES published
+            # production 模式：Redis → ES published（逐配置类型独立兜底）
             api_nodes  = redis_config_bus.get_config(province, intent, "api_nodes")
             biz_config = redis_config_bus.get_config(province, intent, "biz_config")
+            hit_redis = api_nodes is not None or biz_config is not None
 
-            if api_nodes is not None or biz_config is not None:
-                logger.info(f"[SkillLoader] 从 Redis 缓存加载: {province}/{intent}")
-                return api_nodes or {}, biz_config or {}, "redis"
-
-            # Redis 未命中，去 ES
-            api_nodes  = es_config_store.get_published(province, intent, "api_nodes")  or {}
-            biz_config = es_config_store.get_published(province, intent, "biz_config") or {}
-
-            if api_nodes or biz_config:
-                logger.info(f"[SkillLoader] 从 ES published 加载: {province}/{intent}")
-                # 回写 Redis 缓存
+            # ── 关键修复：Redis 命中必须逐类型判断，绝不能"一类命中就整体返回" ──
+            # 保存单个配置类型（如"编辑接口保存"）时，publish_config 只回写了
+            # api_nodes 的 Redis 缓存并触发 reload；此刻 biz_config 缓存往往是 miss(None)。
+            # 旧逻辑"api_nodes 命中即 return (api_nodes, biz_config or {})"会把 biz_config
+            # 当空返回，导致内存里的话术模板被整片冲掉（保存接口后模板消失的根因）。
+            # 正确做法：哪个类型 Redis 未命中，就单独回落 ES 取回该类型，互不影响。
+            if api_nodes is None:
+                api_nodes = es_config_store.get_published(province, intent, "api_nodes")
                 if api_nodes:
                     redis_config_bus.set_config(province, intent, "api_nodes", api_nodes)
+            if biz_config is None:
+                biz_config = es_config_store.get_published(province, intent, "biz_config")
                 if biz_config:
                     redis_config_bus.set_config(province, intent, "biz_config", biz_config)
-                return api_nodes, biz_config, "es"
+
+            api_nodes  = api_nodes or {}
+            biz_config = biz_config or {}
+
+            if api_nodes or biz_config:
+                source = "redis" if hit_redis else "es"
+                logger.info(
+                    f"[SkillLoader] 从 {'Redis 缓存' if hit_redis else 'ES published'} 加载"
+                    f"（逐类型兜底）: {province}/{intent}"
+                )
+                return api_nodes, biz_config, source
 
             # 外部存储均无该技能包数据（ES 尚未发布过），fallback 本地
             logger.info(
@@ -708,6 +718,7 @@ class SkillRuntimeRegistry:
         intent:   str,
         templates_data: List[Dict[str, Any]],
         skip_reload: bool = True,
+        delete_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """批量新建/更新话术模板：将多条模板一次性合并进 biz_config，**只触发一次**
         ES 写入 + skill_meta 刷新（可选热重载/广播）。
@@ -718,7 +729,9 @@ class SkillRuntimeRegistry:
         biz_config 逐行累加导致的 O(N²) 写放大。
 
         - templates_data 中含 template_id 且已存在 → 覆盖合并；否则新建（自动生成 ID）
-        - 返回写入后的模板列表（含 template_id）
+        - delete_ids：本次同时删除的 template_id 列表（多产品编辑去掉某些产品时用），
+          删除与 upsert 合并到**同一次** save_biz_config，避免额外写入往返
+        - 返回写入后（upsert 部分）的模板列表（含 template_id）
         """
         import uuid as _uuid
         import time as _time
@@ -728,11 +741,15 @@ class SkillRuntimeRegistry:
         if pkg is None:
             raise ValueError(f"技能包不存在: {province}:{intent}")
 
-        if not templates_data:
+        del_set = {t for t in (delete_ids or []) if t}
+        if not templates_data and not del_set:
             return []
 
         biz_cfg   = dict(pkg.config.get("biz_config", {}))
         templates = list(biz_cfg.get("script_templates_v2", []))
+        # 先移除待删除项，再重建索引，保证 upsert 命中的下标正确
+        if del_set:
+            templates = [t for t in templates if t.get("template_id") not in del_set]
         id_index  = {
             t.get("template_id"): i
             for i, t in enumerate(templates) if t.get("template_id")

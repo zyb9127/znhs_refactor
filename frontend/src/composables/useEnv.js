@@ -52,15 +52,22 @@ export function useEnv() {
   // 仅开发环境显示（响应提取、标准数据关联，方便测试）
   const showDevOnly = isDev
 
-  // 一键导出配置 / 操作日志：development + production_noauth 显示，gray / production 隐藏
+  // 操作日志：development + production_noauth 显示，gray / production 隐藏
   const showExportLog = computed(
     () => state.environment === 'development' || state.environment === 'production_noauth'
+  )
+
+  // 一键导出/导入配置：全部环境（含 production）可见。
+  // 后端已按账号分省权限收敛——省份账号只导出/导入本省，导入逐技能包校验写权限，
+  // 不会影响其它省配置，故生产环境展示也是安全的。仅在环境未加载完成时隐藏。
+  const showExportImport = computed(
+    () => ['development', 'gray', 'production', 'production_noauth'].includes(state.environment)
   )
 
   return {
     env: state,
     environment, isDev, isGray, isProd, isProdNoauth,
-    showDevOnly, showExportLog,
+    showDevOnly, showExportLog, showExportImport,
     loadEnv,
   }
 }

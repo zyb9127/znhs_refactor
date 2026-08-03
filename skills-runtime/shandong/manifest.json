@@ -9,14 +9,6 @@
       "version": "1.0.0",
       "enabled": true,
       "description": "山东营销智能推荐"
-    },
-    "测试": {
-      "name": "测试",
-      "version": "1.0.0",
-      "enabled": true,
-      "description": "测试",
-      "created_by": "auto_config_agent",
-      "created_at": "2026-07-28 10:06"
     }
   }
 }

@@ -51,6 +51,36 @@ def fuzzy_match_pid(t_pid: str, req_pid: str) -> bool:
     return False
 
 
+def _build_search_list(
+    templates_v2: List[Dict[str, Any]],
+    intent: str,
+    warn: bool = True,
+) -> List[Dict[str, Any]]:
+    """候选模板池：同 intent 且未删除；优先仅用 online。
+
+    （原 select_template_linear 内联逻辑，抽出供宽松兜底复用，语义逐行保持一致。）
+    优先 online 是为了避免配置里全是 offline 时误走旧 prompts（无 template_content），
+    导致 LLM 收不到话术模板正文。intent 为空的模板视为「不限意图」，同样纳入候选。
+    warn=False 用于二次调用（宽松兜底），避免同一请求重复打降级警告。
+    """
+    pool = [
+        t for t in templates_v2
+        if (not t.get("intent") or t.get("intent") == intent)
+        and t.get("status") != "deleted"
+    ]
+    if not pool:
+        return []
+    online_only = [t for t in pool if t.get("status", "online") == "online"]
+    if online_only:
+        return online_only
+    if warn:
+        logger.warning(
+            f"[ScriptStep] intent={intent!r} 无 status=online 的话术模板，"
+            f"已降级使用 offline/其他状态模板共 {len(pool)} 条（仍带话术模板进 LLM）"
+        )
+    return pool
+
+
 def select_templates_expand(
     templates_v2: List[Dict[str, Any]],
     intent: str,
@@ -150,25 +180,9 @@ def select_template_linear(
 
     返回 None 表示无可用 v2 模板，由调用方降级到旧 prompts 字段。
     """
-    # 同 intent 且未删除的模板；优先仅用 online，避免配置里全是 offline 时
-    # 误走旧 prompts（无 template_content），导致 LLM 收不到话术模板正文。
-    # intent 过滤：模板 intent 为空（不限）或与传入 intent 一致均可命中
-    pool = [
-        t for t in templates_v2
-        if (not t.get("intent") or t.get("intent") == intent)
-        and t.get("status") != "deleted"
-    ]
-    if not pool:
+    search_list = _build_search_list(templates_v2, intent)
+    if not search_list:
         return None
-    online_only = [t for t in pool if t.get("status", "online") == "online"]
-    if online_only:
-        search_list = online_only
-    else:
-        search_list = pool
-        logger.warning(
-            f"[ScriptStep] intent={intent!r} 无 status=online 的话术模板，"
-            f"已降级使用 offline/其他状态模板共 {len(pool)} 条（仍带话术模板进 LLM）"
-        )
 
     def _match(t: Dict[str, Any], pid: str, stg: str, scn: str) -> bool:
         """检查模板是否与给定维度完全吻合。
@@ -280,6 +294,64 @@ def select_template_linear(
     return None
 
 
+def select_template_loose(
+    templates_v2: List[Dict[str, Any]],
+    intent:     str,
+    product_id: str,
+    stage:      str = "",
+    scene:      str = "",
+) -> Optional[Dict[str, Any]]:
+    """宽松兜底匹配：把请求中**为空的维度**视为「不限」。
+
+    严格 12 档（select_template_linear / TemplateIndex.select）把「请求维度为空」解释为
+    「模板该维也必须为空」。当调用方漏传 stage（或字段名写错，如把 "stage" 误写成
+    "个人市场"），而模板又都配了具体 stage 时，12 档会一条都匹配不上，只能退化成不带
+    话术模板的兜底 Prompt——话术质量不可控（生产表现为把整包 JSON 丢给大模型）。
+
+    本函数只在严格档位返回 None 后由 select_template 调用，因此不改变任何已能命中的
+    既有匹配；产品维度仍由紧到松：精确 → 模糊 → 通用（模板 product_id 为空）。
+    """
+    req_pid = str(product_id or "").strip()
+    req_stg = str(stage or "").strip()
+    req_scn = str(scene or "").strip()
+    # 两个维度都给全时，严格档位已穷尽所有组合，宽松档不会带来新命中
+    if req_stg and req_scn:
+        return None
+
+    search_list = _build_search_list(templates_v2, intent, warn=False)
+    if not search_list:
+        return None
+
+    def _dims_ok(t: Dict[str, Any]) -> bool:
+        t_stg = str(t.get("stage", "") or "").strip()
+        t_scn = str(t.get("scene", "") or "").strip()
+        return (not req_stg or t_stg == req_stg) and (not req_scn or t_scn == req_scn)
+
+    for mode in ("exact", "fuzzy", "generic"):
+        if mode in ("exact", "fuzzy") and not req_pid:
+            continue
+        for t in search_list:
+            t_pid = str(t.get("product_id", "") or "").strip()
+            if mode == "exact" and t_pid != req_pid:
+                continue
+            if mode == "fuzzy" and not fuzzy_match_pid(t_pid, req_pid):
+                continue
+            if mode == "generic" and t_pid != "":
+                continue
+            if not _dims_ok(t):
+                continue
+            logger.info(
+                f"[ScriptStep] 宽松兜底命中({mode}): req_pid={req_pid!r} "
+                f"stage={req_stg!r} scene={req_scn!r} → tpl_pid={t_pid!r} "
+                f"tpl_stage={str(t.get('stage', '') or '').strip()!r} "
+                f"tpl_scene={str(t.get('scene', '') or '').strip()!r}"
+                "（请求未给定的维度按不限处理，请检查下游是否漏传 stage/scence）"
+            )
+            return t
+
+    return None
+
+
 def select_template(
     templates_v2: List[Dict[str, Any]],
     intent:     str,
@@ -295,8 +367,17 @@ def select_template(
     - index 为 None：回退 select_template_linear（旧线性扫描，行为与迁移前完全一致）
     """
     if index is not None:
-        return index.select(product_id, stage=stage, scene=scene)
-    return select_template_linear(
+        hit = index.select(product_id, stage=stage, scene=scene)
+    else:
+        hit = select_template_linear(
+            templates_v2, intent, product_id, stage=stage, scene=scene
+        )
+    if hit:
+        return hit
+    # 严格 12 档未命中才走宽松兜底（漏传 stage/scence 时仍能命中模板）。
+    # 放在包装层而非两个底层实现里：既让索引/线性两条路径行为一致，
+    # 也保持它们之间「逐语义等价」的不变量（tests/test_template_index.py 有等价性对照）。
+    return select_template_loose(
         templates_v2, intent, product_id, stage=stage, scene=scene
     )
 
@@ -322,6 +403,7 @@ def build_selector_index(
 __all__ = [
     "select_template",
     "select_template_linear",
+    "select_template_loose",
     "select_templates_expand",
     "fuzzy_match_pid",
     "build_selector_index",

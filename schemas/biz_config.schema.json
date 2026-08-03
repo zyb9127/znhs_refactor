@@ -10,8 +10,8 @@
       "properties": {
         "default_strategy":     {"type": "string", "description": "推荐策略名，默认 direct"},
         "max_script_length":    {"type": "integer", "description": "单条话术最大长度，默认 100"},
-        "max_parallel_scripts": {"type": "integer", "description": "话术生成并发数（历史字段）"},
-        "llm_max_concurrency":  {"type": "integer", "description": "LLM 调用并发信号量上限；缺省不限流"}
+        "max_parallel_scripts": {"type": "integer", "description": "话术生成并发数（历史字段；缺省读 config/concurrency.json，默认 8）"},
+        "llm_max_concurrency":  {"type": "integer", "description": "LLM 调用并发信号量上限；缺省读 config/concurrency.json（默认 8）"}
       }
     },
     "field_aliases": {

@@ -37828,5 +37828,14 @@
       "created_at": "2026-06-03 23:47:51",
       "template_id": "tpl_beijing_1780501912536_479055"
     }
-  ]
+  ],
+  "template_match": {
+    "product_id_from": "offerId"
+  },
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 3,
+    "max_script_length": 150,
+    "max_parallel_scripts": 3
+  }
 }

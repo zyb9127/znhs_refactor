@@ -223,13 +223,6 @@ class LLMService:
 
                 if "choices" in output and len(output["choices"]) > 0:
                     raw_content = output["choices"][0]["message"]["content"]
-                    # 推理模型（如 deepseek-v4-flash）输出在 reasoning_content，content 可能为空
-                    if not raw_content:
-                        raw_content = (
-                            output["choices"][0]["message"].get("reasoning_content")
-                            or output["choices"][0]["message"].get("reasoning")
-                            or ""
-                        )
                     content = self._clean_llm_output(raw_content)
                     logger.info(f"✅ 大模型生成成功 - 输出长度: {len(content)}")
                     _llm_elapsed = (time.perf_counter() - start_time) * 1000

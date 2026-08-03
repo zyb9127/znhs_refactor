@@ -81,7 +81,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { apiFetch, marketingRecommendFetch } from '@/utils/apiUrl'
+import { apiFetch, marketingRecommendFetch, readJsonOrThrow } from '@/utils/apiUrl'
 
 const skillsList = ref([])
 const selectedSkillKey = ref('beijing_套餐推荐')
@@ -182,7 +182,7 @@ async function runTest() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     })
-    const json = await res.json()
+    const json = await readJsonOrThrow(res)
     const elapsed = Date.now() - t0
     if (json.code === 200) {
       statusClass.value = 'status-ok'
@@ -216,14 +216,166 @@ function renderResult(json, reqBody) {
   const rc = json.resource_context || {}
   const meta = json.metadata || {}
   const finalRecs = (d.final_recommendations?.length ? d.final_recommendations : rc.recommended_packages) || []
+  const apiCalls = (json.api_calls || []).filter(
+    c => !c.source_type || c.source_type === 'api'
+  )
+  const llmPrompts = json.llm_prompts || []
 
-  resultCards.value = [
+  const cards = [
     { title: '📢 Step3 · 话术生成结果', badgeClass: 'badge-green', open: true, content: renderScripts(d.recommend_results || [], finalRecs) },
+  ]
+  if (llmPrompts.length) {
+    cards.push({
+      title: `🧠 发给大模型的最终提示词 · ${llmPrompts.length} 条`,
+      badgeClass: 'badge-purple',
+      open: true,
+      content: renderLlmPrompts(llmPrompts),
+    })
+  }
+  if (apiCalls.length) {
+    cards.push({
+      title: `🔌 查询接口调用（入参 / 出参）· ${apiCalls.length} 个`,
+      badgeClass: apiCalls.some(c => c.error) ? 'badge-red' : 'badge-blue',
+      open: true,
+      content: renderApiCalls(apiCalls),
+    })
+  }
+  cards.push(
     { title: '📦 Step1 · 数据采集 (resource_context)', badgeClass: 'badge-blue', open: false, content: renderResourceContext(rc) },
     { title: '🎯 Step2 · 推荐筛选', badgeClass: 'badge-purple', open: false, content: renderPackages(finalRecs) },
     { title: '📊 执行元信息', badgeClass: 'badge-blue', open: false, content: renderMeta(meta, json) },
-    { title: '🗂 原始响应 (JSON)', badgeClass: 'badge-blue', open: false, content: `<pre>${JSON.stringify(json, null, 2)}</pre>` }
-  ]
+    { title: '🗂 原始响应 (JSON)', badgeClass: 'badge-blue', open: false, content: `<pre>${escHtml(JSON.stringify(json, null, 2))}</pre>` },
+  )
+  resultCards.value = cards
+}
+
+function renderLlmPrompts(prompts) {
+  if (!prompts?.length) {
+    return '<p style="color:var(--muted);font-size:13px">本次未生成 LLM 提示词</p>'
+  }
+  const section = (title, body, open = false) => {
+    const text = (body || '').trim()
+    if (!text) {
+      return `<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--muted);">${escHtml(title)} · 空</summary>
+        <pre style="max-height:160px;margin-top:6px;">（无）</pre></details>`
+    }
+    return `<details ${open ? 'open' : ''} style="margin-top:8px;">
+      <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--muted);">${escHtml(title)} · ${text.length} 字</summary>
+      <pre style="max-height:280px;margin-top:6px;white-space:pre-wrap;">${escHtml(text)}</pre>
+    </details>`
+  }
+  return prompts.map((p, idx) => {
+    const meta = [
+      p.package_name ? escHtml(p.package_name) : '',
+      p.product_id ? `ID ${escHtml(String(p.product_id))}` : '',
+      p.stage ? `环节 ${escHtml(p.stage)}` : '',
+      p.scence ? `意图 ${escHtml(p.scence)}` : '',
+    ].filter(Boolean).join(' · ')
+    return `<div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;">
+      <div style="font-weight:600;font-size:14px;margin-bottom:4px;">
+        第 ${p.rank || idx + 1} 条提示词
+        ${meta ? `<span style="font-weight:400;color:var(--muted);font-size:12px;margin-left:8px;">${meta}</span>` : ''}
+      </div>
+      ${renderMissingSlots(p.missing_slots, p.missing_slot_hints)}
+      ${section('① 上下文数据', p.context_data, true)}
+      ${section('② 话术模板', p.template, true)}
+      ${section('③ 话术要求', p.script_requirement, true)}
+      ${section('④ 其他提示（角色说明 / 生成规则 / 输出指令）', p.other, false)}
+      ${section('完整 Prompt（最终发给大模型）', p.full, false)}
+    </div>`
+  }).join('')
+}
+
+/** 模板引用但本次无事实的槽位（缺数据的直接线索，对应提示词里的【缺失事实】段） */
+function renderMissingSlots(slots, hints) {
+  if (!slots?.length) return ''
+  const hintMap = hints && typeof hints === 'object' ? hints : {}
+  // 「父域有数据但叶子子键失配」的槽位单独高亮：映射其实成功了，只是键名对不上，
+  // 这类往往是模板占位符或 field_rename 目标名差一字，给出候选键直接可定位。
+  const mismatch = slots.filter(s => hintMap[s])
+  const mismatchHtml = mismatch.length
+    ? `<div style="margin-top:6px;padding-top:6px;border-top:1px dashed #fed7aa;">
+        <div style="font-weight:600;">键名失配（映射有数据、子键对不上，很可能是模板占位符或 field_rename 目标名写错）：</div>
+        ${mismatch.map(s => `<div style="margin-top:2px;">• <code>${escHtml(s)}</code> — ${escHtml(hintMap[s])}</div>`).join('')}
+      </div>`
+    : ''
+  return `<div style="margin:6px 0 2px;padding:8px 10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;color:#9a3412;font-size:12px;">
+    ⚠ 模板引用但本次无数据的槽位：<code>${escHtml(slots.join('、'))}</code>
+    <div style="margin-top:2px;">这些槽位不会进入上下文数据，已在提示词【缺失事实】段显式禁止编造与串填；若本应有数据，请看下方接口调用里的「字段映射诊断」。</div>
+    ${mismatchHtml}
+  </div>`
+}
+
+/** 字段映射诊断：每条 field_transform 规则的数据源与命中情况 */
+function renderMappingDiag(c) {
+  const rows = c.mapping || []
+  if (!rows.length) return ''
+  const meta = {
+    ok: ['已产出', '#2f9e44'],
+    empty_source: ['数据源为空', '#c92a2a'],
+    no_key_matched: ['键名未命中', '#c92a2a'],
+    all_excluded: ['全部被排除', '#e8590c'],
+  }
+  const body = rows.map(m => {
+    const [text, color] = meta[m.status] || [m.status || '—', 'var(--muted)']
+    const hint = m.status === 'no_key_matched'
+      ? `<div style="margin-top:4px;font-size:11px;color:#b91c1c;">配置键名：${escHtml((m.config_keys || []).join('、')) || '—'}<br>接口实际键名：${escHtml((m.source_keys || []).join('、')) || '—'}</div>`
+      : ''
+    return `<tr>
+      <td><code>${escHtml(m.target || '')}</code></td>
+      <td>${escHtml(m.source || m.from || '—')}</td>
+      <td style="color:${color};font-weight:600;">${escHtml(text)}</td>
+      <td>${escHtml((m.output_keys || []).join('、')) || '—'}${hint}</td>
+    </tr>`
+  }).join('')
+  const bad = rows.some(m => m.status !== 'ok')
+  return `<div style="font-size:12px;font-weight:600;color:${bad ? '#b91c1c' : 'var(--muted)'};margin:10px 0 4px;">
+      🧭 字段映射诊断（field_transform → 标准域）${bad ? ' · 存在未产出的映射域' : ''}
+    </div>
+    <table class="diff-table" style="width:100%;font-size:12px;">
+      <tr><th>目标标准域</th><th>数据源</th><th>结果</th><th>产出字段</th></tr>
+      ${body}
+    </table>
+    <div style="font-size:11px;color:var(--muted);margin-top:4px;">本节点写入的标准域：${escHtml((c.mapped_domains || []).join('、')) || '（无）'}</div>`
+}
+
+function renderApiCalls(calls) {
+  if (!calls?.length) {
+    return '<p style="color:var(--muted);font-size:13px">本次未调用外部查询接口</p>'
+  }
+  return calls.map((c, idx) => {
+    const ok = !c.error
+    const statusColor = ok ? '#2f9e44' : '#c92a2a'
+    const statusText = ok ? '成功' : '失败'
+    const mockTag = c.mock_mode
+      ? '<span style="margin-left:8px;font-size:11px;padding:1px 6px;border-radius:10px;background:#fef3c7;color:#92400e;">MOCK</span>'
+      : ''
+    const elapsed = c.elapsed_ms != null ? `${c.elapsed_ms}ms` : '—'
+    const wrapHint = c.request_body_wrapper
+      ? `<div class="meta-row"><span>body 包装键</span><span><code>${escHtml(c.request_body_wrapper)}</code></span></div>`
+      : ''
+    const errHtml = c.error
+      ? `<div style="margin:8px 0;padding:8px 10px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;color:#b91c1c;font-size:12px;">⚠ ${escHtml(String(c.error))}</div>`
+      : ''
+    return `<div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <div style="font-weight:600;font-size:14px;">
+          ${idx + 1}. ${escHtml(c.api_name || 'unnamed')}${mockTag}
+          <span style="font-weight:400;color:var(--muted);font-size:12px;margin-left:8px;">${escHtml(c.method || 'POST')} ${escHtml(c.url || '(无 URL)')}</span>
+        </div>
+        <div style="font-size:12px;">
+          <span style="color:${statusColor};font-weight:600;">${statusText}</span>
+          <span style="color:var(--muted);margin-left:8px;">耗时 ${escHtml(elapsed)}</span>
+        </div>
+      </div>
+      ${wrapHint}${errHtml}
+      <div style="font-size:12px;font-weight:600;color:var(--muted);margin:8px 0 4px;">📤 查询入参（实际上送）</div>
+      <pre style="max-height:220px;">${escHtml(JSON.stringify(c.request ?? null, null, 2))}</pre>
+      <div style="font-size:12px;font-weight:600;color:var(--muted);margin:10px 0 4px;">📥 查询出参（原始响应）</div>
+      <pre style="max-height:280px;">${escHtml(JSON.stringify(c.response ?? null, null, 2))}</pre>
+      ${renderMappingDiag(c)}
+    </div>`
+  }).join('')
 }
 
 function escHtml(s) {
@@ -235,8 +387,9 @@ function renderScripts(scripts, finalRecs) {
   const pkgMap = {}
   finalRecs.forEach(p => { const pid = p.offerId || p.product_id || ''; if (pid) pkgMap[pid] = p.offerName || p.package_name || '' })
   return scripts.map((s, i) => {
-    const pkgName = pkgMap[s.product_id] || s.package_name || ''
-    const subtitle = pkgName ? escHtml(pkgName) : (s.product_id ? escHtml(s.product_id) : '')
+    const assocId = s.offerId || s.product_id || ''
+    const pkgName = pkgMap[assocId] || s.package_name || ''
+    const subtitle = pkgName ? escHtml(pkgName) : (assocId ? escHtml(assocId) : '')
     let tableHtml = ''
     if (s.diff_table?.rows?.length) {
       const hds = s.diff_table.headers || []
@@ -331,6 +484,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--primary);box-shadow:0
 .badge-blue{background:#dbeafe;color:#1d4ed8}
 .badge-green{background:#dcfce7;color:#15803d}
 .badge-purple{background:#f3e8ff;color:#7e22ce}
+.badge-red{background:#fee2e2;color:#b91c1c}
 .step-body{padding:14px 16px;display:none}
 .step-body.open{display:block}
 .skill-tags{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:4px}

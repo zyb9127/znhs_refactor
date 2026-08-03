@@ -18,8 +18,9 @@ ScriptStep — Step3: 话术生成
 - Prompt 组装逻辑已迁移至 engine/prompt_builder.py（_build_prompt /
   _VAR_LABELS / _resource_context_prompt_vars / _append_prompt_extra_suffix 同理）；
 - run()/run_batch() 的重复配置解析合并为 _load_biz()；模板数达标时构建一次哈希索引
-  （build_selector_index，构建后只读、线程安全）；可选 LLM 并发信号量
-  （strategy.llm_max_concurrency 或环境变量 ZNHS_LLM_MAX_CONCURRENCY，未设置行为不变）。
+  （build_selector_index，构建后只读、线程安全）；LLM 并发上限来自
+  config/concurrency.json（默认 8），可被 biz_config.strategy.llm_max_concurrency
+  或环境变量 ZNHS_LLM_MAX_CONCURRENCY 覆盖。
 """
 from __future__ import annotations
 
@@ -34,6 +35,7 @@ from loguru import logger
 
 from core.context import FlowContext
 from services.llm_service import llm_service
+from utils.config_loader import config_loader
 from utils.observability import record_stage
 from plugins.package_diff import PackageDiff
 from engine.prompt_builder import (
@@ -44,14 +46,15 @@ from engine.prompt_builder import (
 )
 from engine.template_selector import (
     build_selector_index,
+    fuzzy_match_pid,
     select_template,
     select_template_linear,
     select_templates_expand,
 )
 
 
-# 并发度：同时向 LLM 发起的请求数
-_DEFAULT_CONCURRENCY = 3
+# 并发度兜底（config/concurrency.json 与 config_loader 均不可用时）
+_DEFAULT_CONCURRENCY = 8
 
 # 内置默认字段别名（biz_config 未配置时的兜底）
 _DEFAULT_FIELD_ALIASES: Dict[str, List[str]] = {
@@ -62,6 +65,60 @@ _DEFAULT_FIELD_ALIASES: Dict[str, List[str]] = {
     "product_id": ["offerId",    "product_id",      "package_id",   "offer_id"],
 }
 
+# LLM 未填充的残留占位符：{var} 或 {域[子键]}（根名为 ASCII 变量名，子键允许中文）
+_RESIDUAL_PLACEHOLDER_RE = re.compile(r"\{[A-Za-z_]\w*(?:\[[^\[\]{}]+\])*\}")
+
+
+def _apply_slot_facts(text: str, slot_facts: Optional[Dict[str, str]]) -> str:
+    """确定性填槽：用【上下文数据】中已注入的事实值替换 LLM 输出里同名占位符。
+
+    优先于残留清理——映射域/子域有值时保证填入准确（不依赖模型是否听话）；
+    长 token 优先（``current_package[curOfferDesc]`` 先于 ``current_package``）。
+    """
+    if not text or not slot_facts or "{" not in text:
+        return text
+    out = text
+    filled: List[str] = []
+    for token, val in sorted(slot_facts.items(), key=lambda kv: -len(kv[0])):
+        ph = "{" + token + "}"
+        if ph in out and str(val).strip():
+            out = out.replace(ph, str(val))
+            filled.append(token)
+    if filled:
+        logger.info(f"[ScriptStep] ✅ 确定性填槽: {filled}")
+    return out
+
+
+def _strip_residual_placeholders(text: str) -> str:
+    """清除话术中 LLM 未填充的残留占位符（生产曾把 {current_package[curOfferDesc]} 原样播给用户）。
+
+    策略：优先删除包含占位符的整个子句（避免"您当前套餐为，"这类悬空表述）；
+    若删完不剩有效中文（极端：每个子句都有占位符），退化为仅删占位符本身。
+    无残留时原样返回，零开销。
+    """
+    if not text or "{" not in text:
+        return text
+    tokens = _RESIDUAL_PLACEHOLDER_RE.findall(text)
+    if not tokens:
+        return text
+    # 按子句切分（保留分隔符），丢弃含占位符的子句及其后的分隔符
+    parts = re.split(r"([，。；！？,;!?])", text)
+    kept: List[str] = []
+    for i in range(0, len(parts), 2):
+        seg = parts[i]
+        sep = parts[i + 1] if i + 1 < len(parts) else ""
+        if _RESIDUAL_PLACEHOLDER_RE.search(seg):
+            continue
+        kept.append(seg + sep)
+    cleaned = "".join(kept).strip()
+    if not re.search(r"[\u4e00-\u9fff]", cleaned):
+        cleaned = re.sub(r"\s{2,}", " ", _RESIDUAL_PLACEHOLDER_RE.sub("", text)).strip()
+    logger.warning(
+        f"[ScriptStep] ⚠️ 话术残留未填充占位符已清理: {tokens}"
+        "（通常为对应映射域运行态为空，请检查接口响应与 response_extract/field_transform 映射）"
+    )
+    return cleaned
+
 class ScriptStep:
     """话术生成步骤（并发 LLM，biz_config 配置驱动，省份无关）"""
 
@@ -70,6 +127,7 @@ class ScriptStep:
         self.max_length    = 150          # 话术最大字符数默认值（营销话术一般 150 字内；可由 biz_config.strategy.max_script_length 覆盖）
         self.concurrency   = _DEFAULT_CONCURRENCY
         self.field_aliases: Dict[str, List[str]] = {}   # 由 _load_biz() 从 biz_config 注入
+        self._match_cfg: Dict[str, Any] = {}             # biz_config.template_match（模板匹配取值配置）
         # 以下由 _load_biz() 每次请求解析注入
         self._templates_v2: List[Dict[str, Any]] = []
         self._fallback_prompt_tpl: str = ""
@@ -87,8 +145,22 @@ class ScriptStep:
         prompts  = biz_config.get("prompts", {})
 
         self.max_length  = strategy.get("max_script_length", self.max_length)
-        self.concurrency = strategy.get("max_parallel_scripts", self.concurrency)
+        # 全局默认来自 config/concurrency.json（默认 8）；biz_config.max_parallel_scripts 可覆盖
+        try:
+            global_cap = int(config_loader.get_script_llm_max_concurrency())
+        except Exception:
+            global_cap = _DEFAULT_CONCURRENCY
+        if global_cap <= 0:
+            global_cap = _DEFAULT_CONCURRENCY
+        self.concurrency = strategy.get("max_parallel_scripts", global_cap)
         self.field_aliases = biz_config.get("field_aliases", {})
+
+        # template_match：模板匹配维度取值配置（接口查询模式：推荐结果字段 → 模板匹配键）
+        # 形如 {"product_id_from": "curOfferId" 或 ["curOfferId","productInfo.offerId"],
+        #       "stage_from": "...", "scene_from": "..."}；支持点路径与多候选。
+        # 未配置时行为不变（走 field_aliases.product_id / 默认别名）。
+        mc = biz_config.get("template_match")
+        self._match_cfg = mc if isinstance(mc, dict) else {}
 
         # script_templates_v2：新格式（列表），支持 product_id 精确匹配 + 兜底
         self._templates_v2 = biz_config.get("script_templates_v2", [])
@@ -100,25 +172,45 @@ class ScriptStep:
         )
         self._fallback_prompt_tpl = old_prompt_cfg.get("user_prompt_template", "")
 
-        # LLM 并发上限：strategy.llm_max_concurrency 优先，其次环境变量
-        # ZNHS_LLM_MAX_CONCURRENCY；两者都未设置（或非法/<=0）→ 0 表示不限流（行为不变）
+        # LLM 并发上限优先级：
+        #   1) biz_config.strategy.llm_max_concurrency（按省/意图覆盖）
+        #   2) 环境变量 ZNHS_LLM_MAX_CONCURRENCY
+        #   3) config/concurrency.json → llm_max_concurrency（全局默认 8）
         raw = strategy.get("llm_max_concurrency")
         if raw is None:
             raw = os.environ.get("ZNHS_LLM_MAX_CONCURRENCY")
+        if raw is None:
+            raw = global_cap
         try:
             n = int(raw) if raw is not None and str(raw).strip() != "" else 0
         except (TypeError, ValueError):
             n = 0
-        self._llm_max_concurrency = n if n > 0 else 0
+        self._llm_max_concurrency = n if n > 0 else global_cap
+
+    @staticmethod
+    def _estimate_batch_tasks(
+        batch_contexts: List[Dict[str, Any]],
+        ctx: FlowContext,
+    ) -> int:
+        """估算本次批量要生成的话术条数，用于自适应并发上限。
+
+        与 run_batch 的展开规则保持一致：条目指定了 product_id → 1 条；
+        product_id 为空 → 对 final_recommendations 逐产品各 1 条。
+        expand 模式条数取决于命中的模板集合，此处无法预知，按产品数估算（偏小无副作用：
+        并发上限只是限流阈值，估小仅表示不额外放宽）。
+        """
+        rec_n = len(ctx.final_recommendations or []) or 1
+        total = 0
+        for bc in batch_contexts or []:
+            pid = str((bc or {}).get("product_id", "") or "").strip()
+            total += 1 if pid else rec_n
+        return max(total, 1)
 
     def _make_llm_semaphore(self) -> Optional[asyncio.Semaphore]:
-        """按 _load_biz 解析出的并发上限创建信号量；未配置返回 None（不限流，行为不变）。"""
-        if self._llm_max_concurrency > 0:
-            logger.info(
-                f"[ScriptStep] LLM 并发限流已启用 max_concurrency={self._llm_max_concurrency}"
-            )
-            return asyncio.Semaphore(self._llm_max_concurrency)
-        return None
+        """按 _load_biz 解析出的并发上限创建信号量（来自 concurrency.json / 覆盖项）。"""
+        n = self._llm_max_concurrency if self._llm_max_concurrency > 0 else _DEFAULT_CONCURRENCY
+        logger.info(f"[ScriptStep] LLM 并发限流已启用 max_concurrency={n}")
+        return asyncio.Semaphore(n)
 
     async def _generate_llm(
         self,
@@ -132,7 +224,7 @@ class ScriptStep:
             return await llm_service.generate(
                 prompt,
                 temperature=0.3,
-                max_tokens=2048,
+                max_tokens=300,
                 stage=stage,
                 provider="script_step",
                 province=ctx.province,
@@ -141,7 +233,7 @@ class ScriptStep:
             return await llm_service.generate(
                 prompt,
                 temperature=0.3,
-                max_tokens=2048,
+                max_tokens=300,
                 stage=stage,
                 provider="script_step",
                 province=ctx.province,
@@ -221,7 +313,7 @@ class ScriptStep:
                 )
                 llm_success = False
                 raw = ""
-            text = self._post_process(raw)
+            text = self._post_process(raw, prep.get("slot_facts"))
             if not text:
                 llm_success = False
                 text = self._fallback_text(prep["pkg"], prep["diff"])
@@ -277,20 +369,19 @@ class ScriptStep:
 
         # 模板索引：构建一次后只读（线程安全），作参数传入准备函数
         tpl_index = build_selector_index(templates_v2, ctx.intent)
-        # LLM 并发限流信号量。批量模式下多产品话术改为并发生成，为避免未配置并发上限时
-        # 向 LLM 网关瞬时打出过多请求（原串行等价于并发=1），此处兜底用 max_parallel_scripts
-        # （默认 3）作为并发上限；已显式配置 llm_max_concurrency 时以其为准，不改变既有行为。
+        # LLM 并发限流：默认读 config/concurrency.json（8），可被 biz_config / 环境变量覆盖
         sem = self._make_llm_semaphore()
         if sem is None:
-            _default_cap = self.concurrency if isinstance(self.concurrency, int) and self.concurrency > 0 else 3
-            sem = asyncio.Semaphore(_default_cap)
+            _cap = self.concurrency if isinstance(self.concurrency, int) and self.concurrency > 0 else _DEFAULT_CONCURRENCY
+            logger.info(f"[ScriptStep.batch] 使用兜底并发上限 max_concurrency={_cap}")
+            sem = asyncio.Semaphore(_cap)
 
         # 产品查找辅助：product_id → 产品 dict（来自 final_recommendations）
-        fa = self.field_aliases
-        pid_keys = fa.get("product_id", _DEFAULT_FIELD_ALIASES["product_id"])
+        # 取值走 _match_product_id：template_match.product_id_from 配置优先（支持点路径），
+        # 让接口查询结果的任意字段可关联到话术模板的 product_id
         rec_by_pid: Dict[str, Dict[str, Any]] = {}
         for pkg in ctx.final_recommendations:
-            pid = str(self._get_field(pkg, pid_keys) or "").strip()
+            pid = self._match_product_id(pkg)
             if pid:
                 rec_by_pid[pid] = pkg
 
@@ -298,6 +389,32 @@ class ScriptStep:
             f"[ScriptStep.batch] 开始批量生成  batch_size={len(batch_contexts)} "
             f"rec_products={len(rec_by_pid)} templates_v2={len(templates_v2)}"
         )
+
+        def _resolve_pkg_for_bc(bc_pid: str) -> Dict[str, Any]:
+            """按 batch_contexts.product_id 从推荐列表取产品，与单产品模板匹配规则对齐。
+
+            查找顺序（与话术模板匹配同一套精确→模糊语义）：
+              1. offerId 精确命中（rec_by_pid）
+              2. 产品候选标识精确命中（offerId / offerName / recommend_package_name）
+              3. 产品名关键词模糊命中（广东式：bc_pid="流量" ↔ offerName 含"流量"）
+            都找不到时回退占位 ``{"product_id": bc_pid}``，兼容无推荐列表、
+            仅靠 batch_contexts.product_id 匹配模板的旧单产品写法。
+
+            命中真实产品后会浅拷贝并写入 ``_batch_product_id_hint=bc_pid``，
+            让模板匹配优先用入参 product_id（与单产品「按 batch 指定值匹配」一致），
+            避免产品名同时含多个关键词时命中错误模板（如「升169套餐」误命中「套餐」）。
+            """
+            found = self._find_pkg_for_batch_pid(
+                bc_pid, rec_by_pid, ctx.final_recommendations
+            )
+            # 占位产品（仅 product_id 一键）已等价于单产品写法，无需再挂 hint
+            if not found or (
+                set(found.keys()) == {"product_id"} and found.get("product_id") == bc_pid
+            ):
+                return found
+            out = dict(found)
+            out["_batch_product_id_hint"] = bc_pid
+            return out
 
         async def _gen_batch_one(
             bc: Dict[str, Any], global_rank: int
@@ -314,19 +431,17 @@ class ScriptStep:
 
             # ── expand 模式：枚举该 product_id+stage 下所有 scene ──────
             if bc_expand and not bc_scene:
-                # 确定要展开的产品列表
-                # - bc_pid 非空：用指定产品（先从推荐结果找，找不到则占位）
-                # - bc_pid 为空 + 有推荐产品：对所有推荐产品各自展开 scene
-                # - bc_pid 为空 + 无推荐产品：用通用产品（product_id=""）匹配模板
-                if bc_pid:
-                    expand_pkgs = [rec_by_pid.get(bc_pid) or {"product_id": bc_pid}]
-                elif ctx.final_recommendations:
-                    expand_pkgs = list(ctx.final_recommendations)
+                # 有推荐产品时始终展开 TopN；bc_pid 仅作模板业务类型 hint，不过滤产品。
+                # 无推荐产品时：bc_pid 非空走占位/定位；都空则通用模板。
+                if ctx.final_recommendations:
+                    expand_pkgs = [
+                        self._attach_batch_pid_hint(pkg, bc_pid)
+                        for pkg in ctx.final_recommendations
+                    ]
+                elif bc_pid:
+                    expand_pkgs = [_resolve_pkg_for_bc(bc_pid)]
                 else:
                     expand_pkgs = [{}]
-
-                fa = self.field_aliases
-                pid_keys = fa.get("product_id", _DEFAULT_FIELD_ALIASES["product_id"])
 
                 # 单条 (产品 × scene) 话术生成协程（供并发调度；行为与原串行逐条一致）
                 async def _gen_one_expand(
@@ -356,7 +471,7 @@ class ScriptStep:
                             f" stage={bc_stage!r} scene={tpl_scene!r} 话术生成失败: {exc}"
                         )
                         llm_success = False
-                    text = self._post_process(raw)
+                    text = self._post_process(raw, prep.get("slot_facts"))
                     if not text:
                         llm_success = False
                         text = self._fallback_text(prep["pkg"], prep["diff"])
@@ -370,8 +485,8 @@ class ScriptStep:
                 # 按原顺序枚举 (产品 × scene) 任务后并发生成（受 sem 限流，gather 保序）
                 expand_tasks = []
                 for pkg_exp in expand_pkgs:
-                    # 取该产品的实际 product_id（推荐产品用 offerId 等字段）
-                    actual_pid = str(self._get_field(pkg_exp, pid_keys) or bc_pid or "").strip()
+                    # 取该产品的实际 product_id（template_match 配置优先，回退 offerId 等默认别名）
+                    actual_pid = self._match_product_id(pkg_exp) or bc_pid
                     # rank 来自推荐产品自身的 rank 字段，同一产品多个 scene 共用同一 rank
                     pkg_rank = int(pkg_exp.get("rank") or global_rank)
                     expand_templates = self._select_templates_expand(
@@ -406,19 +521,24 @@ class ScriptStep:
 
             # ── 普通模式 ────────────────────────────────────────────────
 
-            # 确定要生成话术的产品列表
-            if bc_pid:
-                # product_id 指定：从推荐结果中找；找不到则构造最小占位产品（无推荐场景）
-                pkg = rec_by_pid.get(bc_pid) or {"product_id": bc_pid}
-                target_pkgs = [pkg]
+            # 确定要生成话术的产品列表。
+            # 关键语义（广东多产品）：
+            #   - 有 recommended_packages（final_recommendations 非空）→ 始终对 TopN
+            #     产品各生成一条；batch_contexts.product_id **只作业务类型**优先匹配
+            #     话术模板（挂到 _batch_product_id_hint），**不用于过滤产品**；
+            #     响应 product_id 仍回显 offerId。
+            #   - 无推荐产品（旧单产品）→ product_id 非空时按名称/ID 定位或占位生成 1 条。
+            if ctx.final_recommendations:
+                target_pkgs = [
+                    self._attach_batch_pid_hint(pkg, bc_pid)
+                    for pkg in ctx.final_recommendations
+                ]
+            elif bc_pid:
+                target_pkgs = [_resolve_pkg_for_bc(bc_pid)]
             else:
-                if ctx.final_recommendations:
-                    # 有推荐产品：对所有推荐结果展开（笛卡尔）
-                    target_pkgs = list(ctx.final_recommendations)
-                else:
-                    # 无推荐产品且 product_id 为空：用空产品对象走一次模板匹配，
-                    # 以 stage/scence 为唯一维度匹配「不限产品」的通用话术模板
-                    target_pkgs = [{}]
+                # 无推荐产品且 product_id 为空：用空产品对象走一次模板匹配，
+                # 以 stage/scence 为唯一维度匹配「不限产品」的通用话术模板
+                target_pkgs = [{}]
 
             # 单个产品话术生成协程（供并发调度；行为与原串行逐条一致）
             async def _gen_one_pkg(i: int, pkg: Dict[str, Any]) -> Dict[str, Any]:
@@ -447,7 +567,7 @@ class ScriptStep:
                     )
                     llm_success = False
                     raw = ""
-                text = self._post_process(raw)
+                text = self._post_process(raw, prep.get("slot_facts"))
                 if not text:
                     llm_success = False
                     text = self._fallback_text(prep["pkg"], prep["diff"])
@@ -470,9 +590,11 @@ class ScriptStep:
         tasks = []
         for bc in batch_contexts:
             tasks.append(_gen_batch_one(bc, rank_counter))
-            # 粗略计算 rank 偏移（product_id 为空时展开数量不定，先按 topN 估计）
-            bc_pid = str(bc.get("product_id") or "").strip()
-            rank_counter += 1 if bc_pid else max(len(ctx.final_recommendations), 1)
+            # rank 偏移：有推荐产品时按展开数计；无推荐时每条 batch 占 1
+            if ctx.final_recommendations:
+                rank_counter += len(ctx.final_recommendations)
+            else:
+                rank_counter += 1
 
         nested_results = await asyncio.gather(*tasks)
 
@@ -519,23 +641,37 @@ class ScriptStep:
         tpl_index：run/run_batch 构建一次的模板哈希索引（engine.template_index.TemplateIndex，
         构建后只读、线程安全）；为 None 时 select_template 回退旧线性扫描，行为不变。
         """
-        product_id_hint = self._get_field(
-            pkg,
-            self.field_aliases.get("product_id", _DEFAULT_FIELD_ALIASES["product_id"]),
-        )
+        # 产品标识候选：offerId 优先，未命中任何模板时回退产品名（见 _match_product_id_candidates）
+        pid_candidates = self._match_product_id_candidates(pkg)
+        product_id_hint = pid_candidates[0] if pid_candidates else ""
+        # 匹配维度兜底：入参未带 stage/scene 时，可按 template_match 配置从推荐结果字段取
+        # （接口查询模式下让查询结果自带的环节/场景字段参与模板匹配）
+        if not str(match_stage or "").strip():
+            match_stage = str(self._resolve_match_dim(pkg, "stage_from", None) or "").strip()
+        if not str(match_scene or "").strip():
+            match_scene = str(self._resolve_match_dim(pkg, "scene_from", None) or "").strip()
         logger.info(
             f"[ScriptStep] 模板匹配 product_id={product_id_hint!r} "
             f"stage={match_stage!r} scene={match_scene!r} "
             f"templates_v2_count={len(templates_v2)}"
         )
-        matched = select_template(
-            templates_v2,
-            ctx.intent,
-            str(product_id_hint),
-            stage=match_stage,
-            scene=match_scene,
-            index=tpl_index,
-        )
+        matched = None
+        for _cand in (pid_candidates or [""]):
+            matched = select_template(
+                templates_v2,
+                ctx.intent,
+                str(_cand),
+                stage=match_stage,
+                scene=match_scene,
+                index=tpl_index,
+            )
+            if matched:
+                if _cand != product_id_hint:
+                    logger.info(
+                        f"[ScriptStep] 产品 ID {product_id_hint!r} 未命中任何模板，"
+                        f"改用产品名候选 {_cand!r} 命中（回显 product_id 仍为 {product_id_hint!r}）"
+                    )
+                break
         logger.info(
             f"[ScriptStep] 模板匹配结果: "
             f"{'命中 ' + str(matched.get('template_name', '')) if matched else '未命中，走旧格式'}"
@@ -557,11 +693,18 @@ class ScriptStep:
 
         fa = self.field_aliases
         pid_keys = fa.get("product_id", _DEFAULT_FIELD_ALIASES["product_id"])
-        product_id = self._get_field(pkg, pid_keys)
+        # 出参 product_id 与模板匹配用同一取值逻辑（template_match 优先），保证回显一致
+        product_id = self._resolve_match_dim(pkg, "product_id_from", pid_keys)
+        # 出参 offerId：只取产品真实 offerId（不走 product_id 别名链，避免占位产品误填）
+        offer_id = str(pkg.get("offerId") or pkg.get("offer_id") or "").strip()
         package_name = self._get_field(pkg, fa.get("pkg_name", _DEFAULT_FIELD_ALIASES["pkg_name"]))
 
         diff = PackageDiff(ctx.current_package, pkg)
-        
+
+        # 收集【上下文数据】注入的占位符→事实值，供 LLM 后确定性填槽（含子域）
+        slot_facts: Dict[str, str] = {}
+        # 分段提示词（上下文数据 / 话术模板 / 话术要求 / 其他），供测试页展示
+        prompt_parts: Dict[str, str] = {}
         prompt = self._build_prompt(
             user_prompt_tpl=tpl_prompt,
             template_text=tpl_content,
@@ -570,6 +713,8 @@ class ScriptStep:
             diff=diff,
             linked_vars=tpl_linked_vars or [],
             script_requirement=tpl_script_req,
+            slot_facts_out=slot_facts,
+            parts_out=prompt_parts,
         )
         return {
             "pkg":             pkg,
@@ -578,8 +723,13 @@ class ScriptStep:
             "linked_vars":     tpl_linked_vars,
             "user_prompt_tpl": tpl_prompt,
             "product_id":      product_id,
+            "offerId":         offer_id,
             "package_name":    package_name,
             "prompt":          prompt,
+            "prompt_parts":    prompt_parts,
+            "slot_facts":      slot_facts,
+            "match_stage":     match_stage,
+            "match_scene":     match_scene,
         }
         
     def _finalize_script_one(
@@ -594,19 +744,42 @@ class ScriptStep:
         linked_vars = prep.get("linked_vars") or []
         user_prompt_tpl = prep.get("user_prompt_tpl") or ""
         product_id = prep["product_id"]
+        offer_id = prep.get("offerId") or ""
         package_name = prep["package_name"]
         fa = self.field_aliases
         fee = self._get_field(pkg, fa.get("pkg_fee", _DEFAULT_FIELD_ALIASES["pkg_fee"]))
         flow = self._get_field(pkg, fa.get("pkg_flow", _DEFAULT_FIELD_ALIASES["pkg_flow"]))
         include_table = "table" in linked_vars or "{table}" in user_prompt_tpl
+        # 挂到结果上的提示词分段（测试页读取；生产调用方可忽略）
+        parts = prep.get("prompt_parts") or {}
+        llm_prompt = {
+            "product_id": product_id,
+            "offerId": offer_id,
+            "rank": rank,
+            "package_name": package_name or "",
+            "stage": prep.get("match_stage") or "",
+            "scence": prep.get("match_scene") or "",
+            "context_data": parts.get("context_data") or "",
+            "template": parts.get("template") or "",
+            "script_requirement": parts.get("script_requirement") or "",
+            "other": parts.get("other") or "",
+            "full": parts.get("full") or prep.get("prompt") or "",
+            # 模板引用但本次无事实的槽位（测试页高亮，直接指向缺数据的映射域）
+            "missing_facts": parts.get("missing_facts") or "",
+            "missing_slots": list(parts.get("missing_slots") or []),
+            # {token: 提示}——父域有数据但叶子子键失配（映射键名≠模板子键）的排障线索
+            "missing_slot_hints": dict(parts.get("missing_slot_hints") or {}),
+        }
         result: dict = {
             "product_id":     product_id,
+            "offerId":        offer_id,
             "rank":           rank,
             "marketing_text": text,
             "package_name":   package_name,
             "monthly_fee":    fee or 0,
             "data_quota":     flow or "",
             "_llm_success":   llm_success,
+            "_llm_prompt":    llm_prompt,
         }
         if include_table:
             result["diff_table"] = diff.to_table()
@@ -699,6 +872,8 @@ class ScriptStep:
         linked_vars: Optional[List[str]] = None,
         script_requirement: str = "",
         extra_info_override: Optional[Dict[str, Any]] = None,
+        slot_facts_out: Optional[Dict[str, str]] = None,
+        parts_out: Optional[Dict[str, str]] = None,
     ) -> str:
         """薄委托：实现已迁移至 engine.prompt_builder.build_prompt（逐行等价，
         实例状态 self.field_aliases / self.max_length 以显式参数传入）。"""
@@ -713,15 +888,21 @@ class ScriptStep:
             extra_info_override=extra_info_override,
             field_aliases=self.field_aliases,
             max_length=self.max_length,
+            slot_facts_out=slot_facts_out,
+            parts_out=parts_out,
         )
 
     # ── 话术后处理 ────────────────────────────────────────────────
 
     @staticmethod
-    def _post_process(text: str) -> str:
+    def _post_process(
+        text: str,
+        slot_facts: Optional[Dict[str, str]] = None,
+    ) -> str:
         """对 LLM 输出做最终整形（Markdown/前缀清洗已在 llm_service._clean_llm_output 完成）
 
-        仅保留：多段落合并 / 去首尾引号 / 无中文兜底
+        顺序：多段落合并 → 去首尾引号 → 确定性填槽（有映射事实则强制替换，含子域）
+        → 残留占位符清理（无事实的槽）→ 无中文兜底。
         """
         text = (text or "").strip()
         if not text:
@@ -730,6 +911,10 @@ class ScriptStep:
             parts = [p.strip() for p in re.split(r"\n+", text) if p.strip()]
             text = " ".join(parts)
         text = text.strip().strip('"""\'')
+        # 1) 有映射事实的占位符（含 {域[子键]}）确定性填入，不依赖 LLM
+        text = _apply_slot_facts(text, slot_facts)
+        # 2) 仍残留的占位符（映射域运行态为空）整句清理，避免花括号露给客户
+        text = _strip_residual_placeholders(text)
         if text and not re.search(r"[\u4e00-\u9fff]", text):
             return ""
         return text
@@ -764,6 +949,149 @@ class ScriptStep:
             if v is not None:
                 return v
         return default
+
+    @staticmethod
+    def _get_path_value(d: Any, path: str) -> Any:
+        """按点路径从嵌套 dict/list 取值（如 "productInfo.offerId"、"list.0.id"）；取不到返回 None。"""
+        cur = d
+        for part in str(path).split("."):
+            if isinstance(cur, dict):
+                cur = cur.get(part)
+            elif isinstance(cur, list):
+                try:
+                    cur = cur[int(part)]
+                except (ValueError, IndexError):
+                    return None
+            else:
+                return None
+            if cur is None:
+                return None
+        return cur
+
+    def _resolve_match_dim(
+        self,
+        pkg: Dict[str, Any],
+        cfg_key: str,
+        fallback_keys: Optional[List[str]],
+    ) -> Any:
+        """模板匹配维度取值：template_match 配置优先，回退 field_aliases/默认别名。
+
+        配置值支持：单字段名 / 点路径 / 逗号分隔多候选 / 字符串数组，
+        按顺序取第一个非空值。fallback_keys 为 None 表示无配置时返回空串（stage/scene 用）。
+        """
+        spec = (self._match_cfg or {}).get(cfg_key)
+        if spec:
+            paths = spec if isinstance(spec, list) else re.split(r"[,，]", str(spec))
+            for p in paths:
+                p = str(p).strip()
+                if not p:
+                    continue
+                v = self._get_path_value(pkg, p)
+                if v not in (None, "", [], {}):
+                    return v
+        if fallback_keys is None:
+            return ""
+        return self._get_field(pkg, fallback_keys)
+
+    def _match_product_id(self, pkg: Dict[str, Any]) -> str:
+        """取推荐结果条目中用于匹配话术模板 product_id 的值（统一入口）。"""
+        pid_keys = self.field_aliases.get("product_id", _DEFAULT_FIELD_ALIASES["product_id"])
+        return str(self._resolve_match_dim(pkg, "product_id_from", pid_keys) or "").strip()
+
+    @staticmethod
+    def _attach_batch_pid_hint(pkg: Dict[str, Any], bc_pid: str) -> Dict[str, Any]:
+        """把 batch_contexts.product_id 挂到产品上，仅作模板业务类型匹配 hint。
+
+        不影响响应回显的 offerId；bc_pid 为空时原样返回（避免无谓拷贝）。
+        """
+        key = str(bc_pid or "").strip()
+        if not key or not isinstance(pkg, dict):
+            return pkg
+        out = dict(pkg)
+        out["_batch_product_id_hint"] = key
+        return out
+
+    def _find_pkg_for_batch_pid(
+        self,
+        bc_pid: str,
+        rec_by_pid: Dict[str, Dict[str, Any]],
+        recommendations: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """按 batch_contexts.product_id 定位推荐产品（与单产品模板匹配语义对齐）。
+
+        查找顺序：
+          1. offerId 精确（rec_by_pid）
+          2. 产品候选标识精确（offerId / offerName / recommend_package_name）
+          3. 关键词模糊（bc_pid="流量" ↔ offerName 含"流量"；与 fuzzy_match_pid 一致）
+        都未命中 → 占位 ``{"product_id": bc_pid}``，兼容无推荐列表的旧单产品写法。
+        """
+        key = str(bc_pid or "").strip()
+        if not key:
+            return {}
+        hit = rec_by_pid.get(key)
+        if hit:
+            return hit
+
+        pkgs = list(recommendations or [])
+        # 2. 精确：bc_pid 等于任一候选标识
+        for pkg in pkgs:
+            for cand in self._match_product_id_candidates(pkg):
+                if cand == key:
+                    logger.info(
+                        f"[ScriptStep.batch] batch product_id={key!r} "
+                        f"精确命中推荐产品 offerId={self._match_product_id(pkg)!r}"
+                    )
+                    return pkg
+        # 3. 模糊：bc_pid 与产品名/ID 互相包含（广东关键词场景）
+        for pkg in pkgs:
+            for cand in self._match_product_id_candidates(pkg):
+                if fuzzy_match_pid(key, cand) or fuzzy_match_pid(cand, key):
+                    logger.info(
+                        f"[ScriptStep.batch] batch product_id={key!r} "
+                        f"模糊命中推荐产品 cand={cand!r} "
+                        f"offerId={self._match_product_id(pkg)!r}"
+                    )
+                    return pkg
+
+        logger.info(
+            f"[ScriptStep.batch] batch product_id={key!r} 未命中推荐列表，"
+            "使用占位产品（按入参 product_id 匹配模板）"
+        )
+        return {"product_id": key}
+
+    def _match_product_id_candidates(self, pkg: Dict[str, Any]) -> List[str]:
+        """模板匹配用的产品标识**候选序列**（按序尝试，第一个命中模板的胜出）。
+
+        背景：产品 ID 与话术模板的 product_id 未必同形。广东按「产品名关键词」配模板
+        （product_id="流量"/"套餐"/"升"），而下游推荐结果给的是纯数字 offerId
+        （2026060810324218501011930）——用 offerId 匹配全部落空，只能退化成把整包 JSON
+        丢给大模型，话术质量不可控。此时产品名 offerName（【广州】【纯裸升】升169套餐-2606）
+        恰好能模糊命中关键词模板。
+
+        候选顺序：显式配置 product_id_from → offerId 类别名 → 产品名类别名 →
+        recommend_package_name。
+
+        安全边界（保证不改变既有省份行为）：
+        - 只有**前序候选一个模板都没命中**时才会尝试后续候选；配了通用兜底模板
+          （product_id 为空）的省份第一候选必命中，行为完全不变；
+        - 回显给调用方的 product_id 仍走 _match_product_id（offerId），不受本候选序列影响；
+        - 可用 biz_config.template_match.disable_name_fallback=true 关闭名称回退。
+        """
+        cands: List[str] = []
+
+        def _add(v: Any) -> None:
+            s = str(v or "").strip()
+            if s and s not in cands:
+                cands.append(s)
+
+        # batch_contexts.product_id 指定值优先（与单产品「按入参 product_id 匹配」对齐）
+        _add(pkg.get("_batch_product_id_hint"))
+        _add(self._match_product_id(pkg))
+        if not (self._match_cfg or {}).get("disable_name_fallback"):
+            name_keys = self.field_aliases.get("pkg_name", _DEFAULT_FIELD_ALIASES["pkg_name"])
+            _add(self._get_field(pkg, name_keys))
+            _add(pkg.get("recommend_package_name"))
+        return cands
 
     @classmethod
     def _fmt_package(
@@ -887,12 +1215,31 @@ class ScriptStep:
                 parts.append(str(section_val))
         return "，".join(parts) if parts else ""
 
-    @staticmethod
-    def _fmt_tags(tags: Dict[str, Any]) -> str:
-        """用户标签格式化（只保留值为真的标签名，省份无关）"""
+    #: 标记型标签的假值（整条丢弃）与真值（只报标签名，不报值）
+    _TAG_FALSE_VALUES = frozenset(
+        {"", "否", "0", "False", "false", "No", "no", "null", "None"})
+    _TAG_TRUE_VALUES = frozenset({"1", "是", "True", "true", "Yes", "yes", "Y", "y"})
+
+    @classmethod
+    def _fmt_tags(cls, tags: Dict[str, Any]) -> str:
+        """用户标签格式化（省份无关）。
+
+        标记型标签（值为 0/1、是/否）只输出标签名——「高频高额超套客户」本身即事实，
+        带上 "=1" 反而会被模型念进话术。其余标签输出 ``键:值``：各省 tags 里常混有
+        带数值的业务字段（北京把「实际近6月平均消费（元）」这类用量数据也放在 tags 中），
+        只报键名会把唯一的真实数字丢掉，模型转而拿套餐月费顶替，正是月均消费填错的来源。
+        """
         if not isinstance(tags, dict):
             return ""
-        return "、".join(
-            k for k, v in tags.items()
-            if str(v).strip() not in ("", "否", "0", "False", "false", "No", "null", "None")
-        )
+        parts: List[str] = []
+        for k, v in tags.items():
+            if isinstance(v, (dict, list)):
+                if not v:
+                    continue
+                parts.append(f"{k}:{json.dumps(v, ensure_ascii=False)}")
+                continue
+            s = str(v).strip()
+            if s in cls._TAG_FALSE_VALUES:
+                continue
+            parts.append(str(k) if s in cls._TAG_TRUE_VALUES else f"{k}:{s}")
+        return "、".join(parts)

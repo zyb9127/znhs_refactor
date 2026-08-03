@@ -150,6 +150,31 @@ class TestPublishConfigDev(PublisherTestBase):
             self.assertEqual(json.load(f), {"v": 2})
         self.assertEqual(list(self._cfg_path().parent.glob("*.tmp")), [])
 
+    def test_api_nodes_intermediate_slots_normalized_at_choke_point(self):
+        """唯一写路径统一转直连映射：任何入口（管理端 / LLM 智能映射 / 批量导入 /
+        技能创建 / republish_local）提交的 raw_xxx 中间集写法，落盘前都会被拉平成
+        from 直指响应路径，新技能不会再引入中间集。"""
+        data = {"nodeA": {
+            "source_type": "api",
+            "response_extract": {"current_package": "bean.mainoffer", "raw_tags": "bean.tags"},
+            "field_transform": {"tags": {"from": "raw_tags", "type": "filter_exclude"}},
+            "mock_response": {"bean": {"mainoffer": {"n": 1}, "tags": {"网龄": "10年"}}},
+        }}
+        with mock.patch("utils.skill_runtime.IS_DEV", True):
+            res = publish_config(P, I, "api_nodes", data, reload=False)
+        self.assertTrue(res.success)
+        with open(self._cfg_path("api_nodes"), encoding="utf-8") as f:
+            saved = json.load(f)
+        node = saved["nodeA"]
+        self.assertEqual(node["field_transform"]["tags"]["from"], "bean.tags")
+        self.assertNotIn("raw_tags", node["response_extract"])
+        # 标准域槽位不受影响，且落盘配置巡检零错误
+        self.assertEqual(node["response_extract"]["current_package"], "bean.mainoffer")
+        self.assertEqual(
+            [w for w in res.warnings if "E201" in w], [],
+            f"转直连后不应再有悬空引用告警: {res.warnings}",
+        )
+
     def test_invalid_config_type(self):
         res = publish_config(P, I, "pipeline", {}, reload=False)
         self.assertFalse(res.success)

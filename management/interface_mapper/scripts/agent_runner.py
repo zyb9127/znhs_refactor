@@ -236,8 +236,10 @@ _TOOL_SCHEMAS: List[Dict] = [
                         "type": "string",
                         "description": (
                             "你分析后给出的 response_extract JSON 字符串。"
-                            "格式：{\"数据域名\": \"实际取数路径\", ...}，路径基于出参示例的真实结构。"
-                            "示例：{\"current_package\": \"data.mainOffer\", \"recommended_packages\": \"result.list\", \"raw_tags\": \"data.userTags\"}"
+                            "格式：{\"标准域名\": \"实际取数路径\", ...}，路径基于出参示例的真实结构。"
+                            "只写整块即可对应标准域的字段；需要分拣的混合对象不要在这里建中间槽，"
+                            "交给 field_transform 用真实路径直接取。"
+                            "示例：{\"current_package\": \"data.mainOffer\", \"recommended_packages\": \"result.list\"}"
                         ),
                     },
                     "field_transform_json": {
@@ -246,7 +248,8 @@ _TOOL_SCHEMAS: List[Dict] = [
                             "你分析后给出的 field_transform JSON 字符串。"
                             "支持 passthrough（直接透传）、filter_include（只保留指定key）、filter_exclude（排除指定key）三种类型。"
                             "对需要单位转换的字段在对应规则中加 unit_convert：{\"字段名\": \"mb_to_gb\"|\"fen_to_yuan\"|\"jiao_to_fen\"}。"
-                            "示例：{\"usage.data_usage\": {\"from\": \"raw_tags\", \"type\": \"filter_include\", \"include_keys\": [\"avgFlow3M\"], \"unit_convert\": {\"avgFlow3M\": \"mb_to_gb\"}}}"
+                            "from 一律直接写源对象在响应中的真实路径（如 data.userTags），不要引用 raw_xxx 中间槽。"
+                            "示例：{\"usage.data_usage\": {\"from\": \"data.userTags\", \"type\": \"filter_include\", \"include_keys\": [\"avgFlow3M\"], \"unit_convert\": {\"avgFlow3M\": \"mb_to_gb\"}}}"
                         ),
                     },
                     "output_params_json": {

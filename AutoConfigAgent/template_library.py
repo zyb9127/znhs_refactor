@@ -55,7 +55,18 @@ TPL_PACKAGE_RECOMMEND: Dict[str, Any] = {
         "response_extract": {
             "recommended_packages": "bean.recommend_results",
             "current_package": "bean.mainoffer",
-            "raw_tags": "bean.tags",
+        },
+        # 直连映射：from 直接写响应路径，不再建 raw_xxx 中间槽位再引用
+        # （中间集要求 response_extract 与 from 两处同名才成立，任一边丢失即静默失效）
+        "field_transform": {
+            "usage.consumption": {
+                "from": "bean.tags", "type": "filter_include",
+                "include_keys": ["近3月平均月消费"],
+            },
+            "tags": {
+                "from": "bean.tags", "type": "filter_exclude",
+                "exclude_keys": ["近3月平均月消费"],
+            },
         },
         "mock_response": _DEFAULT_MOCK,
     },

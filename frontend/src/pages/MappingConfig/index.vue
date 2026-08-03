@@ -1395,7 +1395,13 @@ async function saveInterface() {
       return
     }
     const json = await res.json()
-    if (json.code === 200) { showEdit.value = false; showToast('✅ 保存成功', true); await loadInterfaces() }
+    if (json.code === 200) {
+      showEdit.value = false
+      // 后端保存时会补齐残缺映射、把 raw_xxx 中间集转成直连写法，改了什么要让配置人员看见
+      const filled = json.autofilled || []
+      showToast(filled.length ? `✅ 保存成功，配置已自动修正：${filled.join('；')}` : '✅ 保存成功', true)
+      await loadInterfaces()
+    }
     else showToast('❌ '+(json.detail||json.message||'保存失败'), false)
   } catch(e) { showToast('❌ '+e.message, false) }
 }

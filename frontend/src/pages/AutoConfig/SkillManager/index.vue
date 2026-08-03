@@ -34,9 +34,13 @@
           <el-button size="small" type="success" @click="$router.push('/Import')">
             <el-icon><Plus /></el-icon>&nbsp;创建新配置
           </el-button>
-          <el-button v-if="showExportLog" size="small" type="warning" plain :loading="exporting" :disabled="exporting" @click="exportAllConfigs">
+          <el-button v-if="showExportImport" size="small" type="warning" plain :loading="exporting" :disabled="exporting" @click="exportAllConfigs">
             <el-icon><Download /></el-icon>&nbsp;一键导出配置
           </el-button>
+          <el-button v-if="showExportImport" size="small" type="warning" plain :loading="importing" :disabled="importing" @click="triggerImportConfigs">
+            <el-icon><Upload /></el-icon>&nbsp;导入配置
+          </el-button>
+          <input ref="importFileInput" type="file" accept=".json,application/json" style="display:none" @change="onImportFileChosen" />
           <el-button size="small" plain @click="$router.push('/StandardDomains')">
             <el-icon><InfoFilled /></el-icon>&nbsp;用户手册
           </el-button>
@@ -70,11 +74,11 @@
         </el-select>
       </div>
       <div class="filter-group">
-        <label>意图</label>
+        <label>场景分类</label>
         <el-select
           v-model="filter.intent"
           clearable
-          placeholder="全部意图"
+          placeholder="全部场景分类"
           size="small"
           style="width:140px"
           :disabled="intentOptions.length === 0"
@@ -149,7 +153,7 @@
             <div style="font-size:11px;color:var(--muted);margin-top:2px;">{{ row.skill_name }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="省份 / 意图" min-width="120">
+        <el-table-column label="省份 / 场景分类" min-width="120">
           <template #default="{ row }">
             <div>{{ row.province_name || row.province }}</div>
             <div style="font-size:12px;color:var(--muted);">{{ row.intent }}</div>
@@ -520,9 +524,9 @@ import { useAuthStore } from '@/stores/authStore'
 import {
   acListSkills, acGetSkillConfig,
   acDeleteSkill, acReloadSkill, acUpdateSkillStatus,
-  acExportAllSkills, acContextAudit,
+  acExportAllSkills, acImportAllSkills, acContextAudit,
 } from '@/api/autoConfig.js'
-import { apiFetch, marketingRecommendFetch } from '@/utils/apiUrl'
+import { apiFetch, marketingRecommendFetch, readJsonOrThrow } from '@/utils/apiUrl'
 import { $msg, useLock, debounce } from '@/utils/msg'
 import { uiLog } from '@/utils/uiLog'
 import { useEnv } from '@/composables/useEnv'
@@ -538,7 +542,7 @@ const router = useRouter()
 const route = useRoute()
 
 // ── 运行环境（按环境显隐导出/日志按钮，规范 10）────────────
-const { showExportLog } = useEnv()
+const { showExportLog, showExportImport } = useEnv()
 
 function goInterfaceMapper(row) {
   detailVisible.value = false
@@ -655,25 +659,64 @@ function compareVersionDesc(a, b) {
   return String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
 }
 
+// 瞬时网关/后端未就绪错误：502/503/504 或超时/网络中断（冷启动窗口常见）。
+// 这类错误对幂等 GET 可安全重试，避免登录首屏因 Pod 冷启动瞬时 504 直接报错。
+function isTransientGatewayError(e) {
+  const status = e?.response?.status
+  if (status === 502 || status === 503 || status === 504) return true
+  const code = e?.code
+  if (code === 'ECONNABORTED' || code === 'ERR_NETWORK') return true
+  return false
+}
+
+async function acListSkillsWithRetry(params, { retries = 2, baseDelay = 800 } = {}) {
+  let lastErr
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await acListSkills(params)
+    } catch (e) {
+      lastErr = e
+      if (attempt < retries && isTransientGatewayError(e)) {
+        const status = e?.response?.status || e?.code || ''
+        loadError.value = `服务正在启动或繁忙（${status}），正在重试（${attempt + 1}/${retries}）…`
+        uiLog.warn('SkillManager', `配置列表加载瞬时失败，重试 ${attempt + 1}/${retries}`, String(status))
+        await new Promise(r => setTimeout(r, baseDelay * Math.pow(2, attempt)))
+        continue
+      }
+      throw e
+    }
+  }
+  throw lastErr
+}
+
 async function loadSkills() {
   if (loading.value) return   // 防重复请求（规范 1）
   loading.value = true
   loadError.value = ''
   try {
-    const res = await acListSkills({ province: filter.value.province, intent: filter.value.intent })
+    const res = await acListSkillsWithRetry({ province: filter.value.province, intent: filter.value.intent })
+    loadError.value = ''
     skills.value = (res.skills || []).slice().sort(compareVersionDesc)
     sourceSummary.value = res.source_summary || {}
     uiLog.info('SkillManager', `加载配置列表成功：${skills.value.length} 个`, res.source_summary)
     if (!filter.value.province && !filter.value.intent) {
       allSkillsCache.value = skills.value
     } else if (allSkillsCache.value.length === 0) {
-      const all = await acListSkills({})
-      allSkillsCache.value = all.skills || []
+      try {
+        const all = await acListSkillsWithRetry({})
+        allSkillsCache.value = all.skills || []
+      } catch { /* 全量缓存失败不影响当前筛选结果展示 */ }
     }
   } catch (e) {
-    // ES/接口异常：统一空状态 + 刷新重试，不弹零散报错（规范 1/8）
-    loadError.value = $msg.errOf(e, '配置列表加载失败，请刷新重试')
-    uiLog.error('SkillManager', '配置列表加载失败', loadError.value)
+    // 区分「网关超时/服务未就绪」与真实错误，给出可操作文案（规范 1/8）
+    if (isTransientGatewayError(e)) {
+      const status = e?.response?.status || e?.code || ''
+      loadError.value = `服务暂时不可用或正在启动（${status}），请稍候点「刷新重试」`
+      uiLog.error('SkillManager', '配置列表加载失败：网关超时/服务未就绪', String(status))
+    } else {
+      loadError.value = $msg.errOf(e, '配置列表加载失败，请刷新重试')
+      uiLog.error('SkillManager', '配置列表加载失败', loadError.value)
+    }
     skills.value = []
     sourceSummary.value = {}
   } finally {
@@ -722,6 +765,59 @@ const [exportAllConfigs, exporting] = useLock(async () => {
     uiLog.error('SkillManager', '一键导出配置失败', text)
   }
 })
+
+// ── 导入配置（与导出往返对称：直接选择导出的 JSON 文件即可整批还原到 ES）──
+const importFileInput = ref(null)
+const importing = ref(false)
+
+function triggerImportConfigs() {
+  importFileInput.value?.click()
+}
+
+async function onImportFileChosen(e) {
+  const file = e.target.files?.[0]
+  if (e.target) e.target.value = ''   // 允许连续选同一文件
+  if (!file) return
+  let payload
+  try {
+    payload = JSON.parse(await file.text())
+  } catch {
+    $msg.err('文件不是合法 JSON，请选择由「一键导出配置」导出的文件')
+    return
+  }
+  const skills = Array.isArray(payload) ? payload : payload?.skills
+  if (!Array.isArray(skills) || !skills.length) {
+    $msg.err('文件里没有可导入的技能包（需要 skills 列表）')
+    return
+  }
+  const confirmed = await $msg.confirm(
+    `将导入 ${skills.length} 个技能包的接口与话术模板到 ES（同名覆盖，保存即自愈）。是否继续？`,
+    { title: '导入配置', type: 'warning', confirmText: '导入' },
+  )
+  if (!confirmed) return
+
+  importing.value = true
+  try {
+    const res = await acImportAllSkills(Array.isArray(payload) ? { skills } : payload)
+    const s = res?.summary || {}
+    const failed = (res?.results || []).filter(r => r.status === 'failed' || r.status === 'skipped')
+    if (res?.success) {
+      $msg.ok(res.message || `导入完成：成功 ${s.ok || 0}`)
+    } else {
+      const detail = failed.slice(0, 5)
+        .map(r => `${r.province || ''}/${r.intent || ''}：${r.error || (r.notes || []).join('；')}`)
+        .join('\n')
+      $msg.warn(`${res?.message || '部分导入失败'}${detail ? '\n' + detail : ''}`)
+    }
+    uiLog.info('SkillManager', `导入配置：${res?.message || ''}`)
+    await loadSkills()
+  } catch (err) {
+    const text = $msg.errOf(err, '导入失败')
+    uiLog.error('SkillManager', '导入配置失败', text)
+  } finally {
+    importing.value = false
+  }
+}
 
 // ── 查看详情 ───────────────────────────────────────────
 async function openDetail(row) {
@@ -974,13 +1070,171 @@ function renderTestResult(json) {
   const rc = json.resource_context || {}
   const meta = json.metadata || {}
   const finalRecs = (d.final_recommendations?.length ? d.final_recommendations : rc.recommended_packages) || []
-  testResultCards.value = [
+  // 接口查询模式：仅展示 source_type=api（或未标注）的节点调用轨迹
+  const apiCalls = (json.api_calls || []).filter(
+    c => !c.source_type || c.source_type === 'api'
+  )
+  const llmPrompts = json.llm_prompts || []
+  const cards = [
     { title: '📢 Step3 · 话术生成结果', badgeClass: 'badge-green', open: true, content: renderScripts(d.recommend_results || [], finalRecs) },
+  ]
+  if (llmPrompts.length) {
+    cards.push({
+      title: `🧠 发给大模型的最终提示词 · ${llmPrompts.length} 条`,
+      badgeClass: 'badge-purple',
+      open: true,
+      content: renderLlmPrompts(llmPrompts),
+    })
+  }
+  if (apiCalls.length) {
+    cards.push({
+      title: `🔌 查询接口调用（入参 / 出参）· ${apiCalls.length} 个`,
+      badgeClass: apiCalls.some(c => c.error) ? 'badge-red' : 'badge-blue',
+      open: true,
+      content: renderApiCalls(apiCalls),
+    })
+  }
+  cards.push(
     { title: '📦 Step1 · 数据采集 (resource_context)', badgeClass: 'badge-blue', open: false, content: renderResourceContext(rc) },
     { title: '🎯 Step2 · 推荐筛选', badgeClass: 'badge-purple', open: false, content: renderPackages(finalRecs) },
     { title: '📊 执行元信息', badgeClass: 'badge-blue', open: false, content: renderTestMeta(meta, json) },
     { title: '🗂 原始响应 (JSON)', badgeClass: 'badge-blue', open: false, content: `<pre>${escHtml(JSON.stringify(json, null, 2))}</pre>` },
-  ]
+  )
+  testResultCards.value = cards
+}
+
+/** 渲染发给大模型的最终提示词（上下文数据 / 话术模板 / 话术要求 / 其他） */
+function renderLlmPrompts(prompts) {
+  if (!prompts?.length) {
+    return '<p style="color:var(--muted);font-size:13px">本次未生成 LLM 提示词</p>'
+  }
+  const section = (title, body, open = false) => {
+    const text = (body || '').trim()
+    if (!text) {
+      return `<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--muted);">${escHtml(title)} · 空</summary>
+        <pre style="max-height:160px;margin-top:6px;">（无）</pre></details>`
+    }
+    return `<details ${open ? 'open' : ''} style="margin-top:8px;">
+      <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--muted);">${escHtml(title)} · ${text.length} 字</summary>
+      <pre style="max-height:280px;margin-top:6px;white-space:pre-wrap;">${escHtml(text)}</pre>
+    </details>`
+  }
+  return prompts.map((p, idx) => {
+    const meta = [
+      p.package_name ? escHtml(p.package_name) : '',
+      p.product_id ? `ID ${escHtml(String(p.product_id))}` : '',
+      p.stage ? `环节 ${escHtml(p.stage)}` : '',
+      p.scence ? `意图 ${escHtml(p.scence)}` : '',
+    ].filter(Boolean).join(' · ')
+    return `<div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;">
+      <div style="font-weight:600;font-size:14px;margin-bottom:4px;">
+        第 ${p.rank || idx + 1} 条提示词
+        ${meta ? `<span style="font-weight:400;color:var(--muted);font-size:12px;margin-left:8px;">${meta}</span>` : ''}
+      </div>
+      ${renderMissingSlots(p.missing_slots, p.missing_slot_hints)}
+      ${section('① 上下文数据', p.context_data, true)}
+      ${section('② 话术模板', p.template, true)}
+      ${section('③ 话术要求', p.script_requirement, true)}
+      ${section('④ 其他提示（角色说明 / 生成规则 / 输出指令）', p.other, false)}
+      ${section('完整 Prompt（最终发给大模型）', p.full, false)}
+    </div>`
+  }).join('')
+}
+
+/** 模板引用但本次无事实的槽位（缺数据的直接线索，对应提示词里的【缺失事实】段） */
+function renderMissingSlots(slots, hints) {
+  if (!slots?.length) return ''
+  const hintMap = hints && typeof hints === 'object' ? hints : {}
+  // 「父域有数据但叶子子键失配」的槽位单独高亮：映射其实成功了，只是键名对不上，
+  // 这类往往是模板占位符或 field_rename 目标名差一字，给出候选键直接可定位。
+  const mismatch = slots.filter(s => hintMap[s])
+  const mismatchHtml = mismatch.length
+    ? `<div style="margin-top:6px;padding-top:6px;border-top:1px dashed #fed7aa;">
+        <div style="font-weight:600;">键名失配（映射有数据、子键对不上，很可能是模板占位符或 field_rename 目标名写错）：</div>
+        ${mismatch.map(s => `<div style="margin-top:2px;">• <code>${escHtml(s)}</code> — ${escHtml(hintMap[s])}</div>`).join('')}
+      </div>`
+    : ''
+  return `<div style="margin:6px 0 2px;padding:8px 10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;color:#9a3412;font-size:12px;">
+    ⚠ 模板引用但本次无数据的槽位：<code>${escHtml(slots.join('、'))}</code>
+    <div style="margin-top:2px;">这些槽位不会进入上下文数据，已在提示词【缺失事实】段显式禁止编造与串填；若本应有数据，请看下方接口调用里的「字段映射诊断」。</div>
+    ${mismatchHtml}
+  </div>`
+}
+
+/** 字段映射诊断：每条 field_transform 规则的数据源与命中情况 */
+function renderMappingDiag(c) {
+  const rows = c.mapping || []
+  if (!rows.length) return ''
+  const meta = {
+    ok: ['已产出', '#2f9e44'],
+    empty_source: ['数据源为空', '#c92a2a'],
+    no_key_matched: ['键名未命中', '#c92a2a'],
+    all_excluded: ['全部被排除', '#e8590c'],
+  }
+  const body = rows.map(m => {
+    const [text, color] = meta[m.status] || [m.status || '—', 'var(--muted)']
+    const hint = m.status === 'no_key_matched'
+      ? `<div style="margin-top:4px;font-size:11px;color:#b91c1c;">配置键名：${escHtml((m.config_keys || []).join('、')) || '—'}<br>接口实际键名：${escHtml((m.source_keys || []).join('、')) || '—'}</div>`
+      : ''
+    return `<tr>
+      <td><code>${escHtml(m.target || '')}</code></td>
+      <td>${escHtml(m.source || m.from || '—')}</td>
+      <td style="color:${color};font-weight:600;">${escHtml(text)}</td>
+      <td>${escHtml((m.output_keys || []).join('、')) || '—'}${hint}</td>
+    </tr>`
+  }).join('')
+  const bad = rows.some(m => m.status !== 'ok')
+  return `<div style="font-size:12px;font-weight:600;color:${bad ? '#b91c1c' : 'var(--muted)'};margin:10px 0 4px;">
+      🧭 字段映射诊断（field_transform → 标准域）${bad ? ' · 存在未产出的映射域' : ''}
+    </div>
+    <table class="diff-table" style="width:100%;font-size:12px;">
+      <tr><th>目标标准域</th><th>数据源</th><th>结果</th><th>产出字段</th></tr>
+      ${body}
+    </table>
+    <div style="font-size:11px;color:var(--muted);margin-top:4px;">本节点写入的标准域：${escHtml((c.mapped_domains || []).join('、')) || '（无）'}</div>`
+}
+
+/** 渲染接口查询节点的实际请求入参 / 响应出参（排障用） */
+function renderApiCalls(calls) {
+  if (!calls?.length) {
+    return '<p style="color:var(--muted);font-size:13px">本次未调用外部查询接口（可能为直传模式或无启用节点）</p>'
+  }
+  return calls.map((c, idx) => {
+    const ok = !c.error
+    const statusColor = ok ? '#2f9e44' : '#c92a2a'
+    const statusText = ok ? '成功' : '失败'
+    const mockTag = c.mock_mode
+      ? '<span style="margin-left:8px;font-size:11px;padding:1px 6px;border-radius:10px;background:#fef3c7;color:#92400e;">MOCK</span>'
+      : ''
+    const elapsed = c.elapsed_ms != null ? `${c.elapsed_ms}ms` : '—'
+    const wrapHint = c.request_body_wrapper
+      ? `<div class="meta-row"><span>body 包装键</span><span><code>${escHtml(c.request_body_wrapper)}</code></span></div>`
+      : ''
+    const errHtml = c.error
+      ? `<div style="margin:8px 0;padding:8px 10px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;color:#b91c1c;font-size:12px;">⚠ ${escHtml(String(c.error))}</div>`
+      : ''
+    const reqJson = escHtml(JSON.stringify(c.request ?? null, null, 2))
+    const resJson = escHtml(JSON.stringify(c.response ?? null, null, 2))
+    return `<div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <div style="font-weight:600;font-size:14px;">
+          ${idx + 1}. ${escHtml(c.api_name || 'unnamed')}${mockTag}
+          <span style="font-weight:400;color:var(--muted);font-size:12px;margin-left:8px;">${escHtml(c.method || 'POST')} ${escHtml(c.url || '(无 URL)')}</span>
+        </div>
+        <div style="font-size:12px;">
+          <span style="color:${statusColor};font-weight:600;">${statusText}</span>
+          <span style="color:var(--muted);margin-left:8px;">耗时 ${escHtml(elapsed)}</span>
+        </div>
+      </div>
+      ${wrapHint}
+      ${errHtml}
+      <div style="font-size:12px;font-weight:600;color:var(--muted);margin:8px 0 4px;">📤 查询入参（实际上送）</div>
+      <pre style="max-height:220px;">${reqJson}</pre>
+      <div style="font-size:12px;font-weight:600;color:var(--muted);margin:10px 0 4px;">📥 查询出参（原始响应）</div>
+      <pre style="max-height:280px;">${resJson}</pre>
+      ${renderMappingDiag(c)}
+    </div>`
+  }).join('')
 }
 
 function renderScripts(scripts, finalRecs) {
@@ -988,8 +1242,9 @@ function renderScripts(scripts, finalRecs) {
   const pkgMap = {}
   finalRecs.forEach(p => { const pid = p.offerId || p.product_id || ''; if (pid) pkgMap[pid] = p.offerName || p.package_name || '' })
   return scripts.map((s, i) => {
-    const pkgName = pkgMap[s.product_id] || s.package_name || ''
-    const subtitle = pkgName ? escHtml(pkgName) : (s.product_id ? escHtml(s.product_id) : '')
+    const assocId = s.offerId || s.product_id || ''
+    const pkgName = pkgMap[assocId] || s.package_name || ''
+    const subtitle = pkgName ? escHtml(pkgName) : (assocId ? escHtml(assocId) : '')
     let tableHtml = ''
     if (s.diff_table?.rows?.length) {
       const hds = s.diff_table.headers || []
@@ -1079,7 +1334,7 @@ async function runSkillTest() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-    const json = await res.json()
+    const json = await readJsonOrThrow(res)
     const elapsed = Date.now() - t0
     if (json.code === 200) {
       const n = json.data?.recommend_results?.length || 0
@@ -1483,6 +1738,7 @@ onMounted(async () => {
 .badge-blue   { background: #dbeafe; color: #1d4ed8; }
 .badge-green  { background: #dcfce7; color: #15803d; }
 .badge-purple { background: #f3e8ff; color: #7e22ce; }
+.badge-red    { background: #fee2e2; color: #b91c1c; }
 .tc-step-body { padding: 14px 16px; display: none; }
 .tc-step-body.open { display: block; }
 .test-empty { font-size: 13px; color: var(--muted); padding: 12px; }

@@ -476,9 +476,9 @@
                   </span>
                 </header>
                 <div class="om2-tip">
-                  从响应里按 JSON 路径整块取数据，分两类：
-                  <b>直取到标准域</b>——键名就是 7 大域之一（如 <code>current_package</code>），直接写入、无需转换；
-                  <b>中间数据集</b>——键名非标准域（如 <code>raw_tags</code>），仅作为第③步 field_transform 的取数来源，供拆分/筛选。
+                  从响应里按 JSON 路径整块取数据。<b>只写直取到标准域的项</b>——键名就是 7 大域之一
+                  （如 <code>current_package</code>），直接写入、无需转换。
+                  需要拆分/筛选的混合对象<b>不必在这里预先提取</b>：第③步 <code>from</code> 直接填响应路径即可。
                 </div>
                 <el-input v-model="ifcEditForm.response_extract" type="textarea"
                   :autosize="{ minRows: 4, maxRows: 10 }" spellcheck="false" class="code-textarea" />
@@ -521,7 +521,8 @@
                 <div class="om2-tip">
                   作用：把「来源」数据筛选/转换后写入标准域。三种映射方式：
                   <b>整块透传</b>（passthrough）· <b>只保留字段</b>（filter_include）· <b>排除字段</b>（filter_exclude）。
-                  「来源 from」既可选②命名的中间集，也可<b>直接填响应 JSON 路径</b>（如 <code>bean.tags</code>），后者无需在②预先提取。
+                  「来源 from」<b>推荐直接填响应 JSON 路径</b>（如 <code>bean.tags</code>），无需在②预先提取；
+                  存量的中间集写法（引用 ② 的 <code>raw_xxx</code>）保存时会自动转成直连，行为不变。
                   推荐用下方「表格配置」勾选，无需手写 JSON；复杂场景可切「高级 JSON」。
                 </div>
 
@@ -553,7 +554,7 @@
                   </div>
                   <div class="ft-row ft-head">
                     <span class="ft-c-slot">写入标准域</span>
-                    <span class="ft-c-from">来源 from（中间集 / JSON路径）</span>
+                    <span class="ft-c-from">来源 from（响应 JSON 路径）</span>
                     <span class="ft-c-type">映射方式</span>
                     <span class="ft-c-keys">包含 / 排除字段</span>
                     <span class="ft-c-op"></span>
@@ -569,7 +570,7 @@
                     </div>
                     <div class="ft-c-from">
                       <el-select v-model="row.from" size="small" filterable allow-create default-first-option
-                        placeholder="中间集名 或 JSON路径(bean.tags)" @change="commitFtRows">
+                        placeholder="响应 JSON 路径，如 bean.tags" @change="commitFtRows">
                         <el-option v-for="k in extractKeysPreview" :key="k" :label="k" :value="k" />
                       </el-select>
                     </div>
@@ -700,7 +701,10 @@
                   <span class="om2-aux om2-aux-text">点击展开样例值</span>
                 </header>
                 <div class="om2-flow-block">
-                  <div class="om2-flow-label">中间数据集</div>
+                  <div class="om2-flow-label">
+                    响应取数 response_extract
+                    <span class="om2-flow-label-hint">（按 JSON 路径整块取出；键名命中标准域的会直接写入，见下一段）</span>
+                  </div>
                   <details v-for="row in omExtractFlowRows" :key="'ext-'+row.key" class="om2-flow-row">
                     <summary>
                       <code class="om2-flow-key">{{ row.key }}</code>
@@ -735,7 +739,7 @@
                 <div class="om2-flow-block">
                   <div class="om2-flow-label">
                     标准数据域 · 字段转换 field_transform
-                    <span class="om2-flow-label-hint">（按规则筛选/转换中间数据集后写入标准域）</span>
+                    <span class="om2-flow-label-hint">（按规则筛选/转换后写入标准域；来源可以是响应路径直连，也可以是上方取出的数据集）</span>
                   </div>
                   <details v-for="row in omTransformFlowRows" :key="'tr-'+row.slot" class="om2-flow-row" :class="{ 'is-bad': row.invalid }">
                     <summary>
@@ -743,8 +747,11 @@
                       <span class="om2-flow-sep">←</span>
                       <span class="om2-flow-type">{{ row.typeLabel }}</span>
                       <span class="om2-flow-path">{{ row.from || '（同名）' }}</span>
+                      <span v-if="row.direct" class="om2-flow-ok">直连响应路径</span>
                       <span v-if="row.fieldDesc" class="om2-flow-meta">· {{ row.fieldDesc }}</span>
-                      <span v-if="row.invalid" class="om2-flow-warn">⚠ 数据集 {{ row.from }} 未声明</span>
+                      <span v-if="row.invalid" class="om2-flow-warn">
+                        ⚠ 取不到数据：<code>{{ row.from }}</code> 既不是已声明的数据集，样例出参里也没有这条路径
+                      </span>
                     </summary>
                     <pre class="om2-pre om2-pre-light">{{ row.preview }}</pre>
                   </details>
@@ -1087,6 +1094,122 @@
           <el-badge :value="templateList.length" type="info" style="margin-left:6px;" />
         </template>
 
+        <!-- 模板匹配与填槽设置（接口查询模式）-->
+        <details class="tpl-match-panel" open @toggle="e => e.target.open && ensureIfcDetails()">
+          <summary class="tpl-match-summary">
+            ▶ 模板匹配与填槽设置（接口查询模式）
+            <span class="tpl-match-summary-hint">
+              指定查询/推荐结果中哪个字段用于匹配话术模板；配置标准域为空时的入参兜底
+            </span>
+          </summary>
+          <div class="tpl-match-body">
+            <div class="tpl-match-toolbar">
+              <span class="tpl-match-hint" style="margin:0;">
+                打开时从已保存的 <code>biz_config.template_match</code> /
+                <code>api_nodes._domain_fallbacks</code> 自动回填；修改后请点「保存设置」写入生效配置
+              </span>
+              <el-button
+                type="primary" size="small"
+                :loading="matchSettingsSaving"
+                :disabled="matchSettingsSaving"
+                @click="saveMatchSettings"
+              >保存设置</el-button>
+            </div>
+            <div class="tpl-match-row">
+              <span class="tpl-match-label">产品ID取值字段</span>
+              <el-select
+                v-model="tmProductIdArr" size="small" multiple filterable allow-create
+                default-first-option clearable collapse-tags collapse-tags-tooltip
+                placeholder="从接口出参映射结果中选择，或手动输入字段名/点路径；多选时按序取第一个非空值"
+                style="width:380px;" @change="onMatchSettingsChange"
+              >
+                <el-option
+                  v-for="c in matchFieldCandidates" :key="c.field"
+                  :value="c.field" :label="c.field"
+                >
+                  <span style="font-family:monospace;">{{ c.field }}</span>
+                  <el-tag v-if="c.score >= 2" size="small" type="success" style="margin-left:6px;">推荐</el-tag>
+                  <span class="tpl-match-opt-src">{{ c.source }}<template v-if="c.sample"> · 样例: {{ c.sample }}</template></span>
+                </el-option>
+              </el-select>
+              <el-button size="small" plain @click="autoRecommendMatchField">智能推荐</el-button>
+              <span class="tpl-match-hint">
+                推荐结果中该字段的值用于匹配话术模板「产品 ID」；留空按默认字段
+                （offerId / product_id / package_id / offer_id）取值
+              </span>
+            </div>
+            <div class="tpl-match-row">
+              <span class="tpl-match-label">环节取值字段</span>
+              <el-select
+                v-model="tmStageArr" size="small" multiple filterable allow-create
+                default-first-option clearable collapse-tags collapse-tags-tooltip
+                placeholder="可选：入参未传环节时，从推荐结果该字段取值匹配「环节」"
+                style="width:380px;" @change="onMatchSettingsChange"
+              >
+                <el-option
+                  v-for="c in matchFieldCandidates" :key="c.field"
+                  :value="c.field" :label="c.field"
+                >
+                  <span style="font-family:monospace;">{{ c.field }}</span>
+                  <span class="tpl-match-opt-src">{{ c.source }}<template v-if="c.sample"> · 样例: {{ c.sample }}</template></span>
+                </el-option>
+              </el-select>
+            </div>
+            <div class="tpl-match-row">
+              <span class="tpl-match-label">意图取值字段</span>
+              <el-select
+                v-model="tmSceneArr" size="small" multiple filterable allow-create
+                default-first-option clearable collapse-tags collapse-tags-tooltip
+                placeholder="可选：入参未传意图时，从推荐结果该字段取值匹配「意图」"
+                style="width:380px;" @change="onMatchSettingsChange"
+              >
+                <el-option
+                  v-for="c in matchFieldCandidates" :key="c.field"
+                  :value="c.field" :label="c.field"
+                >
+                  <span style="font-family:monospace;">{{ c.field }}</span>
+                  <span class="tpl-match-opt-src">{{ c.source }}<template v-if="c.sample"> · 样例: {{ c.sample }}</template></span>
+                </el-option>
+              </el-select>
+            </div>
+            <el-divider style="margin:8px 0;" />
+            <div class="tpl-match-row" style="align-items:flex-start;">
+              <span class="tpl-match-label" style="margin-top:4px;">空域入参兜底</span>
+              <div style="flex:1;">
+                <div
+                  v-for="(row, i) in domainFallbacks" :key="i"
+                  class="tpl-match-row" style="margin-bottom:4px;"
+                >
+                  <el-select v-model="row.domain" size="small" style="width:210px;" @change="onMatchSettingsChange">
+                    <el-option
+                      v-for="s in STANDARD_SLOT_LIST" :key="s.key"
+                      :label="`${s.label}（${s.key}）`" :value="s.key"
+                    />
+                  </el-select>
+                  <span class="tpl-match-arrow">←&nbsp;extra_data.</span>
+                  <el-input
+                    v-model="row.path" size="small" clearable
+                    placeholder="入参路径，如 currentMainOffer"
+                    style="width:220px;" @change="onMatchSettingsChange"
+                  />
+                  <el-button
+                    size="small" link type="danger"
+                    @click="domainFallbacks.splice(i, 1); onMatchSettingsChange()"
+                  >删除</el-button>
+                </div>
+                <el-button
+                  size="small" plain
+                  @click="domainFallbacks.push({ domain: 'current_package', path: '' })"
+                >+ 添加兜底</el-button>
+                <div class="tpl-match-hint" style="margin-top:4px;">
+                  接口映射后标准域仍为空时，用主服务入参 extra_data 对应字段回填，
+                  保证话术槽位有事实可填（如：当前套餐 ← currentMainOffer）；接口有数据时不生效
+                </div>
+              </div>
+            </div>
+          </div>
+        </details>
+
         <!-- 工具栏 -->
 
         <div class="tpl-toolbar">
@@ -1094,7 +1217,19 @@
             话术模板（{{ templateList.length }} 组<template v-if="templateTotalCount !== templateList.length"> · 共 {{ templateTotalCount }} 条</template>）
           </span>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <!-- 筛选：场景分类名称 / 环节（省份由当前技能包固定，无需筛选）-->
+            <!-- 筛选：产品 ID / 场景分类名称 / 环节（省份由当前技能包固定，无需筛选）-->
+            <el-select
+              v-model="tplFilterProductId"
+              size="small"
+              placeholder="产品 ID"
+              clearable
+              filterable
+              style="width:180px;"
+              @change="tplPage = 1"
+              @clear="tplPage = 1"
+            >
+              <el-option v-for="p in tplProductIdOptions" :key="p" :label="p" :value="p" />
+            </el-select>
             <el-input
               v-model="tplFilterName"
               size="small"
@@ -1354,7 +1489,7 @@
 <script setup>
 import { ref, reactive, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { $msg } from '@/utils/msg'
+import { $msg, useLock } from '@/utils/msg'
 
 // 统一消息反馈（交互规范 2）：本组件历史上大量直接调用 ElMessage，
 // 这里以同名本地对象桥接到全局 $msg 工具，成功/警告/错误三类反馈行为全局一致。
@@ -1990,6 +2125,24 @@ function _applyTransformRule(slot, rule, preview, mockResp) {
   return src
 }
 
+/**
+ * 判定一条 field_transform 的 `from` 能否取到数据（与后端 DataStep._transform_fields
+ * 及 lint E201 同一套规则，三种合法形态）：
+ *   'declared' —— 命中 response_extract 已声明的数据集名（存量中间集写法）
+ *   'direct'   —— 直接是响应 JSON 路径（如 bean.tags），运行时走路径回退取值
+ *   'unknown'  —— 没有样例出参，无从判定，一律不报警（避免误伤）
+ * 返回 'invalid' 才是真正取不到数据。
+ *
+ * 抽成公共函数是因为此前面板与保存前校验各写了一套且规则不一致：面板只认
+ * response_extract 声明，直连写法被误报成「未声明」，而它其实能正常取到数据。
+ */
+function _classifyFrom(from, declared, sample) {
+  if (!from || typeof from !== 'string') return 'declared'   // 省略 from = 同名，另有逻辑
+  if (declared.has(from)) return 'declared'
+  if (!sample || !Object.keys(sample).length) return 'unknown'
+  return _getByPath(sample, from) !== undefined ? 'direct' : 'invalid'
+}
+
 // 直接匹配：response_extract 中 key 命中 7 大标准域，且没有 field_transform 规则覆盖
 const omDirectMatchedRows = computed(() => {
   const ext = _safeParse(ifcEditForm.response_extract)
@@ -2036,7 +2189,9 @@ const omTransformFlowRows = computed(() => {
     const main = rules[0]
     const type = main.type || 'passthrough'
     const from = main.from || slot
-    const invalid = !!from && !declared.has(from)
+    // 省略 from 时运行时不走路径回退（语义是同名数据集），仍按声明与否判定
+    const kind = main.from ? _classifyFrom(from, declared, mockResp) : (declared.has(from) ? 'declared' : 'unknown')
+    const invalid = kind === 'invalid'
     let fieldDesc = ''
     if (type === 'filter_include' && Array.isArray(main.include_keys)) {
       fieldDesc = `只保留 ${main.include_keys.length} 个字段：${main.include_keys.slice(0,3).join(' / ')}${main.include_keys.length>3?' …':''}`
@@ -2066,6 +2221,7 @@ const omTransformFlowRows = computed(() => {
       from,
       fieldDesc,
       invalid,
+      direct: kind === 'direct',
       preview: _previewVal(result),
     }
   })
@@ -2082,12 +2238,8 @@ const transformInvalidFroms = computed(() => {
     for (const v of Object.values(ft || {})) {
       const f = v?.from
       if (!f || typeof f !== 'string') continue
-      if (declared.has(f)) continue
-      // from 未命名为中间集时，若作为 JSON 路径能在样例中取到值即视为合法（走后端路径回退）
-      if (hasSample && _getByPath(sample, f) !== undefined) continue
-      // 样例为空时无法判定路径是否有效，不误报
-      if (!hasSample) continue
-      invalid.add(f)
+      // 与数据流面板共用判定，避免两套规则漂移（直连写法曾在面板被误报为「未声明」）
+      if (_classifyFrom(f, declared, hasSample ? sample : null) === 'invalid') invalid.add(f)
     }
     return [...invalid]
   } catch { return [] }
@@ -2588,7 +2740,16 @@ async function saveIfcEdit() {
     const json = await res.json()
     if (json.code === 200) {
       ifcEditVisible.value = false
-      ElMessage.success('✅ 保存成功')
+      // 后端保存时会补齐残缺映射、把 raw_xxx 中间集转成直连写法，改了什么必须让配置人员看见
+      const filled = json.autofilled || []
+      if (filled.length) {
+        ElMessage.success({ message: `✅ 保存成功，配置已自动修正：${filled.join('；')}`, duration: 6000 })
+      } else {
+        ElMessage.success('✅ 保存成功')
+      }
+      if ((json.unfixed || []).length) {
+        ElMessage.warning({ message: `⚠️ 以下问题需人工处理：${json.unfixed.join('；')}`, duration: 8000 })
+      }
       await loadIfcItems()
     } else {
       ElMessage.error(json.detail || json.message || '保存失败')
@@ -2965,11 +3126,21 @@ function removeNode(idx) {
 
 // ── 模板分页 & 搜索 ────────────────────────────────────
 const TBL_PAGE_SIZE = 20
-// 筛选条件：场景分类名称（模糊）/ 环节（精确）/ 意图（场景，精确）
+// 筛选条件：产品 ID（精确，可下拉/输入过滤）/ 场景分类名称（模糊）/ 环节（精确）/ 意图（场景，精确）
+const tplFilterProductId = ref('')
 const tplFilterName  = ref('')
 const tplFilterStage = ref('')
 const tplFilterScene = ref('')
 const tplPage    = ref(1)
+
+// 「产品 ID」下拉可选项：来自当前模板列表全部产品 ID 去重（兼容分组行的多产品）
+const tplProductIdOptions = computed(() => {
+  const set = new Set()
+  for (const t of templateList.value) {
+    for (const p of rowProductIds(t)) set.add(p)
+  }
+  return [...set].sort()
+})
 
 // 「环节」下拉可选项：来自当前模板列表去重
 const tplStageOptions = computed(() => {
@@ -2991,10 +3162,12 @@ const tplSceneOptions = computed(() => {
 const filteredTemplates = computed(() => {
   // 过滤空行（template_name / template_content / stage 全空时跳过）
   const nonEmpty = templateList.value.filter(t => !!(t.template_name || t.template_content || t.stage))
+  const pid   = tplFilterProductId.value.trim()
   const name  = tplFilterName.value.trim().toLowerCase()
   const stage = tplFilterStage.value
   const scene = tplFilterScene.value
   return nonEmpty.filter(t =>
+    (!pid   || rowProductIds(t).includes(pid)) &&
     (!name  || (t.template_name || '').toLowerCase().includes(name)) &&
     (!stage || (t.stage || '') === stage) &&
     (!scene || (t.scene || '') === scene)
@@ -3158,52 +3331,48 @@ async function handleTemplateSave(formData) {
         linked_apis:        formData.linked_apis || tplEditing.value?.linked_apis || [],
         status:             formData.status || 'online',
         created_by:         formData.created_by || '',
-        // 优化三：接口数据域变量「有传参默认全选」——由后端并入 linked_vars
-        auto_domain_vars:   true,
       }
 
-      let okCount = 0, failMsg = ''
-      // 1) 更新 / 新建
-      for (const pid of newPids) {
-        const existTid = pidToTid[pid]
-        let res
-        if (!tplDialogIsNew.value && existTid) {
-          res = await apiFetch(`/api/templates/${encodeURIComponent(existTid)}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...baseBody, product_id: pid }),
-          })
-        } else {
-          res = await apiFetch('/api/templates', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ province: props.province, intent: props.intent, ...baseBody, product_id: pid }),
-          })
-        }
-        const json = await res.json()
-        if (json.code === 200) okCount++
-        else failMsg = json.detail || json.message || '保存失败'
-      }
+      // 单次批量保存：多产品 upsert + 删除去掉的产品合并为一次请求，
+      // 后端只做一次 biz_config 版本化写入 + 热重载 + 广播，
+      // 避免逐产品 POST/PUT/DELETE 造成的 N 次 ES 往返（25 个产品 = 25 轮）。
+      const templates = newPids.map(pid => {
+        const item = { ...baseBody, product_id: pid }
+        // 编辑且该产品已有模板 → 带上 template_id 让后端原地更新（保留创建信息）
+        const existTid = !tplDialogIsNew.value ? pidToTid[pid] : ''
+        if (existTid) item.template_id = existTid
+        return item
+      })
 
-      // 2) 删除被去掉的 product_id（仅编辑时）
-      if (!tplDialogIsNew.value) {
-        for (const pid of oldPids) {
-          if (!newPids.includes(pid)) {
-            const tid = pidToTid[pid]
-            if (tid) {
-              await apiFetch(`/api/templates/${encodeURIComponent(tid)}`, { method: 'DELETE' })
-            }
-          }
-        }
-      }
+      // 编辑时：老产品里被去掉的，收集其 template_id 一并删除
+      const deleteTemplateIds = tplDialogIsNew.value
+        ? []
+        : oldPids
+            .filter(pid => !newPids.includes(pid))
+            .map(pid => pidToTid[pid])
+            .filter(Boolean)
 
-      if (failMsg) {
-        ElMessage.error(`❌ ${failMsg}（成功 ${okCount} 条）`)
-      } else {
+      const res = await apiFetch('/api/templates/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          province: props.province,
+          intent: props.intent,
+          templates,
+          delete_template_ids: deleteTemplateIds,
+          // 优化三：接口数据域变量「有传参默认全选」——由后端并入 linked_vars
+          auto_domain_vars: true,
+        }),
+      })
+      const json = await res.json()
+      if (json.code === 200) {
+        const okCount = json.data?.imported ?? templates.length
         tplDialogVisible.value = false
         ElMessage.success(tplDialogIsNew.value
           ? `✅ 创建成功（共 ${okCount} 条）`
           : `✅ 更新成功（共 ${okCount} 条）`)
+      } else {
+        ElMessage.error(`❌ ${json.detail || json.message || '保存失败'}`)
       }
       await loadTplItems()
     } catch (e) {
@@ -3556,6 +3725,11 @@ function applySmartParsed() {
 
 // API 节点列表（数组形式，方便 v-for，序列化时还原回 Object）
 const apiNodeList = ref([])
+// api_nodes 顶层 `_` 前缀键是配置元数据（如 _domain_fallbacks），不是接口节点：
+// 单独保留并在序列化时合并回去，防止保存时被丢弃/误当节点渲染
+const apiNodesMeta = ref({})
+// 空域兜底行：[{ domain, path }] ↔ api_nodes._domain_fallbacks
+const domainFallbacks = ref([])
 
 // ── 标准数据域：7 大 resource_context 域（与 core/context.py 对齐）──
 const STANDARD_SLOTS = new Set([
@@ -4566,13 +4740,230 @@ const strategy = reactive({
   max_script_length: 150,
   max_parallel_scripts: 3,
 })
+// 模板匹配取值配置（biz_config.template_match）：接口查询模式下，
+// 指定推荐结果中哪个字段（支持点路径、逗号分隔多候选）用于匹配话术模板维度
+const templateMatch = reactive({
+  product_id_from: '',
+  stage_from: '',
+  scene_from: '',
+})
+
+// ── 模板匹配候选字段：从接口出参映射结果（mock 样例模拟）提取可选字段 ──
+
+/** 轻量模拟某接口节点单个标准域的映射结果值（response_extract → field_transform 整域规则）。
+ *  与 getSimulatedSlots 相比只求"域的最终值"，供候选字段提取；子键规则/多规则合并从简。 */
+function _simulateSlotValue(cfg, slotKey) {
+  if (!cfg) return undefined
+  const mock = cfg.mock_response || {}
+  const re = cfg.response_extract || {}
+  const datasets = {}
+  for (const [name, path] of Object.entries(re)) datasets[name] = _getByPath(mock, path)
+  const ft = cfg.field_transform || {}
+  for (const [k, r] of Object.entries(ft)) {
+    if (String(k).split('.')[0] !== slotKey || k.includes('.') || !r || typeof r !== 'object') continue
+    const fromN = r.from || slotKey
+    const src = datasets[fromN] !== undefined ? datasets[fromN] : _getByPath(mock, fromN)
+    if (src == null || typeof src !== 'object') return src
+    if (r.type === 'filter_include' || r.type === 'include') {
+      if (Array.isArray(src)) return src
+      const keys = Array.isArray(r.include_keys) ? r.include_keys : []
+      return Object.fromEntries(keys.filter(x => src[x] !== undefined).map(x => [x, src[x]]))
+    }
+    if (r.type === 'filter_exclude' || r.type === 'exclude') {
+      if (Array.isArray(src)) return src
+      const ex = new Set(Array.isArray(r.exclude_keys) ? r.exclude_keys : [])
+      return Object.fromEntries(Object.entries(src).filter(([x]) => !ex.has(x)))
+    }
+    return src   // passthrough / 其它
+  }
+  if (re[slotKey] !== undefined) return datasets[slotKey]
+  if (cfg.source_type === 'direct') return (mock || {})[slotKey]
+  return undefined
+}
+
+/** 从域值提取候选字段路径（数组取首条；嵌套对象下钻一层为 a.b 点路径）*/
+function _collectFieldPaths(val, prefix = '', depth = 0, out = []) {
+  const item = Array.isArray(val) ? val[0] : val
+  if (!item || typeof item !== 'object' || Array.isArray(item) || depth > 1) return out
+  for (const [k, v] of Object.entries(item)) {
+    if (String(k).startsWith('_')) continue
+    const p = prefix ? `${prefix}.${k}` : k
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      _collectFieldPaths(v, p, depth + 1, out)
+    } else {
+      const sample = Array.isArray(v) ? '[…]' : String(v ?? '')
+      out.push({ field: p, sample: sample.length > 24 ? sample.slice(0, 24) + '…' : sample })
+    }
+  }
+  return out
+}
+
+/** 产品ID类字段识别评分：3=典型ID字段名 2=含产品/套餐语义的ID 1=以id结尾 0=其它 */
+function _pidScore(field) {
+  const leaf = String(field).split('.').pop()
+  if (/^(product_?id|offer_?id|cur_?offer_?id|package_?id|prod_?id|goods_?id)$/i.test(leaf)) return 3
+  if (/(offer|product|prod|pkg|package|goods|policy|activity|biz).{0,8}id$/i.test(leaf)) return 2
+  if (/id$/i.test(leaf)) return 1
+  return 0
+}
+
+/** 候选字段清单：遍历接口节点（模式B用 apiNodeList，模式A回退接口详情缓存），
+ *  模拟 recommended_packages / current_package 两域的映射结果，提取字段路径。 */
+const matchFieldCandidates = computed(() => {
+  const nodes = apiNodeList.value.length
+    ? apiNodeList.value.map(n => [n._key, n])
+    : Object.entries(ifcDetailsCache)
+  const seen = new Map()
+  for (const [name, cfg] of nodes) {
+    if (!cfg || cfg.enabled === false) continue
+    for (const slotKey of ['recommended_packages', 'current_package']) {
+      const slotLabel = STANDARD_SLOT_LIST.find(s => s.key === slotKey)?.label || slotKey
+      for (const c of _collectFieldPaths(_simulateSlotValue(cfg, slotKey))) {
+        if (!seen.has(c.field)) {
+          seen.set(c.field, {
+            ...c,
+            source: `${name} · ${slotLabel}`,
+            score: _pidScore(c.field),
+          })
+        }
+      }
+    }
+  }
+  return [...seen.values()].sort((a, b) => b.score - a.score)
+})
+
+/** 逗号分隔字符串 ↔ 多选数组（el-select multiple 绑定用）*/
+function _tmArrProxy(key) {
+  return computed({
+    get: () => String(templateMatch[key] || '').split(/[,，]/).map(s => s.trim()).filter(Boolean),
+    set: (arr) => { templateMatch[key] = (arr || []).join(',') },
+  })
+}
+const tmProductIdArr = _tmArrProxy('product_id_from')
+const tmStageArr     = _tmArrProxy('stage_from')
+const tmSceneArr     = _tmArrProxy('scene_from')
+
+/** 序列化当前 UI 中的 template_match（空则返回 null，表示删除该配置段）*/
+function buildTemplateMatchCfg() {
+  const cfg = {}
+  for (const k of ['product_id_from', 'stage_from', 'scene_from']) {
+    const arr = String(templateMatch[k] || '')
+      .split(/[,，]/).map(s => s.trim()).filter(Boolean)
+    if (arr.length) cfg[k] = arr.length > 1 ? arr : arr[0]
+  }
+  return Object.keys(cfg).length ? cfg : null
+}
+
+/** 序列化空域兜底行 → api_nodes._domain_fallbacks（无有效行时返回 null）*/
+function buildDomainFallbacksCfg() {
+  const rows = domainFallbacks.value.filter(r => r.domain && String(r.path || '').trim())
+  if (!rows.length) return null
+  return Object.fromEntries(rows.map(r => [r.domain, String(r.path).trim()]))
+}
+
+/**
+ * 保存模板匹配 / 空域兜底到生效配置。
+ * Mode A（Skill 管理）：合并写入后端 biz_config / api_nodes（不覆盖话术模板与接口节点）。
+ * Mode B（创建页）：仅同步到父组件 v-model，随技能创建一并落库。
+ */
+const [saveMatchSettings, matchSettingsSaving] = useLock(async () => {
+  const tmCfg = buildTemplateMatchCfg()
+  const dfCfg = buildDomainFallbacksCfg()
+
+  // 先同步本地 v-model（Mode B 到此即可；Mode A 额外落库）
+  emitChange()
+
+  if (!props.province || !props.intent) {
+    ElMessage.success('✅ 已写入当前配置（创建技能时一并保存）')
+    return
+  }
+
+  const p = encodeURIComponent(props.province)
+  const i = encodeURIComponent(props.intent)
+  try {
+    // ── biz_config.template_match：GET 合并再 PUT，避免覆盖 script_templates_v2 ──
+    const bizRes = await apiFetch(`/api/skills/${p}/${i}/biz_config`)
+    const bizJson = await bizRes.json().catch(() => ({}))
+    if (!bizRes.ok || (bizJson.code !== undefined && bizJson.code !== 200)) {
+      throw new Error(bizJson.detail || bizJson.message || '读取 biz_config 失败')
+    }
+    const biz = { ...(bizJson.data || {}) }
+    if (tmCfg) biz.template_match = tmCfg
+    else delete biz.template_match
+    // 策略面板也在本编辑器内，一并合并当前值
+    biz.strategy = { ...(biz.strategy || {}), ...strategy }
+
+    const bizPut = await apiFetch(`/api/skills/${p}/${i}/biz_config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: biz }),
+    })
+    const bizPutJson = await bizPut.json().catch(() => ({}))
+    if (!bizPut.ok || (bizPutJson.code !== undefined && bizPutJson.code !== 200)) {
+      throw new Error(bizPutJson.detail || bizPutJson.message || '保存 template_match 失败')
+    }
+
+    // ── api_nodes._domain_fallbacks：GET 合并再 PUT，保留全部接口节点 ──
+    const apiRes = await apiFetch(`/api/skills/${p}/${i}/api_nodes`)
+    const apiJson = await apiRes.json().catch(() => ({}))
+    if (!apiRes.ok || (apiJson.code !== undefined && apiJson.code !== 200)) {
+      throw new Error(apiJson.detail || apiJson.message || '读取 api_nodes 失败')
+    }
+    const apiNodes = { ...(apiJson.data || {}) }
+    if (dfCfg) apiNodes._domain_fallbacks = dfCfg
+    else delete apiNodes._domain_fallbacks
+
+    const apiPut = await apiFetch(`/api/skills/${p}/${i}/api_nodes`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: apiNodes }),
+    })
+    const apiPutJson = await apiPut.json().catch(() => ({}))
+    if (!apiPut.ok || (apiPutJson.code !== undefined && apiPutJson.code !== 200)) {
+      throw new Error(apiPutJson.detail || apiPutJson.message || '保存空域兜底失败')
+    }
+
+    // 回写父组件，保证再次打开/关闭弹窗前本地态与落库一致
+    emit('update:modelValue', {
+      api_nodes: apiNodes,
+      biz_config: biz,
+    })
+    ElMessage.success('✅ 模板匹配与填槽设置已保存')
+  } catch (e) {
+    ElMessage.error(e.message || '保存失败')
+  }
+})
+
+/** 选择变更：先同步本地；Mode B 即完成，Mode A 需再点「保存设置」落库 */
+function onMatchSettingsChange() {
+  emitChange()
+}
+
+/** 一键推荐：从候选中选产品ID语义最强的字段填入（最多 2 个候选按序兜底）*/
+function autoRecommendMatchField() {
+  const cands = matchFieldCandidates.value.filter(c => c.score >= 2)
+  if (!cands.length) {
+    ElMessage.warning('未在接口出参映射结果中识别到产品ID类字段：请先在接口配置里填好 mock 样例与出参映射，或手动输入字段名')
+    return
+  }
+  const picked = cands.slice(0, 2).map(c => c.field)
+  tmProductIdArr.value = picked
+  onMatchSettingsChange()
+  ElMessage.success(`已推荐产品ID匹配字段：${picked.join('、')}（请点「保存设置」写入生效配置）`)
+}
 // 模板列表
 const templateList = ref([])
 
 // ── 从 props 初始化 ───────────────────────────────────
 function loadFromProps(val) {
   const apiNodes = val?.api_nodes || {}
-  apiNodeList.value = Object.entries(apiNodes).map(([k, v]) => ({
+  // `_` 前缀顶层键（配置元数据）与接口节点分离保存
+  apiNodesMeta.value = Object.fromEntries(
+    Object.entries(apiNodes).filter(([k]) => k.startsWith('_'))
+  )
+  domainFallbacks.value = Object.entries(apiNodesMeta.value._domain_fallbacks || {})
+    .map(([domain, path]) => ({ domain, path: String(path ?? '') }))
+  apiNodeList.value = Object.entries(apiNodes).filter(([k]) => !k.startsWith('_')).map(([k, v]) => ({
     _key: k,
     enabled:               v.enabled               ?? true,
     url:                   v.url                   ?? '',
@@ -4607,6 +4998,13 @@ function loadFromProps(val) {
   strategy.top_n               = s.top_n               ?? 3
   strategy.max_script_length   = s.max_script_length   ?? 150
   strategy.max_parallel_scripts = s.max_parallel_scripts ?? 3
+
+  // 模板匹配取值配置（值可能是字符串或数组，UI 统一按逗号分隔字符串编辑）
+  const tm = biz.template_match || {}
+  const tmStr = v => Array.isArray(v) ? v.join(',') : String(v ?? '')
+  templateMatch.product_id_from = tmStr(tm.product_id_from)
+  templateMatch.stage_from      = tmStr(tm.stage_from)
+  templateMatch.scene_from      = tmStr(tm.scene_from)
 
   // Mode A（有 province+intent，如 Skill 管理）：话术模板改由 loadTplItems 分页拉全量并
   // 「按场景分类/环节/意图/话术内容」合并归类展示（不同 product_id 收进同一分组行），
@@ -4643,7 +5041,27 @@ watch(() => props.modelValue, loadFromProps, { immediate: true, deep: false })
 
 // ── 序列化并 emit ─────────────────────────────────────
 function emitChange() {
-  // api_nodes
+  const tmCfg = buildTemplateMatchCfg()
+  const dfCfg = buildDomainFallbacksCfg()
+
+  // Mode A（Skill 管理）：接口节点 / 话术模板由独立 API 持久化；
+  // 此处只合并匹配设置与元数据，避免用空的 templateList 覆盖 script_templates_v2。
+  if (props.province && props.intent) {
+    const prevApi = { ...(props.modelValue?.api_nodes || {}) }
+    Object.assign(prevApi, apiNodesMeta.value)
+    if (dfCfg) prevApi._domain_fallbacks = dfCfg
+    else delete prevApi._domain_fallbacks
+
+    const prevBiz = { ...(props.modelValue?.biz_config || {}) }
+    prevBiz.strategy = { ...(prevBiz.strategy || {}), ...strategy }
+    if (tmCfg) prevBiz.template_match = tmCfg
+    else delete prevBiz.template_match
+
+    emit('update:modelValue', { api_nodes: prevApi, biz_config: prevBiz })
+    return
+  }
+
+  // Mode B（创建页）：完整序列化 api_nodes + biz_config
   const apiNodes = {}
   for (const node of apiNodeList.value) {
     const isDirect = node.source_type === 'direct'
@@ -4673,7 +5091,11 @@ function emitChange() {
     }
   }
 
-  // biz_config
+  // `_` 前缀元数据键透传（防丢失）；空域兜底行同步回 _domain_fallbacks
+  Object.assign(apiNodes, apiNodesMeta.value)
+  if (dfCfg) apiNodes._domain_fallbacks = dfCfg
+  else delete apiNodes._domain_fallbacks
+
   const scriptTemplatesV2 = templateList.value.map(tpl => {
     const obj = {
       template_id:       tpl.template_id || `tpl_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
@@ -4695,6 +5117,7 @@ function emitChange() {
   const bizConfig = {
     strategy: { ...strategy },
     field_aliases: props.modelValue?.biz_config?.field_aliases ?? {},
+    ...(tmCfg ? { template_match: tmCfg } : {}),
     script_templates_v2: scriptTemplatesV2,
   }
 
@@ -5029,6 +5452,68 @@ async function removeTemplate(idx) {
 }
 
 /* ── 话术模板工具栏 ── */
+/* 模板匹配与填槽设置面板 */
+.tpl-match-panel {
+  margin: 8px 0;
+  border: 1px solid var(--border, #e4e7ed);
+  border-radius: 6px;
+  background: var(--bg-soft, #fafbfc);
+}
+.tpl-match-summary {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  user-select: none;
+}
+.tpl-match-summary-hint {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted, #909399);
+}
+.tpl-match-body {
+  padding: 4px 12px 12px;
+  border-top: 1px dashed var(--border, #e4e7ed);
+}
+.tpl-match-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.tpl-match-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.tpl-match-label {
+  width: 110px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text, #303133);
+  font-weight: 600;
+}
+.tpl-match-hint {
+  font-size: 11px;
+  color: var(--muted, #909399);
+}
+.tpl-match-arrow {
+  font-size: 12px;
+  color: var(--muted, #909399);
+  font-family: monospace;
+}
+.tpl-match-opt-src {
+  float: right;
+  margin-left: 16px;
+  font-size: 11px;
+  color: var(--muted, #909399);
+}
+
 .tpl-toolbar {
   display: flex;
   align-items: center;
@@ -6648,6 +7133,13 @@ async function removeTemplate(idx) {
 }
 .om2-flow-meta { font-size: 10px; color: #868e96; }
 .om2-flow-warn { font-size: 10px; color: #c92a2a; font-weight: 600; }
+.om2-flow-warn code { font-family: monospace; background: #fff0f0; padding: 0 3px; border-radius: 3px; }
+/* 直连响应路径：正常形态，标绿以区别于「取不到数据」的红色告警 */
+.om2-flow-ok {
+  font-size: 10px; color: #2b8a3e; font-weight: 600;
+  background: #ebfbee; border: 1px solid #d3f9d8;
+  border-radius: 3px; padding: 0 4px;
+}
 .om2-flow-empty {
   font-size: 11px; color: #adb5bd; font-style: italic;
   padding: 4px 8px;

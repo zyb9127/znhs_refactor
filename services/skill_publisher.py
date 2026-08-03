@@ -145,7 +145,10 @@ def publish_config(
     result = PublishResult(True, "")
 
     if config_type == "api_nodes":
-        from utils.field_naming import normalize_api_nodes_renames  # 延迟 import
+        from utils.field_naming import (  # 延迟 import
+            autofill_usage_renames,
+            normalize_api_nodes_renames,
+        )
 
         _renames_fixed = normalize_api_nodes_renames(data)
         if _renames_fixed:
@@ -153,6 +156,33 @@ def publish_config(
                 f"[publish_config] {province}/{intent} api_nodes 重命名目标字段名已规范化: "
                 f"{_renames_fixed}"
             )
+        # usage.* 里带「实际」前缀的 include_keys 自动补 field_rename → 去前缀规范名，
+        # 根治「补了 include 漏写 rename」导致产出键停留在 `实际…（GB）`、模板占位符落空。
+        # 幂等、尊重既有 rename（见 autofill_usage_renames 行为边界）。
+        _usage_renames = autofill_usage_renames(data)
+        if _usage_renames:
+            logger.info(
+                f"[publish_config] {province}/{intent} api_nodes 已为 usage 字段自动补齐"
+                f"「实际→规范名」重命名: {_usage_renames}"
+            )
+            result.warnings.append(
+                "已为用量字段自动补齐「实际→规范名」映射，产出键名将去掉「实际」前缀："
+                + "；".join(_usage_renames)
+            )
+        # 中间集写法统一转直连（from 直接写响应路径，不再需要 raw_xxx 槽位）。
+        # 放在唯一写路径上而非仅靠映射 Prompt 引导：LLM 智能映射、批量导入、技能创建、
+        # republish_local 等任何入口写进来的配置都会被拉齐，新技能不会再引入中间集。
+        # 等价变换（见 inline_intermediate_slots 的安全边界），幂等。
+        try:
+            from management.config_agent.repairer import inline_intermediate_slots
+
+            _inlined = inline_intermediate_slots(data)
+            if _inlined:
+                logger.info(
+                    f"[publish_config] {province}/{intent} api_nodes 中间集已转直连映射: {_inlined}"
+                )
+        except Exception as _exc:  # noqa: BLE001 - 规范化失败不阻断发布
+            logger.warning(f"[publish_config] {province}/{intent} 中间集转直连跳过: {_exc}")
         # 保存时配置巡检（纯内存 lint，不阻断保存）：E201「from 槽位不存在」等问题
         # 意味着运行时对应映射域将静默为空（话术缺历史用量/标签的根因形态），
         # 在写入时就暴露给保存者与日志，而不是等生产话术出错才发现。

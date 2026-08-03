@@ -490,18 +490,17 @@ const IFC_JSON_SAMPLE = `{
   },
   "response_extract": {
     "current_package":      "bean.mainoffer",
-    "recommended_packages": "bean.recommend_results",
-    "raw_tags":             "bean.tags"
+    "recommended_packages": "bean.recommend_results"
   },
   "field_transform": {
     "usage.data_usage": {
-      "from": "raw_tags",
+      "from": "bean.tags",
       "type": "filter_include",
       "include_keys": ["近3月平均流量(MB)", "近6月平均流量(MB)"],
       "unit_convert": { "近3月平均流量(MB)": "mb_to_gb" }
     },
     "tags": {
-      "from": "raw_tags",
+      "from": "bean.tags",
       "type": "filter_exclude",
       "exclude_keys": ["近3月平均流量(MB)", "近6月平均流量(MB)"]
     }
@@ -583,7 +582,7 @@ const DOMAINS = [
     sourceFields: ['近3月平均流量', '近6月平均流量', '近3月饱和度', '近3月平均消费'],
     vars: ['usage_line'],
     example: `"usage.data_usage": {
-  "from": "raw_tags",
+  "from": "bean.tags",
   "type": "filter_include",
   "include_keys": ["近3月平均流量(MB)", "近6月平均流量(MB)"],
   "unit_convert": { "近3月平均流量(MB)": "mb_to_gb" }
@@ -595,7 +594,7 @@ const DOMAINS = [
     sourceFields: ['是否老年人', '是否学生', '终端品牌', '入网渠道'],
     vars: ['user_tags'],
     example: `"tags": {
-  "from": "raw_tags",
+  "from": "bean.tags",
   "type": "filter_exclude",
   "exclude_keys": ["近3月平均流量", "近6月平均流量"]
 }`,
@@ -651,14 +650,12 @@ const DEMO_RESPONSE = `{
 
 const DEMO_TRANSFORM = `{
   "response_extract": {
-    "raw_main":  "bean.mainoffer",
-    "raw_tags":  "bean.tags",
     "current_package":      "bean.mainoffer",
     "recommended_packages": "bean.recommend_results"
   },
   "field_transform": {
     "usage.data_usage": {
-      "from": "raw_tags",
+      "from": "bean.tags",
       "type": "filter_include",
       "include_keys": ["近3月平均流量(MB)", "近6月平均流量(MB)"],
       "unit_convert": {
@@ -667,7 +664,7 @@ const DEMO_TRANSFORM = `{
       }
     },
     "tags": {
-      "from": "raw_tags",
+      "from": "bean.tags",
       "type": "filter_exclude",
       "exclude_keys": ["近3月平均流量(MB)", "近6月平均流量(MB)"]
     }

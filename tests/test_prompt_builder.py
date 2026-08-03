@@ -289,16 +289,41 @@ class _OraclePromptStep(ScriptStep):  # type: ignore[misc]
             if "extra_context" not in emitted and ec_txt:
                 context_lines.append(f"{self._VAR_LABELS['extra_context']} {{extra_context}}：{ec_txt}")
 
+            # 缺失事实负向约束（镜像 engine.prompt_builder；oracle 不含子字段占位符分支，
+            # 故只统计模板里的普通 {token}，与该分支用例的覆盖范围一致）
+            _missing = [
+                t for t in sorted(tpl_token_set)
+                if t not in emitted and t in _INJECTABLE_KNOWN
+            ]
+
+            def _slot_label(token):
+                return _DERIVED_LABELS.get(token) or self._VAR_LABELS.get(token, token)
+
+            missing_block = ""
+            if _missing and template_text:
+                missing_block = (
+                    "【缺失事实】本次未取到以下槽位的数据（映射结果为空）："
+                    + "、".join(f"{_slot_label(t)}{{{t}}}" for t in _missing)
+                    + "。上述槽位没有任何可用事实：严禁编造，严禁用其他行的值代替"
+                    "——尤其不得用当前套餐或推荐套餐的包含量（套餐流量、语音额度、月费）"
+                    "冒充用户的历史使用量（月均流量、主叫时长、月均消费）；"
+                    "请在话术中整体略过相关表述，也不得保留占位符原文。"
+                )
+
             lines = [
                 "你是套餐营销推荐坐席，负责将【上下文数据】填充进【话术模板】，"
                 "生成自然、口语化的个性化套餐营销推荐话术。"
             ]
             if context_lines:
                 lines.append(
-                    "【上下文数据】（均为最终可直接引用的参数值：接口出参已按映射规则完成字段重命名与单位换算，"
-                    "直传字段为主服务入参原值；是你唯一可依据的事实来源，请勿使用未在此列出的信息）"
+                    "【上下文数据】（映射模式最终事实：接口出参已按映射规则写入标准域并完成字段重命名与单位换算；"
+                    "直传字段为主服务入参原值。下列每行「{占位符}：值」即为该槽位唯一正确取值，"
+                    "请按同名占位符原样填入话术，勿反推接口原始字段名、勿改写数值。"
+                    "未列出的占位符表示映射结果为空——是你唯一可依据的事实来源，请勿使用未在此列出的信息）"
                 )
                 lines.extend(context_lines)
+            if missing_block:
+                lines.append(missing_block)
             if template_text:
                 lines.append("【话术模板】")
                 lines.append(template_text)
@@ -306,16 +331,21 @@ class _OraclePromptStep(ScriptStep):  # type: ignore[misc]
                 "【生成规则】\n"
                 "1. 仅依据【上下文数据】中的事实填充话术模板，不得编造数据中不存在的"
                 "数字、套餐名、优惠、功能或权益。\n"
-                "2. 若某项信息缺失、为空或为 0，则跳过对应表述，既不提及、也不得用其他字段的值代替"
-                "（例如语音为 0 则不谈语音；优惠月数为 0 则表述为“连续包月”而非“连续 0 个月”）。\n"
-                "3. 占位符对应关系：【上下文数据】每行已用 {占位符} 标注其对应的槽位，"
-                "请将【话术模板】中出现的同名 {占位符} 替换为该行的事实值（含 {域[子键]} 形式的子字段占位符，"
-                "须整串同名精确对应）；严禁串填：尤其不得用套餐内包含量（套餐流量/语音额度/月费）"
-                "冒充历史使用量（月均流量/主叫时长/月均消费），反之亦然；"
+                "2. 若某项信息缺失、为空或为 0（即【上下文数据】无对应 {占位符} 行），"
+                "则跳过该占位符所在表述，既不提及、也不得用其他字段的值代替"
+                "（例如语音为 0 则不谈语音；优惠月数为 0 则表述为“连续包月”而非“连续 0 个月”）；"
+                "严禁把占位符原文（如 {current_package}）留在输出中。\n"
+                "3. 占位符一一对应：【上下文数据】每行已用 {占位符} 标注槽位，"
+                "请将【话术模板】中出现的同名 {占位符} 替换为该行冒号后的事实值"
+                "（含 {域[子键]} 子字段占位符，须整串同名精确对应，不得拆开或改名）；"
+                "有对应行则必须填入该行的值，不得留空或改用其他行。"
+                "严禁串填：{current_package}/{current_package[…]} 只用当前套餐行，"
+                "{pkg_brief}/{pkg_name}/{recommended_package} 只用推荐产品行，"
+                "不得用推荐套餐名/资费冒充当前套餐，也不得用套餐内包含量"
+                "（套餐流量/语音额度/月费）冒充历史使用量（月均流量/主叫时长/月均消费），反之亦然；"
                 "若该行事实包含多个指标（如历史用量、用户标签），不得原样罗列、也不得因内容多而整体略过该槽位，"
                 "应提炼其中最能支撑推荐理由的 1-3 个要点，口语化融入话术"
-                "（如“您月均流量已达37GB、接近饱和”）；"
-                "模板中出现但【上下文数据】未列出的占位符按第 2 条处理（跳过、不臆造、不串填）。\n"
+                "（如“您月均流量已达37GB、接近饱和”）。\n"
                 "4. 保留话术模板的语义与结构，输出贴合用户痛点、可直接对客播报的完整话术，"
                 "最终结果不得残留任何 {} 占位符或字段名。"
             )
@@ -802,26 +832,114 @@ class TestNewFormatLinkedVars(EquivalenceBase):
             {"raw_other": "bean.other"}, {"current_package": "bean.mainoffer"}, {})
         self.assertNotIn("raw_other", new_ext3)
 
-    def test_transform_missing_source_warns_and_prompt_flags_missing_slots(self) -> None:
-        """静默失败消除（生产 usage/tags 缺失场景端到端）：
-        ① response_extract 丢失 raw_tags → usage/tags 映射域为空（DataStep 告警，本测不断言日志）；
-        ② build_prompt 组装后，模板引用的 {usage}/{tags}/子字段槽位无数据 → 不入上下文、
-           上下文中仅有有数据的域（current_package 等），且不会用其他域的值顶替。"""
-        from steps.data_step import DataStep
+    @staticmethod
+    def _beijing_node_cfg() -> Dict[str, Any]:
+        """北京「套餐推荐」接口节点配置深拷贝（含 mock_response，供映射链路用例复用）。"""
         import json as _json
         cfg = _json.load(open(
             "skills-runtime/beijing/套餐推荐/config/api_nodes.json", encoding="utf-8"
         ))["北京测试接口_api"]
-        cfg = _json.loads(_json.dumps(cfg))   # 深拷贝
+        return _json.loads(_json.dumps(cfg))
+
+    @staticmethod
+    def _beijing_legacy_node_cfg() -> Dict[str, Any]:
+        """同上，但还原成**存量中间集写法**（from: raw_tags + response_extract 槽位）。
+
+        出厂配置已统一为直连映射，而「丢槽位自愈 / 中间集转直连」这类用例要测的正是
+        历史遗留形态，夹具自己造，避免用例依赖出厂配置的写法风格。
+        """
+        cfg = TestNewFormatLinkedVars._beijing_node_cfg()
+        cfg["response_extract"]["raw_tags"] = "bean.tags"
+        for rule in cfg["field_transform"].values():
+            if isinstance(rule, dict) and rule.get("from") == "bean.tags":
+                rule["from"] = "raw_tags"
+        return cfg
+
+    def test_missing_intermediate_slot_self_heals_at_runtime(self) -> None:
+        """运行态自愈（北京事故第二形态存量坏配置）：response_extract 丢了 raw_tags，
+        DataStep 按名从 bean.tags 探测回数据源，usage/tags 映射域照常产出。"""
+        from steps.data_step import DataStep
+        cfg = self._beijing_legacy_node_cfg()
         del cfg["response_extract"]["raw_tags"]   # 模拟生产 ES 丢失中间槽位
         ds = DataStep("beijing")
         extracted = ds._extract_fields(cfg["mock_response"], cfg)
-        resources = ds._transform_fields(extracted, cfg, cfg["mock_response"])
-        # usage/tags 静默为空（root cause 复现）
+        diag: List[Dict[str, Any]] = []
+        resources = ds._transform_fields(extracted, cfg, cfg["mock_response"], diag)
+        self.assertEqual(
+            resources["usage"]["consumption"]["近6月平均月消费"], "130.42")
+        self.assertEqual(
+            resources["usage"]["data_usage"]["近6月平均流量(GB)"], 37.23)
+        self.assertTrue(resources.get("tags"))
+        self.assertTrue(all(d["status"] == "ok" for d in diag), diag)
+        self.assertTrue(all("自愈探测 bean.tags" == d["source"] for d in diag), diag)
+
+    def test_filter_keys_tolerate_bracket_variants(self) -> None:
+        """键名容错：上游把「近6月平均流量(MB）」返回成全角括号形态时，
+        filter_include / unit_convert / field_rename 仍整条命中（此前静默落空）。"""
+        from steps.data_step import DataStep
+        cfg = self._beijing_node_cfg()
+        raw = cfg["mock_response"]
+        raw["bean"]["tags"] = {
+            k.replace("(", "（").replace(")", "）"): v
+            for k, v in raw["bean"]["tags"].items()
+        }
+        ds = DataStep("beijing")
+        resources = ds._transform_fields(ds._extract_fields(raw, cfg), cfg, raw)
+        self.assertEqual(
+            resources["usage"]["data_usage"]["近6月平均流量(GB)"], 37.23)
+        self.assertEqual(
+            resources["usage"]["consumption"]["近6月平均月消费"], "130.42")
+
+    def test_upstream_renamed_keys_reported_as_no_key_matched(self) -> None:
+        """上游把 tags 字段整体改名（配置键名对不上）：映射域为空但不再静默——
+        诊断标记 no_key_matched 并同时给出配置键名与接口实际键名。"""
+        from steps.data_step import DataStep
+        cfg = self._beijing_node_cfg()
+        raw = cfg["mock_response"]
+        raw["bean"]["tags"] = {"月均消费金额": 29.02, "月均上网流量": 0.4}
+        ds = DataStep("beijing")
+        diag: List[Dict[str, Any]] = []
+        resources = ds._transform_fields(ds._extract_fields(raw, cfg), cfg, raw, diag)
+        self.assertFalse(resources.get("usage"))
+        by_target = {d["target"]: d for d in diag}
+        self.assertEqual(by_target["usage.consumption"]["status"], "no_key_matched")
+        self.assertIn("近6月平均月消费", by_target["usage.consumption"]["config_keys"])
+        self.assertIn("月均消费金额", by_target["usage.consumption"]["source_keys"])
+        # filter_exclude 的 tags 域仍拿到全部字段（数值型标签由 _fmt_tags 带值进上下文）
+        self.assertEqual(by_target["tags"]["status"], "ok")
+        self.assertEqual(resources["tags"], {"月均消费金额": 29.02, "月均上网流量": 0.4})
+
+    def test_beijing_config_covers_both_upstream_key_namings(self) -> None:
+        """北京节点同时兼容上游两套 tags 键名（旧「近6月平均流量(MB）」/
+        新「实际近6月平均流量（GB）」），产出键名都归到话术模板占位符用的名字。"""
+        from steps.data_step import DataStep
+        cfg = self._beijing_node_cfg()
+        raw = cfg["mock_response"]
+        raw["bean"]["tags"] = {
+            "实际近6月平均消费（元）": 29.02,
+            "实际近6月平均流量（GB）": 0.4,
+            "实际近6月平均语音（分钟）": 12.83,
+            "融合状态": "合约融合",
+        }
+        ds = DataStep("beijing")
+        res = ds._transform_fields(ds._extract_fields(raw, cfg), cfg, raw)
+        self.assertEqual(res["usage"]["consumption"]["近6月平均月消费"], 29.02)
+        self.assertEqual(res["usage"]["data_usage"]["近6月平均流量(GB)"], 0.4)
+        self.assertEqual(res["usage"]["voice_usage"]["近6月平均主叫时长"], 12.83)
+        self.assertEqual(res["tags"], {"融合状态": "合约融合"})   # 用量字段不再混进标签
+
+    def test_prompt_flags_missing_slots_without_cross_fill(self) -> None:
+        """映射域确实无数据时（接口响应里根本没有 tags）：模板引用的
+        {usage}/{tags}/子字段槽位不入上下文、不被套餐数据顶替，并生成缺失事实负向约束。"""
+        from steps.data_step import DataStep
+        cfg = self._beijing_node_cfg()
+        raw = cfg["mock_response"]
+        raw["bean"].pop("tags")        # 上游未返回标签块，自愈探测也无从取值
+        ds = DataStep("beijing")
+        resources = ds._transform_fields(ds._extract_fields(raw, cfg), cfg, raw)
         self.assertFalse(resources.get("usage"))
         self.assertFalse(resources.get("tags"))
         self.assertTrue(resources.get("current_package"))
-        # build_prompt：usage 相关槽位不入上下文，也不被套餐数据顶替
         ctx = make_ctx(
             current_package=resources["current_package"], usage={}, tags={},
             user_info={}, user_profile={}, domain_ext={},
@@ -830,15 +948,205 @@ class TestNewFormatLinkedVars(EquivalenceBase):
         pkg = resources["recommended_packages"][0]
         tpl = ("您当前{current_package}，平均消费{usage[consumption][近6月平均月消费]}元，"
                "月均流量{usage}，标签{tags}。推荐{pkg_brief}。")
+        parts: Dict[str, Any] = {}
         out = build_prompt(
             user_prompt_tpl="", template_text=tpl, ctx=ctx, pkg=pkg,
             diff=PackageDiff(ctx.current_package, pkg),
             linked_vars=["current_package", "usage", "tags", "pkg_brief"],
+            parts_out=parts,
         )
         self.assertNotIn("{usage}：", out)          # 空域不入上下文
         self.assertNotIn("{tags}：", out)
         self.assertNotIn("近6月平均月消费]}：", out)  # 子字段槽位取不到值不注入
         self.assertIn("{current_package}：", out)
+        # 缺口显式写进 Prompt，并禁止用套餐包含量冒充历史用量
+        self.assertIn("【缺失事实】", out)
+        self.assertIn("不得用当前套餐或推荐套餐的包含量", out)
+        self.assertIn("usage", parts["missing_slots"])
+        self.assertIn("usage[consumption][近6月平均月消费]", parts["missing_slots"])
+
+    def test_guard_whole_package_save_preserves_slots_and_meta(self) -> None:
+        """整份 api_nodes 保存（技能管理页 / 填槽设置保存走的通道）同样受守护：
+        表单未回显的中间槽位与顶层 `_` 元数据不会被一次保存冲掉。"""
+        from routers.management import _guard_api_nodes_package
+        old = {
+            "_domain_fallbacks": {"current_package": "extra_data.currentMainOffer"},
+            "节点A": {
+                "response_extract": {
+                    "current_package": "bean.mainoffer",
+                    "recommended_packages": "bean.recommend_results",
+                    "raw_tags": "bean.tags",
+                },
+                "field_transform": {"tags": {"from": "raw_tags", "type": "filter_exclude"}},
+            },
+        }
+        new = {"节点A": {
+            "response_extract": {"current_package": "bean.mainoffer"},
+            "field_transform": {"tags": {"from": "raw_tags", "type": "filter_exclude"}},
+        }}
+        merged, notes = _guard_api_nodes_package(old, new)
+        ext = merged["节点A"]["response_extract"]
+        self.assertEqual(ext["raw_tags"], "bean.tags")
+        self.assertEqual(ext["recommended_packages"], "bean.recommend_results")
+        self.assertIn("_domain_fallbacks", merged)
+        self.assertTrue(notes)
+        # 显式置空 = 有意删除，守护不复活
+        new2 = {"节点A": {
+            "response_extract": {"current_package": "bean.mainoffer", "raw_tags": ""},
+            "field_transform": {"tags": {"from": "raw_tags", "type": "filter_exclude"}},
+        }}
+        merged2, _ = _guard_api_nodes_package(old, new2)
+        self.assertNotIn("raw_tags", merged2["节点A"]["response_extract"])
+
+    def test_direct_response_path_from_needs_no_intermediate_slot(self) -> None:
+        """免中间集直连写法：from 直接写响应路径（bean.tags），运行时产出与走
+        raw_tags 中间集完全一致，且不应被 lint 判成悬空引用、不应进修复的 unfixed。"""
+        from management.config_agent.linter import lint_api_nodes
+        from management.config_agent.repairer import repair_api_nodes
+        from steps.data_step import DataStep
+
+        node = self._beijing_node_cfg()       # 出厂配置本身已是直连写法
+        cfg = {"北京测试接口_api": node}
+        self.assertNotIn("raw_tags", node["response_extract"])
+        self.assertEqual(node["field_transform"]["tags"]["from"], "bean.tags")
+
+        self.assertEqual(lint_api_nodes(cfg, "beijing", "套餐推荐")["errors"], [])
+        rep = repair_api_nodes(cfg, "beijing", "套餐推荐")
+        self.assertEqual(rep["fixes"], [])
+        self.assertEqual(rep["unfixed"], [])
+
+        raw = node["mock_response"]
+        extracted = {k: DataStep._get_path(raw, v) for k, v in node["response_extract"].items()}
+        out = DataStep.__new__(DataStep)._transform_fields(extracted, node, raw)
+        self.assertTrue(out.get("tags"))
+        self.assertEqual(
+            sorted((out.get("usage") or {}).keys()),
+            ["consumption", "data_usage", "voice_usage"],
+        )
+
+    def test_inline_intermediate_slots_is_behavior_preserving(self) -> None:
+        """存量中间集写法在保存时自动转直连：产出必须逐字节等价，标准域槽位不许动，
+        重复执行幂等。"""
+        from management.config_agent.repairer import inline_intermediate_slots
+        from steps.data_step import DataStep
+
+        def _run(node):
+            raw = node["mock_response"]
+            extracted = {k: DataStep._get_path(raw, v)
+                         for k, v in (node.get("response_extract") or {}).items()}
+            return DataStep.__new__(DataStep)._transform_fields(extracted, node, raw)
+
+        before = _run(self._beijing_legacy_node_cfg())
+        cfg = {"北京测试接口_api": self._beijing_legacy_node_cfg()}
+        notes = inline_intermediate_slots(cfg)
+        node = cfg["北京测试接口_api"]
+
+        self.assertTrue(any("raw_tags" in n for n in notes))
+        self.assertNotIn("raw_tags", node["response_extract"])
+        self.assertEqual(node["field_transform"]["tags"]["from"], "bean.tags")
+        self.assertEqual(_run(node), before)
+        # 标准域槽位是第①步自动透传的依据，不得被当成中间集删掉
+        self.assertIn("current_package", node["response_extract"])
+        self.assertEqual(inline_intermediate_slots(cfg), [])   # 幂等
+
+    def test_inline_skips_slot_referenced_without_explicit_from(self) -> None:
+        """省略 from 的规则运行时不走路径回退，改写会变语义 —— 该槽位必须原样保留。"""
+        from management.config_agent.repairer import inline_intermediate_slots
+        cfg = {"n": {
+            "source_type": "api",
+            "response_extract": {"combo": "bean.combo"},
+            "field_transform": {
+                "combo": {"type": "passthrough"},                     # 隐式 from=combo
+                "usage.data_usage": {"from": "combo", "type": "filter_include"},
+            },
+            "mock_response": {"bean": {"combo": {"近6月平均流量(GB)": 12}}},
+        }}
+        self.assertEqual(inline_intermediate_slots(cfg), [])
+        self.assertIn("combo", cfg["n"]["response_extract"])
+
+    def test_inline_skips_node_without_sample_response(self) -> None:
+        """没存样例出参就无法自证路径有效，转完反而会被 E201 判成悬空 —— 保持不转。"""
+        from management.config_agent.repairer import inline_intermediate_slots
+        cfg = {"n": {
+            "source_type": "api",
+            "response_extract": {"raw_tags": "bean.tags"},
+            "field_transform": {"tags": {"from": "raw_tags", "type": "filter_exclude"}},
+        }}
+        self.assertEqual(inline_intermediate_slots(cfg), [])
+        self.assertIn("raw_tags", cfg["n"]["response_extract"])
+
+    def test_dangling_from_still_errors_without_sample(self) -> None:
+        """严格边界：没存样例出参就无从区分"直连路径"与"写错的槽位名"，
+        必须继续报 E201，否则北京那类丢槽位事故会被放过。"""
+        from management.config_agent.linter import lint_api_nodes
+        node = self._beijing_node_cfg()
+        cfg = {"北京测试接口_api": node}
+        node.pop("mock_response")
+        self.assertTrue(lint_api_nodes(cfg, "beijing", "套餐推荐")["errors"])
+
+    def test_save_autofills_slots_missing_from_both_sides(self) -> None:
+        """保存即补齐：旧配置本就缺了 raw_tags（守护无从保留）时，重新编辑保存一次
+        也应按 field_transform 引用 + mock_response 自证把槽位补回来，
+        不必再另去点「修复」。"""
+        from routers.management import _autofill_api_nodes
+        nodes = {"节点A": {
+            "source_type": "api",
+            "response_extract": {"current_package": "bean.mainoffer"},
+            "field_transform": {"tags": {"from": "raw_tags", "type": "filter_exclude"}},
+            "mock_response": {"bean": {"mainoffer": {}, "tags": {"网龄": "10年"}}},
+        }}
+        filled, notes, _unfixed = _autofill_api_nodes(nodes, "beijing", "套餐推荐")
+        node = filled["节点A"]
+        # 数据源恢复即达成目的：补回的中间槽位会紧接着被转成直连写法，
+        # 终态是 from 直指响应路径、不再有 raw_tags 槽位（两者运行时等价）。
+        self.assertEqual(node["field_transform"]["tags"]["from"], "bean.tags")
+        self.assertNotIn("raw_tags", node["response_extract"])
+        self.assertTrue(any("raw_tags" in n for n in notes))
+        # 不动已有的标准域映射
+        self.assertEqual(node["response_extract"]["current_package"], "bean.mainoffer")
+
+    def test_save_autofill_respects_explicit_delete(self) -> None:
+        """显式置空 = 有意删除：补齐不得把运营刚删掉的槽位又探测回来。"""
+        from routers.management import _autofill_api_nodes, _explicit_removed_slots
+        body_ext = {"current_package": "bean.mainoffer", "raw_tags": ""}
+        nodes = {"节点A": {
+            "source_type": "api",
+            "response_extract": {"current_package": "bean.mainoffer"},
+            "field_transform": {"tags": {"from": "raw_tags", "type": "filter_exclude"}},
+            "mock_response": {"bean": {"mainoffer": {}, "tags": {"网龄": "10年"}}},
+        }}
+        filled, notes, _unfixed = _autofill_api_nodes(
+            nodes, "beijing", "套餐推荐", {"节点A": _explicit_removed_slots(body_ext)})
+        self.assertNotIn("raw_tags", filled["节点A"]["response_extract"])
+        self.assertFalse([n for n in notes if "raw_tags" in n])
+
+    def test_template_save_fills_subfield_placeholder_vars(self) -> None:
+        """保存话术模板时按正文占位符补齐 linked_vars，子字段占位符取根名
+        （历史推断的精确层只认 {xxx}，会漏掉 {usage[consumption][...]}）。"""
+        from routers.management import _fill_placeholder_vars
+        content = "您当前套餐 {current_package[curOfferDesc]}，月均消费 {usage[consumption][近6月平均月消费]} 元"
+        merged, added = _fill_placeholder_vars(content, ["pkg_brief"])
+        self.assertEqual(merged[:1], ["pkg_brief"])       # 已有的保持原序在前
+        self.assertIn("current_package", merged)
+        self.assertIn("usage", merged)
+        self.assertEqual(sorted(added), ["current_package", "usage"])
+        # 纯固定文案不凭空补
+        self.assertEqual(_fill_placeholder_vars("您好，简单给您介绍一下。", []), ([], []))
+
+    def test_fmt_tags_keeps_numeric_values(self) -> None:
+        """数值型标签必须带值进上下文（北京把月均消费/流量放在 tags 里），
+        标记型标签仍只报标签名，假值整条丢弃。"""
+        from steps.script_step import ScriptStep
+        out = ScriptStep._fmt_tags({
+            "高频高额超套客户": "1",
+            "低频低额超套客户": "0",
+            "融合状态": "合约融合",
+            "实际近6月平均消费（元）": 29.02,
+        })
+        self.assertIn("高频高额超套客户", out)
+        self.assertNotIn("低频低额超套客户", out)
+        self.assertIn("融合状态:合约融合", out)
+        self.assertIn("实际近6月平均消费（元）:29.02", out)
 
     def test_publish_lint_reports_dangling_from_slot(self) -> None:
         """保存时巡检：from 槽位不存在（E201）在 lint_api_nodes 中可检出
@@ -1214,13 +1522,18 @@ class TestRepublishLocal(unittest.TestCase):
     并覆盖本地文件缺失 / 非法类型的降级返回。
     """
 
-    def test_read_local_config_beijing_has_raw_tags(self) -> None:
+    def test_read_local_config_beijing_is_direct_mapped(self) -> None:
+        """本地标准配置必须是直连写法：from 直指响应路径、不含 raw_xxx 中间槽位。
+
+        republish_local 会把这份文件整包覆盖回 ES，它若还带中间集，一次事故恢复就把
+        「两处同名才成立」的脆弱契约又写回生产。
+        """
         from services.skill_publisher import read_local_config
         cfg = read_local_config("beijing", "套餐推荐", "api_nodes")
         self.assertIsInstance(cfg, dict)
         node = cfg["北京测试接口_api"]
-        # 本地标准配置必须含被 field_transform 引用的中间槽位 raw_tags
-        self.assertEqual(node["response_extract"].get("raw_tags"), "bean.tags")
+        self.assertEqual(node["field_transform"]["tags"]["from"], "bean.tags")
+        self.assertNotIn("raw_tags", node["response_extract"])
 
     def test_read_local_config_bad_inputs_return_none(self) -> None:
         from services.skill_publisher import read_local_config
@@ -1244,9 +1557,10 @@ class TestRepublishLocal(unittest.TestCase):
             results = sp.republish_local("beijing", "套餐推荐", config_types=("api_nodes",))
         self.assertTrue(results["api_nodes"].success)
         self.assertEqual(captured["config_type"], "api_nodes")
-        # 发布的就是本地标准配置整包（含 raw_tags）
+        # 发布的就是本地标准配置整包（直连写法）
         node = captured["data"]["北京测试接口_api"]
-        self.assertEqual(node["response_extract"].get("raw_tags"), "bean.tags")
+        self.assertEqual(node["field_transform"]["tags"]["from"], "bean.tags")
+        self.assertNotIn("raw_tags", node["response_extract"])
 
     def test_republish_local_missing_file_fails_gracefully(self) -> None:
         import services.skill_publisher as sp
@@ -1255,6 +1569,45 @@ class TestRepublishLocal(unittest.TestCase):
         self.assertFalse(results["api_nodes"].success)
         self.assertIn("本地配置文件不存在", results["api_nodes"].message)
         m.assert_not_called()   # 本地无文件时不应触发发布
+
+
+class TestSubfieldMissingHint(unittest.TestCase):
+    """子键失配诊断：区分「域为空」与「域有数据但叶子子键写错」。"""
+
+    def setUp(self) -> None:
+        self.roots = {
+            "usage": {
+                "data_usage": {"近3月平均流量(GB)": 12.5, "近6月平均流量(GB)": 37.23},
+                "voice_usage": {"近3月平均主叫时长": 45, "近6月平均主叫时长": 50},
+                "consumption": {"近3月平均月消费": 29.02, "近6月平均月消费": 130.42},
+            }
+        }
+
+    def test_leaf_name_off_by_one_char_returns_candidate(self) -> None:
+        from engine.prompt_builder import _subfield_missing_hint
+        hint = _subfield_missing_hint(self.roots, "usage[consumption][近6月平均消费]")
+        self.assertIn("近6月平均月消费", hint)   # 给出最接近的产出键
+        self.assertIn("未命中", hint)
+
+    def test_leaf_gone_from_upstream_still_reports_domain_has_data(self) -> None:
+        from engine.prompt_builder import _subfield_missing_hint
+        hint = _subfield_missing_hint(self.roots, "usage[voice_usage][近6月平均语音饱和度]")
+        self.assertTrue(hint)
+        self.assertIn("已产出", hint)
+
+    def test_canonically_equal_leaf_is_not_a_mismatch(self) -> None:
+        from engine.prompt_builder import _subfield_missing_hint
+        # 括号形态差异（全/半角）能被 fuzzy_get 取到，不算失配 → 无提示
+        hint = _subfield_missing_hint(self.roots, "usage[data_usage][近6月平均流量（GB）]")
+        self.assertEqual(hint, "")
+
+    def test_empty_domain_returns_no_hint(self) -> None:
+        from engine.prompt_builder import _subfield_missing_hint
+        # 父域根本不存在/为空 → 真·无数据，交常规缺失逻辑，本函数不产出提示
+        self.assertEqual(
+            _subfield_missing_hint(self.roots, "current_package[curOfferDesc]"), "")
+        self.assertEqual(
+            _subfield_missing_hint({"usage": {}}, "usage[consumption][近6月平均消费]"), "")
 
 
 if __name__ == "__main__":

@@ -76,12 +76,11 @@
     },
     "response_extract": {
       "current_package": "bean.mainoffer",
-      "recommended_packages": "bean.recommend_results",
-      "raw_tags": "bean.tags"
+      "recommended_packages": "bean.recommend_results"
     },
     "field_transform": {
       "usage.data_usage": {
-        "from": "raw_tags",
+        "from": "bean.tags",
         "type": "filter_include",
         "include_keys": [
           "近3月平均流量(MB）",
@@ -92,7 +91,7 @@
         }
       },
       "usage.voice_usage": {
-        "from": "raw_tags",
+        "from": "bean.tags",
         "type": "filter_include",
         "include_keys": [
           "近3月平均主叫时长(分钟)",
@@ -100,7 +99,7 @@
         ]
       },
       "usage.consumption": {
-        "from": "raw_tags",
+        "from": "bean.tags",
         "type": "filter_include",
         "include_keys": [
           "月均折后收入（分）",
@@ -112,7 +111,7 @@
         }
       },
       "tags": {
-        "from": "raw_tags",
+        "from": "bean.tags",
         "type": "filter_exclude",
         "exclude_keys": [
           "近3月平均流量(MB）",

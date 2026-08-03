@@ -39,6 +39,9 @@ export const acSkillExists = (province, intent) =>
 /** 一键导出全部技能包配置（返回 JSON blob，用于前端触发下载） */
 export const acExportAllSkills = (params = {}) =>
   http.get(`${P}/skills/export`, { params, responseType: 'blob' })
+/** 批量导入技能包配置（接口+话术模板），直接回传导出的 JSON。dry_run=true 仅预检 */
+export const acImportAllSkills = (payload) =>
+  http.post(`${P}/skills/import`, payload)
 export const acSkillAsTemplate = (province, intent) =>
   http.get(`${P}/skills/${province}/${intent}/as-template`)
 export const acGetSkillConfig = (province, intent) =>

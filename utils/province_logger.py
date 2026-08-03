@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from contextvars import ContextVar, Token
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -33,6 +34,32 @@ _ENABLED = os.environ.get("ZNHS_PROVINCE_LOG", "1").strip() not in ("0", "false"
 
 # 已执行过当日清理的省份目录，避免每次写入都扫描
 _cleaned: set = set()
+
+# 测试页额外落盘省份（如 "test"）：与真实省份双写，便于集中排查测试请求
+_extra_log_province: ContextVar[Optional[str]] = ContextVar(
+    "province_logger_extra", default=None
+)
+
+
+def set_extra_log_province(province: Optional[str]) -> Token:
+    """设置当前请求额外写入的分省日志目录（测试页用 province=test）。
+
+    返回 Token，调用方应在 finally 中 reset_extra_log_province(token)。
+    """
+    return _extra_log_province.set((province or "").strip() or None)
+
+
+def reset_extra_log_province(token: Token) -> None:
+    try:
+        _extra_log_province.reset(token)
+    except Exception:
+        pass
+
+
+def is_test_trace(trace_id: Any) -> bool:
+    """识别运营测试页 / TestConsole 发起的请求（callId 前缀约定）。"""
+    s = str(trace_id or "")
+    return s.startswith("skilltest-") or s.startswith("test-")
 
 
 def _safe(name: Any, default: str = "unknown") -> str:
@@ -127,9 +154,7 @@ def _cleanup(prov_dir: Path) -> None:
         pass
 
 
-def _write(province: str, filename: str, record: Dict[str, Any]) -> None:
-    if not _ENABLED:
-        return
+def _write_one(province: str, filename: str, record: Dict[str, Any]) -> None:
     try:
         prov_dir = _prov_dir(province)
         _cleanup(prov_dir)
@@ -140,6 +165,19 @@ def _write(province: str, filename: str, record: Dict[str, Any]) -> None:
                 fh.write(line + "\n")
     except Exception as e:  # 日志失败绝不影响主流程
         logger.warning(f"[province_logger] 写入失败 province={province} file={filename}: {e}")
+
+
+def _write(province: str, filename: str, record: Dict[str, Any]) -> None:
+    if not _ENABLED:
+        return
+    _write_one(province, filename, record)
+    # 测试页双写：真实省份保留一份，同时写入 logs/provinces/test/
+    extra = _extra_log_province.get()
+    if extra and _safe(extra) != _safe(province):
+        extra_rec = dict(record)
+        extra_rec["log_source_province"] = province
+        extra_rec["province"] = extra
+        _write_one(extra, filename, extra_rec)
 
 
 # ── 对外 API ────────────────────────────────────────────────────
@@ -177,10 +215,35 @@ def log_response(
     other_info: Any = None,
     metadata: Optional[Dict[str, Any]] = None,
     error: Optional[str] = None,
+    llm_prompts: Optional[list] = None,
 ) -> None:
-    """记录一次推荐请求的出参（模型返回话术）+ 关键统计。"""
+    """记录一次推荐请求的出参（模型返回话术）+ 关键统计。
+
+    llm_prompts：可选，测试页排查用的最终提示词分段摘要（全文见同 trace 的 llm_*.jsonl）。
+    """
     meta = metadata or {}
     results = recommend_results or []
+    prompts = llm_prompts or []
+    # 响应日志只留分段摘要，避免与 llm_*.jsonl 重复撑爆；完整 full 仍可在 llm 日志查
+    prompt_summaries = []
+    for p in prompts:
+        if not isinstance(p, dict):
+            continue
+        prompt_summaries.append({
+            "product_id": p.get("product_id"),
+            "rank": p.get("rank"),
+            "stage": p.get("stage"),
+            "scence": p.get("scence"),
+            "context_data": _truncate(p.get("context_data") or ""),
+            "template": _truncate(p.get("template") or ""),
+            "script_requirement": _truncate(p.get("script_requirement") or ""),
+            "other": _truncate(p.get("other") or ""),
+            # 模板引用但无事实的槽位：排查"话术缺历史用量/串填"时的第一现场
+            "missing_slots": p.get("missing_slots") or None,
+            # 父域有数据但叶子子键失配（映射键名≠模板子键）的候选提示，键名漂移排障用
+            "missing_slot_hints": p.get("missing_slot_hints") or None,
+            "full_len": len(p.get("full") or ""),
+        })
     _write(province, f"response_{_day()}.jsonl", {
         "ts": _now(),
         "trace_id": trace_id,
@@ -200,6 +263,8 @@ def log_response(
         # 模型返回话术明细
         "recommend_results": results,
         "has_other_info": other_info not in (None, {}, []),
+        "llm_prompt_count": len(prompt_summaries),
+        "llm_prompts": prompt_summaries or None,
     })
 
 

@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 
 from utils.auth_utils import check_province_write, get_operator, get_user_province
 from utils.skill_runtime import skill_registry
-from utils.var_infer import infer_linked_vars
+from utils.var_infer import infer_linked_vars, infer_placeholder_vars
 
 router = APIRouter(tags=["运营管理"])
 
@@ -101,8 +101,12 @@ class TemplateBulkRequest(BaseModel):
     """
     province: str = Field(..., description="省份代码")
     intent: str = Field(..., description="意图（与技能包目录名一致）")
-    templates: List[Dict[str, Any]] = Field(..., description="待写入的模板对象列表")
+    templates: List[Dict[str, Any]] = Field(..., description="待写入的模板对象列表（含 template_id 则原地更新）")
     auto_domain_vars: bool = Field(default=False, description="是否自动全选有传参的接口数据域变量")
+    delete_template_ids: List[str] = Field(
+        default_factory=list,
+        description="本次同时删除的模板 ID（多产品编辑去掉某些产品时用），与写入合并为单次 ES 写入",
+    )
 
 
 class TemplateBatchDeleteRequest(BaseModel):
@@ -141,10 +145,33 @@ async def get_biz_config(province: str, intent: str):
 async def save_biz_config(province: str, intent: str, body: SkillConfigRequest, request: Request):
     """保存话术模板配置（写本地文件 + 热重载；需同省份或本部权限）"""
     check_province_write(request, province)
-    ok = skill_registry.save_biz_config(province, intent, body.data)
+    data = dict(body.data or {})
+
+    # ── 话术模板防丢失守护 ──────────────────────────────────────
+    # biz_config 是整字典替换。部分调用方（如"模板匹配设置"保存）只想更新
+    # template_match/_domain_fallbacks 等片段，若提交的 biz_config **完全不含**
+    # script_templates_v2 键，一次保存就会把已有话术模板静默冲掉。
+    # 规则：提交里缺失该键时，自动保留旧模板并告警；确需清空请显式传 []（空列表）。
+    preserved_tpls = False
+    if "script_templates_v2" not in data:
+        pkg = skill_registry.get(province, intent)
+        old_biz = pkg.config.get("biz_config", {}) if (pkg and isinstance(pkg.config, dict)) else {}
+        old_tpls = old_biz.get("script_templates_v2") if isinstance(old_biz, dict) else None
+        if old_tpls:
+            data["script_templates_v2"] = old_tpls
+            preserved_tpls = True
+            logger.warning(
+                f"[话术保存守护] {province}/{intent} 提交的 biz_config 缺失 script_templates_v2，"
+                f"已自动保留原有 {len(old_tpls)} 条话术模板（如需清空请显式传空列表）"
+            )
+
+    ok = skill_registry.save_biz_config(province, intent, data)
     if not ok:
         raise HTTPException(500, _SAVE_FAIL_MSG)
-    return {"code": 200, "message": "保存成功"}
+    msg = "保存成功"
+    if preserved_tpls:
+        msg += "（已自动保留原有话术模板，如需清空请显式传空列表）"
+    return {"code": 200, "message": msg}
 
 
 @router.get("/api/skills/{province}/{intent}/api_nodes")
@@ -462,14 +489,56 @@ def _merge_auto_domain_vars(province: str, intent: str, linked_vars) -> List[str
     return merged
 
 
+def _fill_placeholder_vars(content: Any, linked_vars: Any) -> tuple:
+    """保存即补齐：把模板里真实写出的占位符所属数据域并入 linked_vars（只增不减）。
+
+    子字段占位符 ``{usage[consumption][近6月平均月消费]}`` 只写了根名 ``usage`` 的子键，
+    历史推断（infer_linked_vars 的 ``\\{(\\w+)\\}`` 精确层）匹配不到，模板若又没手动勾选
+    usage，配置页就看不出这条模板依赖该域，运营排查"话术没带上月均消费"时会找错方向。
+    这里按占位符零猜测地补齐，保证存下来的模板自带完整依赖声明。
+
+    Returns:
+        (补齐后的 linked_vars, 新增的变量列表)
+    """
+    merged = list(linked_vars or [])
+    added = [v for v in infer_placeholder_vars(str(content or "")) if v not in merged]
+    merged.extend(added)
+    return merged, added
+
+
 @router.put("/api/skills/{province}/{intent}/api_nodes")
 async def save_api_nodes(province: str, intent: str, body: SkillConfigRequest, request: Request):
-    """保存接口映射配置（写本地文件 + 热重载；需同省份或本部权限）"""
+    """保存整份接口映射配置（写本地文件 + 热重载；需同省份或本部权限）"""
     check_province_write(request, province)
-    ok = skill_registry.save_api_nodes(province, intent, body.data)
+    pkg = skill_registry.get(province, intent)
+    old_nodes = pkg.config.get("api_nodes", {}) if (pkg and isinstance(pkg.config, dict)) else {}
+    data, preserved = _guard_api_nodes_package(old_nodes, body.data or {})
+    if preserved:
+        logger.warning(
+            f"[接口保存守护] {province}/{intent} 整份保存缺失标准域/被引用中间槽位，"
+            f"已自动保留：{preserved}（如需删除请将该 key 显式置为空串）"
+        )
+    # 保存即补齐：旧配置本就残缺时守护无从保留，这里按自证线索补回（同「修复」按钮逻辑）
+    removed = {
+        name: _explicit_removed_slots(cfg.get("response_extract"))
+        for name, cfg in (body.data or {}).items()
+        if isinstance(cfg, dict)
+    }
+    data, filled_notes, unfixed = _autofill_api_nodes(data, province, intent, removed)
+    if filled_notes:
+        logger.warning(f"[接口保存补齐] {province}/{intent} 配置已自动修正: {filled_notes}")
+    if unfixed:
+        logger.warning(f"[接口保存补齐] {province}/{intent} 仍需人工处理: {unfixed}")
+
+    ok = skill_registry.save_api_nodes(province, intent, data)
     if not ok:
         raise HTTPException(500, _SAVE_FAIL_MSG)
-    return {"code": 200, "message": "保存成功"}
+    msg = "保存成功"
+    if preserved:
+        msg += f"（已自动保留映射：{'；'.join(preserved)}）"
+    if filled_notes:
+        msg += f"（配置已自动修正：{'；'.join(filled_notes)}）"
+    return {"code": 200, "message": msg, "autofilled": filled_notes, "unfixed": unfixed}
 
 
 @router.post("/api/skills/{province}/{intent}/repair_config")
@@ -505,7 +574,8 @@ async def repair_skill_config(province: str, intent: str, request: Request):
         return {"code": 200, "message": msg, "data": data}
 
     operator = get_operator(request)
-    ok = skill_registry.save_api_nodes(province, intent, rep["config"])
+    # 修复产物本身不带 updated_by，版本记录里的操作人只能靠这里传：不传会记成 system
+    ok = skill_registry.save_api_nodes(province, intent, rep["config"], operator=operator)
     if not ok:
         raise HTTPException(500, f"修复配置已生成但发布失败：{_SAVE_FAIL_MSG}")
     data["published"] = True
@@ -794,6 +864,8 @@ async def create_template(body: TemplateCreateRequest, request: Request):
         auto_flag = data.pop("auto_domain_vars", False)
         if auto_flag:
             data["linked_vars"] = _merge_auto_domain_vars(body.province, body.intent, data.get("linked_vars"))
+        data["linked_vars"], _added = _fill_placeholder_vars(
+            data.get("template_content"), data.get("linked_vars"))
         saved = skill_registry.upsert_template(body.province, body.intent, data)
         from services.kafka_service import send_op_log
         send_op_log(request, "add", "新建话术模板",
@@ -819,7 +891,8 @@ async def bulk_create_templates(body: TemplateBulkRequest, request: Request):
     check_province_write(request, body.province)
     if skill_registry.get(body.province, body.intent) is None:
         raise HTTPException(404, f"技能包不存在: {body.province}/{body.intent}")
-    if not body.templates:
+    delete_ids = [t for t in (body.delete_template_ids or []) if t]
+    if not body.templates and not delete_ids:
         return {"code": 200, "message": "无可导入数据", "data": {"imported": 0, "templates": []}}
 
     operator = get_operator(request, fallback="import")
@@ -842,7 +915,8 @@ async def bulk_create_templates(body: TemplateBulkRequest, request: Request):
             for k in domain_vars:
                 if k not in linked:
                     linked.append(k)
-        data_list.append(dict(
+        linked, _ = _fill_placeholder_vars(content, linked)
+        item = dict(
             province=body.province, intent=body.intent,
             template_name=str(t.get("template_name") or body.intent),
             template_content=content,
@@ -854,23 +928,34 @@ async def bulk_create_templates(body: TemplateBulkRequest, request: Request):
             prompt_template=str(t.get("prompt_template", "") or ""),
             linked_apis=list(t.get("linked_apis") or []),
             status="offline" if str(t.get("status", "online")) == "offline" else "online",
-            created_by=operator,
-            created_at=now,
-        ))
+        )
+        # 传了 template_id 视为原地更新：保留原 created_at/created_by（由 bulk 合并保留），
+        # 仅新建项写入 created_by/created_at，避免编辑时把创建信息覆盖成本次操作人/时间。
+        tid = str(t.get("template_id", "") or "")
+        if tid:
+            item["template_id"] = tid
+        else:
+            item["created_by"] = operator
+            item["created_at"] = now
+        data_list.append(item)
 
-    if not data_list:
+    if not data_list and not delete_ids:
         return {"code": 200, "message": "无有效模板（话术内容均为空）",
                 "data": {"imported": 0, "templates": []}}
 
     try:
         saved = skill_registry.bulk_upsert_templates(
-            body.province, body.intent, data_list, skip_reload=False
+            body.province, body.intent, data_list, skip_reload=False,
+            delete_ids=delete_ids,
         )
         from services.kafka_service import send_op_log
-        send_op_log(request, "import", "批量导入话术模板",
-                    f"批量导入 {len(saved)} 条话术模板({body.province}/{body.intent})")
-        return {"code": 200, "message": f"导入完成：成功 {len(saved)} 条",
-                "data": {"imported": len(saved), "templates": saved}}
+        send_op_log(request, "import", "批量保存话术模板",
+                    f"批量保存 {len(saved)} 条话术模板"
+                    f"{f'、删除 {len(delete_ids)} 条' if delete_ids else ''}"
+                    f"({body.province}/{body.intent})")
+        return {"code": 200, "message": f"保存完成：写入 {len(saved)} 条"
+                + (f"，删除 {len(delete_ids)} 条" if delete_ids else ""),
+                "data": {"imported": len(saved), "deleted": len(delete_ids), "templates": saved}}
     except ValueError as e:
         raise HTTPException(404, str(e))
     except RuntimeError:
@@ -907,6 +992,11 @@ async def update_template(template_id: str, body: TemplateUpdateRequest, request
     auto_flag = update_data.pop("auto_domain_vars", None)
     if auto_flag and "linked_vars" in update_data:
         update_data["linked_vars"] = _merge_auto_domain_vars(province, intent, update_data.get("linked_vars"))
+    # 保存即补齐：正文改了就按新正文里的占位符补全数据域声明（含子字段占位符的根名）
+    if "template_content" in update_data:
+        base_vars = update_data["linked_vars"] if "linked_vars" in update_data else tpl.get("linked_vars")
+        update_data["linked_vars"], _added = _fill_placeholder_vars(
+            update_data["template_content"], base_vars)
 
     try:
         saved = skill_registry.upsert_template(province, intent, update_data)
@@ -1661,6 +1751,126 @@ def _guard_response_extract(
     return new_ext, preserved
 
 
+def _explicit_removed_slots(body_ext: Any) -> set:
+    """本次提交里被显式置空（""/None）的 response_extract 槽位 = 有意删除。"""
+    if not isinstance(body_ext, dict):
+        return set()
+    return {k for k, v in body_ext.items() if v in ("", None)}
+
+
+def _added_slot_notes(before: Dict[str, Any], after: Dict[str, Any]) -> List[str]:
+    """对比补齐前后的 api_nodes，列出新增的 response_extract 槽位（回显给保存者）。"""
+    notes: List[str] = []
+    for name, node in (after or {}).items():
+        if str(name).startswith("_") or not isinstance(node, dict):
+            continue
+        old_node = (before or {}).get(name)
+        old_ext = old_node.get("response_extract") or {} if isinstance(old_node, dict) else {}
+        for key, path in (node.get("response_extract") or {}).items():
+            if key not in old_ext:
+                notes.append(f"{name}: 补回映射 {key} → {path}")
+    return notes
+
+
+def _autofill_api_nodes(
+    api_nodes: Dict[str, Any],
+    province: str,
+    intent: str,
+    removed_by_node: Optional[Dict[str, set]] = None,
+) -> tuple:
+    """保存即补齐：按配置自证线索补回缺失的映射槽位/标准域，并规范化字段名。
+
+    与 :func:`_guard_response_extract` 的分工：守护只能保住「旧配置里还有、这次提交漏了」
+    的槽位；如果 ES 上那份配置本身早就缺了（如 raw_tags 被历史保存冲掉），守护无从补起，
+    运营重新编辑保存一次也修不好，只能另去点「修复」。这里在保存路径上复用「修复」的同一套
+    逻辑（management.config_agent.repairer），让编辑保存本身就把配置补到健全状态。
+
+    只增不删；``removed_by_node`` 里本次被显式置空的槽位视为有意删除，补齐后再摘掉，
+    保证运营仍能真正删除某条映射。
+
+    保存的同时把存量 ``from: raw_xxx`` 中间集写法就地转成直连写法（等价变换，
+    见 inline_intermediate_slots），让"两处同名才成立"的脆弱契约随编辑逐步消失。
+
+    Returns:
+        (补齐后的 api_nodes, 变更说明列表, 无法自动补齐的问题列表)
+    """
+    from management.config_agent.repairer import inline_intermediate_slots, repair_api_nodes
+
+    try:
+        rep = repair_api_nodes(api_nodes, province, intent)
+    except Exception as exc:  # noqa: BLE001 - 补齐失败不能阻断保存
+        logger.warning(f"[接口保存补齐] {province}/{intent} 补齐跳过: {exc}")
+        return api_nodes, [], []
+
+    cfg = rep["config"]
+    for node_name, removed in (removed_by_node or {}).items():
+        node = cfg.get(node_name)
+        if not isinstance(node, dict) or not isinstance(node.get("response_extract"), dict):
+            continue
+        for key in removed:
+            node["response_extract"].pop(key, None)
+    notes = _added_slot_notes(api_nodes, cfg)
+    try:
+        notes.extend(inline_intermediate_slots(cfg))
+    except Exception as exc:  # noqa: BLE001 - 简化失败同样不阻断保存
+        logger.warning(f"[接口保存补齐] {province}/{intent} 中间集简化跳过: {exc}")
+    # usage.* 带「实际」前缀的 include_keys 自动补 field_rename → 去前缀规范名，
+    # 让产出键对齐话术模板占位符（根治「补了 include 漏写 rename」的漂移）。
+    try:
+        from utils.field_naming import autofill_usage_renames
+
+        _ur = autofill_usage_renames(cfg)
+        if _ur:
+            notes.append("已为用量字段自动补齐「实际→规范名」映射：" + "；".join(_ur))
+    except Exception as exc:  # noqa: BLE001 - 补齐失败不阻断保存
+        logger.warning(f"[接口保存补齐] {province}/{intent} usage 重命名补齐跳过: {exc}")
+    return cfg, notes, list(rep["unfixed"])
+
+
+def _guard_api_nodes_package(
+    old_nodes: Dict[str, Any],
+    new_nodes: Dict[str, Any],
+) -> tuple:
+    """整份 api_nodes 保存的防丢失守护（逐节点复用 :func:`_guard_response_extract`）。
+
+    单节点保存（PUT /api/interfaces/...）早已有守护，但整份保存
+    （PUT /api/skills/{province}/{intent}/api_nodes，技能管理页与「模板匹配与填槽设置」
+    的保存都走这里）是整字典替换：前端表单只要没完整回显某个中间槽位
+    （raw_tags 之类非标准域），一次保存就把它冲掉，usage/tags 随即静默变空。
+    北京「用户消费信息未生效」正是这条路径漏防的结果，故在 choke point 补齐。
+
+    同时保留旧配置里以 ``_`` 开头的顶层元数据键（如 ``_domain_fallbacks``），
+    避免只提交接口节点的调用方把空域兜底配置一并抹掉。
+
+    Returns:
+        (合并后的 api_nodes, 保留项说明列表)
+    """
+    merged = dict(new_nodes or {})
+    notes: List[str] = []
+    for key, val in (old_nodes or {}).items():
+        if str(key).startswith("_") and key not in merged:
+            merged[key] = val
+            notes.append(f"顶层元数据[{key}]")
+    for name, cfg in list(merged.items()):
+        if str(name).startswith("_") or not isinstance(cfg, dict):
+            continue
+        old_cfg = (old_nodes or {}).get(name)
+        if not isinstance(old_cfg, dict) or "response_extract" not in cfg:
+            continue
+        if (cfg.get("source_type") or old_cfg.get("source_type") or "api") == "direct":
+            continue
+        ft = cfg.get("field_transform") or old_cfg.get("field_transform") or {}
+        new_ext, preserved = _guard_response_extract(
+            old_cfg.get("response_extract") or {},
+            cfg.get("response_extract") or {},
+            ft,
+        )
+        if preserved:
+            merged[name] = {**cfg, "response_extract": new_ext}
+            notes.append(f"{name}: {', '.join(preserved)}")
+    return merged, notes
+
+
 @router.put("/api/interfaces/{province}/{intent}/{api_name}")
 async def update_interface(
     province: str, intent: str, api_name: str,
@@ -1715,13 +1925,30 @@ async def update_interface(
         merged["updated_by"] = get_operator(request)
         merged["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     api_nodes_cfg[api_name] = merged
+
+    # ── 保存即补齐 ──────────────────────────────────────────────
+    # 守护只能保住"旧配置里还有、这次提交漏了"的槽位；若线上那份本就残缺（历史保存
+    # 已把 raw_tags 冲掉），重新编辑保存也修不好。这里对本节点复用「修复」逻辑，
+    # 按 field_transform 引用关系 + mock_response 自证补回缺失槽位。
+    filled, filled_notes, unfixed = _autofill_api_nodes(
+        {api_name: merged}, province, intent,
+        {api_name: _explicit_removed_slots(body.get("response_extract"))},
+    )
+    api_nodes_cfg[api_name] = filled.get(api_name, merged)
+    if filled_notes:
+        logger.warning(f"[接口保存补齐] {province}/{intent}/{api_name} 配置已自动修正: {filled_notes}")
+    if unfixed:
+        logger.warning(f"[接口保存补齐] {province}/{intent}/{api_name} 仍需人工处理: {unfixed}")
+
     ok = skill_registry.save_api_nodes(province, intent, api_nodes_cfg)
     if not ok:
         raise HTTPException(500, "保存失败")
     msg = "保存成功"
     if preserved_domains:
         msg += f"（已自动保留标准域映射：{', '.join(preserved_domains)}，如需删除请将其显式置为空串）"
-    return {"code": 200, "message": msg}
+    if filled_notes:
+        msg += f"（配置已自动修正：{'；'.join(filled_notes)}）"
+    return {"code": 200, "message": msg, "autofilled": filled_notes, "unfixed": unfixed}
 
 
 @router.delete("/api/interfaces/{province}/{intent}/{api_name}")

@@ -37,11 +37,12 @@ npm ci
 # 本地开发
 npm run dev
 
-# 构建灰度包（输出到 dist/，供 main.py 挂载）
-npm run build:gray
-
-# 一次性打三套包（dist-prod / dist-gray / dist-dev）
+# ⚠️ main.py 只挂载 dist-gray / dist-prod / dist-dev，不挂载 dist/
+# 前端代码改动后统一打三套包（推荐，dist-gray 即灰度页面 /znhs-gray/ 所用的资源）
 npm run build:artifacts
+
+# 仅重建灰度包（单独改灰度前端时用）
+npm run build:artifact:gray
 ```
 
 ### 测试

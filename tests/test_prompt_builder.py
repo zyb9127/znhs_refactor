@@ -1382,6 +1382,97 @@ class TestFormatExceptionFallback(EquivalenceBase):
 
 
 @unittest.skipUnless(_BASELINE_AVAILABLE, f"script_step 导入失败: {_BASELINE_IMPORT_ERROR}")
+class TestMultiProductContext(unittest.TestCase):
+    """多产品：上下文必须带上各自的推荐产品事实，否则 N 条话术内容雷同。
+
+    广东现网问题：linked_vars 只勾了 current_package / business_conte，产品信息一条都没进
+    Prompt，18 个产品拿到完全相同的上下文 → 生成 18 条一样的话术。
+    """
+
+    # 广东式产品条：字段名与模板占位符 **（recommend_actual_price）同名
+    _GD_PKGS = [
+        {
+            "offerId": "202607011329144580103550" + str(i),
+            "offerName": name,
+            "recommend_package_name": name,
+            "recommend_actual_price": f"{99 + i * 10}元",
+            "recommend_preferential_period": f"{6 + i}个月",
+            "rank": i + 1,
+            "_batch_product_id_hint": "流量",
+        }
+        for i, name in enumerate(("升99元套餐_东莞", "升109元套餐_东莞", "升119元套餐_东莞"))
+    ]
+    _GD_TPL = ("顺便跟您讲一下，现在连续**（recommend_preferential_period）"
+               "每月只需**（recommend_actual_price），现在给您办理好吗？")
+
+    def _build(self, pkg: Dict[str, Any], recs: List[Dict[str, Any]],
+               linked_vars: Optional[List[str]] = None,
+               template_text: Optional[str] = None) -> str:
+        ctx = make_ctx(final_recommendations=recs)
+        return build_prompt(
+            user_prompt_tpl="", template_text=(self._GD_TPL if template_text is None else template_text),
+            ctx=ctx, pkg=pkg, diff=PackageDiff(ctx.current_package, pkg),
+            linked_vars=list(linked_vars or ["current_package"]),
+        )
+
+    def test_each_product_gets_its_own_facts(self) -> None:
+        """多产品且未勾选任何产品变量：逐条注入产品字段，上下文互不相同。"""
+        outs = [self._build(p, self._GD_PKGS) for p in self._GD_PKGS]
+        self.assertEqual(len(set(outs)), 3)
+        for pkgd, out in zip(self._GD_PKGS, outs):
+            # 字段名与模板占位符同名，模型才能对齐填槽
+            self.assertIn(f"{{recommend_actual_price}}：{pkgd['recommend_actual_price']}", out)
+            self.assertIn(f"{{recommend_preferential_period}}：{pkgd['recommend_preferential_period']}", out)
+            self.assertIn(pkgd["offerName"], out)
+
+    def test_internal_and_id_fields_not_leaked(self) -> None:
+        """内部标记与 ID/排序字段不进 Prompt（避免模型把串号念进话术）。"""
+        out = self._build(self._GD_PKGS[0], self._GD_PKGS)
+        self.assertNotIn("_batch_product_id_hint", out)
+        self.assertNotIn(self._GD_PKGS[0]["offerId"], out)
+        self.assertNotIn("{rank}", out)
+
+    def test_single_product_unchanged(self) -> None:
+        """单产品不触发兜底：沿用 linked_vars 驱动语义，产品字段不注入。"""
+        out = self._build(self._GD_PKGS[0], self._GD_PKGS[:1])
+        self.assertNotIn("{recommend_actual_price}", out)
+        self.assertIn("{current_package}", out)
+
+    def test_no_injection_when_product_var_already_linked(self) -> None:
+        """已勾选产品变量（pkg_brief）时不重复兜底注入，避免同一数值出现两次。"""
+        out = self._build(self._GD_PKGS[0], self._GD_PKGS,
+                          linked_vars=["current_package", "pkg_brief"],
+                          template_text="推荐{pkg_brief}。")
+        self.assertIn("{pkg_brief}：", out)
+        self.assertNotIn("{recommend_actual_price}：", out)
+
+    def test_product_field_never_fills_standard_domain(self) -> None:
+        """产品条自带与标准域同名的字段（北京推荐条自带 tags）时严禁顶替标准域。"""
+        pkgs = [dict(p, tags=[], usage="产品侧无关值") for p in self._GD_PKGS]
+        ctx = make_ctx(final_recommendations=pkgs, tags={}, usage={})
+        out = build_prompt(
+            user_prompt_tpl="", template_text="您的标签{tags}，用量{usage}。",
+            ctx=ctx, pkg=pkgs[0], diff=PackageDiff(ctx.current_package, pkgs[0]),
+            linked_vars=["tags", "usage"],
+        )
+        self.assertNotIn("{tags}：", out)
+        self.assertNotIn("{usage}：", out)
+
+    def test_template_referenced_product_field_resolves(self) -> None:
+        """模板直接写 {产品字段} 时可取到当前产品的值（单产品也生效）。"""
+        out = self._build(self._GD_PKGS[0], self._GD_PKGS[:1],
+                          template_text="每月只需{recommend_actual_price}。")
+        self.assertIn("{recommend_actual_price}：99元", out)
+
+    def test_product_brief_excludes_internal_fields(self) -> None:
+        """{pkg_brief} 摘要不含内部标记（批量路径会给产品挂 _batch_product_id_hint）。"""
+        from steps.script_step import ScriptStep
+
+        brief = ScriptStep._fmt_recommended_product_full(self._GD_PKGS[0], {})
+        self.assertNotIn("_batch_product_id_hint", brief)
+        self.assertIn("offerName", brief)
+
+
 class TestVarLabelsAndHelpers(unittest.TestCase):
     """VAR_LABELS 单一真源与辅助函数的等价。"""
 
@@ -1435,6 +1526,374 @@ class TestVarLabelsAndHelpers(unittest.TestCase):
         self.assertEqual([s["token"] for s in subs2], ["extra_info[a][b]"])
 
 
+class TestProductFieldPalette(unittest.TestCase):
+    """配置页调色板：入参为多个产品（数组）时，产品字段必须可见可拖入。
+
+    此前 context_vars 只从「接口映射结果」取推荐条，直传省份（产品在
+    extra_info.recommended_packages 数组里）取不到，调色板一个产品字段都看不到。
+    """
+
+    def _data(
+        self,
+        mock: Dict[str, Any],
+        selected: Optional[List[str]] = None,
+        passthrough: bool = True,
+    ) -> List[Dict[str, Any]]:
+        import asyncio
+        from unittest.mock import patch
+        from routers import management as mg
+
+        # selected=None 表示「不勾选任何字段」= 默认暴露全部顶层字段
+        cfg: Dict[str, Any] = {
+            "enabled": True, "source_type": "direct", "mock_response": mock,
+        }
+        if selected is not None:
+            cfg["passthrough_fields"] = selected
+        if passthrough:
+            cfg["direct_mode"] = "passthrough"
+        fake = type("P", (), {"config": {"api_nodes": {"cc": cfg}, "biz_config": {}}})()
+        with patch.object(mg.skill_registry, "get", return_value=fake):
+            res = asyncio.run(mg.get_context_vars("guangdong", "营销活动"))
+        return res["data"]
+
+    def _vars(self, mock: Dict[str, Any], selected: Optional[List[str]] = None,
+              passthrough: bool = True) -> List[str]:
+        """取推荐产品字段的裸占位符 token 名。
+        - 映射/接口口径：source=recommended_product 分组；
+        - 透传口径：source=passthrough 的 recommended_packages 直传大变量（展开=勾选的产品字段）。
+        """
+        tokens: List[str] = []
+        for g in self._data(mock, selected, passthrough):
+            is_prod_group = g.get("source") == "recommended_product"
+            is_pt_prod = (g.get("source") == "passthrough"
+                          and g.get("key") == "recommended_packages")
+            if not (is_prod_group or is_pt_prod):
+                continue
+            for s in (g.get("subfields") or []):
+                tokens.append(s.get("token"))
+        return tokens
+
+    _ARR_MOCK = {"extra_info": {"recommended_packages": [
+        {"offerName": "升99元套餐", "recommend_actual_price": "99元",
+         "recommend_base_flow": "40GB/月"}]}}
+
+    def test_passthrough_no_selection_uses_dict_name_only(self) -> None:
+        """透传模式未勾产品字段：不摊开字段，只给透传字典名 {recommended_packages}。"""
+        data = self._data(self._ARR_MOCK)
+        rp = next((v for v in data if v["key"] == "recommended_packages"), None)
+        self.assertIsNotNone(rp, "recommended_packages 应作为透传字典名出现")
+        self.assertEqual(rp["source"], "passthrough")
+        self.assertFalse(rp.get("subfields"), "透传模式不应摊开产品字段")
+        self.assertEqual(
+            [v for v in data if v.get("source") == "recommended_product"], [],
+            "未勾选时不应出现产品字段分组")
+
+    def test_passthrough_selected_product_fields_only(self) -> None:
+        """透传模式按 recommended_packages.<字段> 精确勾选：只暴露勾中的产品字段。"""
+        keys = self._vars(self._ARR_MOCK, selected=[
+            "recommended_packages.offerName",
+            "recommended_packages.recommend_actual_price",
+        ])
+        self.assertEqual(set(keys), {"offerName", "recommend_actual_price"})
+        self.assertNotIn("recommend_base_flow", keys, "未勾选的产品字段不应暴露")
+
+    def test_mapping_mode_still_exposes_product_fields(self) -> None:
+        """直传映射 / 接口查询模式口径不变：产品字段仍自动收敛为单个可展开分组。"""
+        data = self._data(self._ARR_MOCK, passthrough=False)
+        groups = [v for v in data if v.get("source") == "recommended_product"]
+        self.assertEqual(len(groups), 1, "产品字段应收敛为单个分组变量")
+        self.assertEqual(groups[0]["key"], "recommended_packages")
+        self.assertGreaterEqual(len(groups[0].get("subfields") or []), 3)
+
+    def test_legacy_single_product_skeleton_exposed(self) -> None:
+        """旧版单产品字典 + 全空骨架样例（只声明字段名）→ 按结构暴露。"""
+        keys = self._vars({
+            "extra_info": {"final_recommendations": {
+                "recommend_package_name": "", "recommend_actual_price": "",
+            }},
+        }, passthrough=False)
+        self.assertEqual(set(keys), {"recommend_package_name", "recommend_actual_price"})
+
+    def test_id_and_standard_domain_names_excluded(self) -> None:
+        """ID/排序字段与标准域同名字段不作为话术槽位暴露（与运行时注入规则一致）。"""
+        keys = self._vars({
+            "extra_info": {"recommended_packages": [{
+                "offerId": "20260701132914458", "rank": 1, "tags": ["x"],
+                "current_package": "冲突名", "offerName": "升99元套餐",
+            }]},
+        }, passthrough=False)
+        self.assertEqual(keys, ["offerName"])
+
+    def test_save_path_normalizes_wrapped_mock(self) -> None:
+        """保存直传节点（生产 ES 写路径）：整请求体 / params 包裹的 mock 归一为 extra_info 本体，
+        并清理指向包裹层的脏 passthrough_fields；对已干净数据幂等。"""
+        from routers.management import _clean_direct_node_for_save
+        node = {
+            "source_type": "direct", "direct_mode": "passthrough",
+            "passthrough_fields": ["extra_info", "current_package", "recommended_packages"],
+            "mock_response": {"callId": "x", "province": "gd", "extra_info": {
+                "current_package": {"package_name": "139全家享"},
+                "recommended_packages": [{"offerName": "升169"}]},
+                "batch_contexts": [{"stage": "个人市场"}]},
+        }
+        notes = _clean_direct_node_for_save(node)
+        self.assertTrue(notes)
+        self.assertEqual(set(node["mock_response"].keys()),
+                         {"current_package", "recommended_packages"})
+        self.assertNotIn("extra_info", node["passthrough_fields"])
+        self.assertEqual(_clean_direct_node_for_save(node), [])  # 幂等
+
+        wrapped = {"source_type": "direct", "direct_mode": "passthrough",
+                   "mock_response": {"params": {"phone": "x", "extra_info": {"a": "1"},
+                                                "batch_contexts": []}}}
+        _clean_direct_node_for_save(wrapped)
+        self.assertEqual(wrapped["mock_response"], {"a": "1"})
+
+        api_node = {"source_type": "api", "mock_response": {"bean": {"x": 1}}}
+        self.assertEqual(_clean_direct_node_for_save(api_node), [])
+        self.assertEqual(api_node["mock_response"], {"bean": {"x": 1}})
+
+    def test_current_package_visible_in_direct_mode(self) -> None:
+        """直传纯 passthrough 节点：current_package 标准域也要出现在调色板（可展开子字段）。"""
+        import asyncio
+        from unittest.mock import patch
+        from routers import management as mg
+        node = {"cc": {"enabled": True, "source_type": "direct",
+                       "direct_mode": "passthrough",
+                       "passthrough_fields": ["current_package", "recommended_packages"],
+                       "mock_response": {"extra_info": {
+                           "current_package": {"package_name": "139全家享", "actual_price": "139"},
+                           "recommended_packages": [{"offerName": "a"}]}}}}
+        fake = type("P", (), {"config": {"api_nodes": node, "biz_config": {}}})()
+        with patch.object(mg.skill_registry, "get", return_value=fake):
+            res = asyncio.run(mg.get_context_vars("guangdong", "营销活动"))
+        cp = next((v for v in res["data"] if v["key"] == "current_package"), None)
+        self.assertIsNotNone(cp, "current_package 应出现在调色板")
+        subs = [s["token"] for s in (cp.get("subfields") or [])]
+        self.assertIn("current_package[package_name]", subs)
+
+    def test_renamed_passthrough_list_drops_stale_std_name(self) -> None:
+        """透传产品列表改名（recommended_packages → recommended_packages11）：
+        旧标准域名 recommended_packages 已不在样例里 → 属残留脏项，调色板不再复活它，
+        只出最新的 recommended_packages11（且带产品子字段），避免重复占位符。"""
+        import asyncio
+        from unittest.mock import patch
+        from routers import management as mg
+        node = {"cc": {"enabled": True, "source_type": "direct",
+                       "direct_mode": "passthrough",
+                       # 残留旧 recommended_packages 键 + 新 recommended_packages11 键
+                       "passthrough_fields": ["recommended_packages",
+                                              "recommended_packages.recommend_actual_price",
+                                              "recommended_packages11",
+                                              "recommended_packages11.recommend_actual_price"],
+                       "mock_response": {"extra_info": {
+                           "recommended_packages11": [
+                               {"offerName": "升169", "recommend_actual_price": "169元"}]}}}}
+        fake = type("P", (), {"config": {"api_nodes": node, "biz_config": {}}})()
+        with patch.object(mg.skill_registry, "get", return_value=fake):
+            res = asyncio.run(mg.get_context_vars("guangdong", "营销活动"))
+        keys = {v["key"] for v in res["data"]}
+        self.assertNotIn("recommended_packages", keys,
+                         "改名后旧 recommended_packages 不应再出现（残留脏项）")
+        self.assertIn("recommended_packages11", keys, "只保留最新透传列表字段")
+        rp = next(v for v in res["data"] if v["key"] == "recommended_packages11")
+        subs = {s["token"] for s in (rp.get("subfields") or [])}
+        self.assertIn("recommend_actual_price", subs)
+
+    def test_clean_save_drops_renamed_std_list(self) -> None:
+        """保存写路径：样例里已不存在的旧标准域名（改名残留）从 passthrough_fields 清理掉。"""
+        from routers.management import _clean_direct_node_for_save
+        node = {
+            "source_type": "direct", "direct_mode": "passthrough",
+            "passthrough_fields": ["recommended_packages",
+                                   "recommended_packages.recommend_actual_price",
+                                   "recommended_packages11",
+                                   "recommended_packages11.recommend_actual_price"],
+            "mock_response": {"extra_info": {"recommended_packages11": [
+                {"offerName": "升169", "recommend_actual_price": "169元"}]}},
+        }
+        _clean_direct_node_for_save(node)
+        self.assertEqual(node["passthrough_fields"],
+                         ["recommended_packages11",
+                          "recommended_packages11.recommend_actual_price"])
+        self.assertEqual(_clean_direct_node_for_save(node), [])  # 幂等
+
+    def test_subpath_passthrough_field_in_palette(self) -> None:
+        """透传大变量与占位符一一对应：勾选的子字段收进「父级大变量」的 subfields，
+        不再平铺成顶层 leaf chip；调色板只出 portrait_style / current_package 两个大变量。"""
+        import asyncio
+        from unittest.mock import patch
+        from routers import management as mg
+        node = {"cc": {"enabled": True, "source_type": "direct",
+                       "direct_mode": "passthrough",
+                       "passthrough_fields": ["portrait_style.communication_style",
+                                              "current_package.package_name"],
+                       "mock_response": {"extra_info": {
+                           "portrait_style": {"communication_style": "直接爽快",
+                                              "business_conte": "关注性价比"},
+                           "current_package": {"package_name": "139全家享"}}}}}
+        fake = type("P", (), {"config": {"api_nodes": node, "biz_config": {}}})()
+        with patch.object(mg.skill_registry, "get", return_value=fake):
+            res = asyncio.run(mg.get_context_vars("guangdong", "营销活动"))
+        by_key = {v["key"]: v for v in res["data"]}
+        # 大变量作为顶层占位符出现，子字段不再平铺
+        self.assertIn("portrait_style", by_key, "父级大变量应作为占位符出现")
+        self.assertIn("current_package", by_key)
+        self.assertNotIn("communication_style", by_key, "子字段不再平铺成顶层 chip")
+        self.assertNotIn("package_name", by_key, "子字段不再平铺成顶层 chip")
+        # portrait_style（非标准域）子字段用裸叶子 token；未勾的兄弟不暴露
+        pt_subs = {s["token"] for s in (by_key["portrait_style"].get("subfields") or [])}
+        self.assertIn("communication_style", pt_subs, "勾选的子字段收进父级 subfields（裸叶子名）")
+        self.assertNotIn("business_conte", pt_subs, "未勾选的兄弟子字段不应暴露")
+        # current_package（标准域）子字段用 {域[子键]} token，走 resource_context 精确解析
+        cp_subs = {s["token"] for s in (by_key["current_package"].get("subfields") or [])}
+        self.assertIn("current_package[package_name]", cp_subs)
+
+    def test_runtime_subpath_passthrough(self) -> None:
+        """运行时：点路径透传只暴露被勾选的子字段（按叶子名），兄弟子字段不外泄；
+        标准域仍照旧写入 resources（多产品展开依赖 recommended_packages）。"""
+        import asyncio
+        from steps.data_step import DataStep
+        raw = {
+            "portrait_style": {"communication_style": "直接爽快",
+                               "business_conte": "关注性价比"},
+            "current_package": {"package_name": "139全家享"},
+            "recommended_packages": [{"offerName": "升169"}],
+        }
+        ctx = make_ctx(extra_info=raw)
+        cfg = {"source_type": "direct", "direct_mode": "passthrough",
+               "passthrough_fields": ["portrait_style.communication_style"]}
+        out = asyncio.run(DataStep("guangdong")._call_one("cc", cfg, ctx))
+        self.assertEqual(out["passthrough"], {"communication_style": "直接爽快"})
+        self.assertIn("recommended_packages", out["resources"])
+        self.assertIn("current_package", out["resources"])
+
+        # 勾选父级（或不勾选）时保留父级大变量 portrait_style 本身 + 展开子字段：
+        # 大变量占位符 {portrait_style} 需在上下文里可读地体现，不再 pop 掉父级。
+        cfg2 = {"source_type": "direct", "direct_mode": "passthrough",
+                "passthrough_fields": ["portrait_style"]}
+        out2 = asyncio.run(DataStep("guangdong")._call_one("cc", cfg2, ctx))
+        self.assertEqual(set(out2["passthrough"]),
+                         {"portrait_style", "communication_style", "business_conte"})
+        self.assertEqual(out2["passthrough"]["portrait_style"],
+                         {"communication_style": "直接爽快", "business_conte": "关注性价比"})
+        out3 = asyncio.run(DataStep("guangdong")._call_one(
+            "cc", {"source_type": "direct", "direct_mode": "passthrough"}, ctx))
+        self.assertEqual(set(out3["passthrough"]),
+                         {"portrait_style", "communication_style", "business_conte"})
+
+    def test_runtime_product_field_whitelist(self) -> None:
+        """运行时：recommended_packages.<字段> 勾选进产品字段白名单，多产品逐条注入只给这些字段；
+        不勾选时沿用「注入全部非空产品字段」的原行为。"""
+        import asyncio
+        from steps.data_step import DataStep
+        raw = {
+            "recommended_packages": [
+                {"offerId": "A1", "offerName": "升169", "recommend_actual_price": "169元",
+                 "recommend_base_flow": "40GB/月", "rank": 1},
+                {"offerId": "A2", "offerName": "扩容20G", "recommend_actual_price": "20元",
+                 "recommend_base_flow": "20GB/月", "rank": 2},
+            ],
+        }
+        ctx = make_ctx(extra_info=raw)
+        out = asyncio.run(DataStep("guangdong")._call_one(
+            "cc", {"source_type": "direct", "direct_mode": "passthrough",
+                   "passthrough_fields": ["recommended_packages",
+                                          "recommended_packages.recommend_actual_price"]}, ctx))
+        self.assertEqual(out["product_field_allow"], ["recommend_actual_price"])
+        self.assertEqual(out["passthrough"], {}, "列表域子字段不进扁平透传通道")
+        self.assertEqual(len(out["resources"]["recommended_packages"]), 2)
+
+        # 白名单生效：只有勾中的产品字段进【上下文数据】
+        ctx2 = make_ctx(extra_info=raw)
+        ctx2.final_recommendations = raw["recommended_packages"]
+        ctx2.product_field_allow = ["recommend_actual_price"]
+        # 模板不引用产品字段 → 走多产品逐字段兜底注入（白名单在此生效）
+        _pkg = raw["recommended_packages"][0]
+        _tpl = "您好，给您介绍一个优惠。"
+        txt = build_prompt(
+            user_prompt_tpl="", template_text=_tpl,
+            ctx=ctx2, pkg=_pkg, diff=PackageDiff(ctx2.current_package, _pkg),
+            linked_vars=[],
+        )
+        self.assertIn("{recommend_actual_price}：169元", txt)
+        self.assertNotIn("{recommend_base_flow}：", txt, "未勾选的产品字段不应注入")
+        self.assertNotIn("{offerName}：", txt)
+
+        # 不勾选 → 原行为（全部非空产品字段）
+        ctx3 = make_ctx(extra_info=raw)
+        ctx3.final_recommendations = raw["recommended_packages"]
+        txt3 = build_prompt(
+            user_prompt_tpl="", template_text=_tpl,
+            ctx=ctx3, pkg=_pkg, diff=PackageDiff(ctx3.current_package, _pkg),
+            linked_vars=[],
+        )
+        self.assertIn("{recommend_actual_price}：169元", txt3)
+        self.assertIn("{recommend_base_flow}：40GB/月", txt3)
+        self.assertIn("{offerName}：升169", txt3)
+
+    def test_cache_key_busts_on_config_change(self) -> None:
+        """保存 api_nodes 后配置立即生效：缓存 key 必须随节点配置变化。
+
+        只按接口 URL 做 key 时，改 response_extract / field_transform /
+        passthrough_fields 这类不改 URL 的配置不会失效缓存，TTL 窗口内测试页仍返回
+        改配置前的映射结果（表现为「保存了但没生效」）。
+        """
+        from steps.data_step import DataStep
+        step = DataStep("guangdong")
+        ctx = make_ctx(extra_info={"a": "1"})
+
+        base = {"cc": {"source_type": "direct", "direct_mode": "passthrough",
+                       "passthrough_fields": ["a"]}}
+        k1 = step._cache_key(ctx, base)
+        self.assertEqual(k1, step._cache_key(ctx, {"cc": dict(base["cc"])}),
+                         "配置未变时 key 必须稳定（否则缓存永不命中）")
+
+        changed = {"cc": {**base["cc"], "passthrough_fields": ["a", "b"]}}
+        self.assertNotEqual(k1, step._cache_key(ctx, changed), "透传字段变化应失效缓存")
+
+        for field_name, val in (
+            ("response_extract", {"current_package": "bean.offer"}),
+            ("field_transform", {"usage": {"type": "passthrough"}}),
+            ("mock_mode", True),
+            ("mock_response", {"bean": {"x": 1}}),
+            ("enabled", False),
+        ):
+            self.assertNotEqual(
+                k1, step._cache_key(ctx, {"cc": {**base["cc"], field_name: val}}),
+                f"{field_name} 变化应失效缓存")
+
+    def test_save_path_keeps_product_field_subpaths(self) -> None:
+        """保存（ES 写路径）：列表域下的产品字段路径按数组元素校验保留。"""
+        from routers.management import _clean_direct_node_for_save
+        node = {
+            "source_type": "direct", "direct_mode": "passthrough",
+            "passthrough_fields": ["recommended_packages.recommend_actual_price",
+                                   "recommended_packages.不存在字段"],
+            "mock_response": {"extra_info": {"recommended_packages": [
+                {"offerName": "a", "recommend_actual_price": "9"}]}},
+        }
+        _clean_direct_node_for_save(node)
+        self.assertEqual(node["passthrough_fields"],
+                         ["recommended_packages.recommend_actual_price"])
+        self.assertEqual(_clean_direct_node_for_save(node), [])  # 幂等
+
+    def test_save_path_keeps_subpath_fields(self) -> None:
+        """保存（ES 写路径）：点路径透传字段按路径校验保留，不存在的路径才清理。"""
+        from routers.management import _clean_direct_node_for_save
+        node = {
+            "source_type": "direct", "direct_mode": "passthrough",
+            "passthrough_fields": ["portrait_style.communication_style",
+                                   "portrait_style.not_exist", "extra_info"],
+            "mock_response": {"extra_info": {
+                "portrait_style": {"communication_style": "直接爽快"}}},
+        }
+        _clean_direct_node_for_save(node)
+        self.assertEqual(node["passthrough_fields"],
+                         ["portrait_style.communication_style"])
+        self.assertEqual(_clean_direct_node_for_save(node), [])  # 幂等
+
+
 @unittest.skipUnless(_BASELINE_AVAILABLE, f"script_step 导入失败: {_BASELINE_IMPORT_ERROR}")
 class TestPreviewPrompt(unittest.TestCase):
     """preview_prompt：示例数据走同一 build_prompt 路径。"""
@@ -1473,6 +1932,75 @@ class TestPreviewPrompt(unittest.TestCase):
             tpl, sample_ctx_data={"recommended_package": {"offerName": "自定义测试套餐X"}}
         )
         self.assertIn("自定义测试套餐X", out)
+
+    def test_preview_passthrough_no_default_domain_leak(self) -> None:
+        """直传透传预览：上下文严格以选择的透传入参为准，不掺内置默认样例的标准域
+        （current_package=畅享套餐59元档 / usage / tags / user_profile 不得混入），且直传
+        current_package 按入参原值呈现（不映射成 offerName 口径）。"""
+        ei = {
+            "portrait_style": {"communication_style": "直接爽快"},
+            "current_package": {"package_name": "139全家享", "actual_price": "139元"},
+            "recommended_packages": [{"offerName": "升169", "recommend_actual_price": "169元"}],
+        }
+        tpl = {
+            "template_content": "当前{current_package}，用{communication_style}推荐{recommend_actual_price}。",
+            "linked_vars": ["current_package"],
+            "intent": "营销活动",
+        }
+        out = preview_prompt(
+            tpl, sample_ctx_data={"extra_info": ei},
+            passthrough_fields=["current_package", "portrait_style", "recommended_packages"],
+        )
+        # 默认样例的标准域不得泄漏进上下文
+        for leaked in ("畅享套餐59元档", "175%", "五星", "视频类应用为主"):
+            self.assertNotIn(leaked, out, f"默认样例 {leaked} 不应混入透传预览")
+        # 直传入参按原值呈现 + 透传叶子 + 产品字段
+        self.assertIn("139全家享", out)
+        self.assertIn("直接爽快", out)
+        self.assertIn("169元", out)
+
+    def test_preview_passthrough_parent_bigvar_reflected(self) -> None:
+        """直传大变量 {portrait_style} 必须在上下文里体现（可读展开）；已被父级整块体现的
+        子字段（communication_style / business_conte）不再单列一行，避免重复。"""
+        ei = {
+            "portrait_style": {"communication_style": "直接爽快",
+                               "business_conte": "关注性价比，近期有升档意向"},
+            "recommended_packages": [{"offerName": "升169", "recommend_actual_price": "169元"}],
+        }
+        tpl = {
+            "template_content": "用 {portrait_style} 风格推荐 {recommend_actual_price}。",
+            "linked_vars": [],
+            "intent": "营销活动",
+        }
+        out = preview_prompt(
+            tpl, sample_ctx_data={"extra_info": ei},
+            passthrough_fields=["portrait_style", "portrait_style.communication_style",
+                                "portrait_style.business_conte", "recommended_packages"],
+        )
+        # 父级大变量占位符锚点出现，且可读展开（非生 JSON blob）
+        self.assertIn("{portrait_style}", out, "大变量 {portrait_style} 应在上下文中体现")
+        self.assertNotIn('{"communication_style"', out, "父级不应以生 JSON blob 呈现")
+        self.assertIn("communication_style：直接爽快", out)
+        # 未被模板引用的子字段不再单列成独立行（父级已整块体现，去重）
+        self.assertNotIn("{communication_style}：", out, "子字段行应被父级去重")
+        self.assertNotIn("{business_conte}：", out, "子字段行应被父级去重")
+
+    def test_preview_passthrough_referenced_leaf_still_emitted(self) -> None:
+        """模板显式引用某子字段 {communication_style} 时，仍单列该子字段行以保证可填。"""
+        ei = {"portrait_style": {"communication_style": "直接爽快",
+                                 "business_conte": "关注性价比"}}
+        tpl = {
+            "template_content": "请用 {communication_style} 的口吻沟通。",
+            "linked_vars": [], "intent": "营销活动",
+        }
+        out = preview_prompt(
+            tpl, sample_ctx_data={"extra_info": ei},
+            passthrough_fields=["portrait_style", "portrait_style.communication_style",
+                                "portrait_style.business_conte"],
+        )
+        self.assertIn("{communication_style}：直接爽快", out, "被引用的子字段应单列可填")
+        # 未被引用的兄弟子字段仍被父级去重，不单列
+        self.assertNotIn("{business_conte}：", out)
 
     def test_preview_matches_manual_build(self) -> None:
         """preview_prompt 输出与手工用相同示例数据调 build_prompt 一致（同一路径）。"""

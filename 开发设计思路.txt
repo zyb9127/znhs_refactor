@@ -2532,3 +2532,80 @@ usage [voice_usage][近6月平均语音饱和度]一usage.voice_usage已产出[�
 入参中：batch_contexts.product_id优先作为业务类型匹配话术模板的；
 
 请检查存在的问题
+
+
+优化点：
+1、对于直传模式，如果传入的产品数组有1 个或者多个，不限制并发数量，直接按照全部的产品数量并发请求生成话术；
+2、对于直传模式，如果传入的产品数组有 1 个或者多个，优先据每个产品信息的里面的参数来匹配话术模板，例如：广东的是offerName 模糊匹配（可考虑前端可以配置对应的关联字段），如果没有的话，才根据product_id关联。 可以优化后端和前端
+
+
+
+
+
+
+对于广东入参是多个产品生成话术，每个话术都是一样的，发现下面的上下文数据有问题，没有把推荐产品的产品信息传入，请检查
+
+第 2 条提示词 【裸升】升99元套餐_202608_东莞·ID【裸升】升99元套餐_202608_东莞·环节 个人市场
+·意图 开口话术
+
+①上下文数据·356字
+【上下文数据】(映射模式最终事实：接口出参已按映射规则写入标准域并完成字段重命名与单位换算；直传字段为主服务入参原值。下列每行「{占位符}：值」即为该槽位唯一正确取值，请按同名占位符原样填入话术，勿反推接口原始字段名、勿改写数值。未列出的占位符表示映射结果为空——是你唯一可依据的事实来源，请勿使用未在此列出的信息）
+当前套餐信息 {current_package}：全家享套餐（全国版）79档，actual_price:79元，broadband:无，voice_minutes:150分钟，equity:无
+business_conte {business_conte}：升档优惠目标客户，请抓住机会！未开通宽带，无亲情网，优推金牛方案、亲情网！（营销切入语：暑期出行，给您推荐出行爆款产品，组合搭配更划算）
+
+
+
+同时话术模板对于入参有多个产品的话（数组），选择产品参数不适配（无法看到），请检查
+
+
+
+
+
+生产环境里面：
+山东直传模式
+接口里面配置参数 ，里面含有params
+{
+params{
+ "callId": "123",
+ "intent": "套餐升档",
+ "phone": "15853422072",
+ "topn": "1",
+ "province": "shandong",
+ "extra_info": {
+  "uniProdGrade": "58",
+  "voiceTotal": "11",
+  "discountExpenses": "11",
+  "privEndMonth": "11",
+  "totalFlow": "16",
+  "voice": "16",
+  "shareFlow": "25",
+  "flow": "15",
+  "giftFlow": "45",
+  "flowGiftFlow": "45",
+  "flowGiftFlowTf": "45",
+  "realFlow": "45",
+  "tf": "16",
+  "internetAge": "11",
+  "giftVoice": "11",
+  "voiceGiftVoice": "11",
+  "voiceGiftVoiceVoiceTotal": "11",
+  "brandLevelName": "11",
+  "flowStandard": "11",
+  "lastedMonth": "11",
+  "3MonthsOutFlowFee": "11",
+  "customerLocation": "11",
+  "telNumStar": "三星级",
+  "discountPrice": "0",
+  "origPrice": "79",
+  "reducePrice": "79"
+ },
+ "batch_contexts": [{
+  "product_id": "20220817116982",
+  "stage": "营销推荐",
+  "scence": "营销推荐-融合权益"
+ }]
+}
+}
+
+提示：mockresponseJSON格式错误
+请针对带外面一层的，优化前端识别，针对这种情况的槽位选取逻辑也判断是否需要优化

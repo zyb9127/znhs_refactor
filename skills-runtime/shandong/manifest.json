@@ -4,6 +4,12 @@
   "enabled": true,
   "version": "1.0.0",
   "intents": {
+    "套餐推荐": {
+      "name": "套餐推荐",
+      "version": "1.0.0",
+      "enabled": true,
+      "description": "山东套餐推荐（比赛演示主技能：直传+18模板多场景）"
+    },
     "营销推荐": {
       "name": "营销推荐",
       "version": "1.0.0",

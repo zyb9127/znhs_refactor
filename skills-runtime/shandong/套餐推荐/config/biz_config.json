@@ -250,7 +250,14 @@
       "status": "online",
       "created_by": "import",
       "created_at": "2026-04-28 15:05:55",
-      "template_id": "tpl_shandong_1777359955644_7971af"
+      "template_id": "tpl_shandong_1777359955644_7971af",
+      "linked_vars": [
+        "current_package",
+        "usage",
+        "tags"
+      ],
+      "script_requirement": "你是山东移动坐席，营销切入环节。结合客户近6月真实流量/费用先点出“超套多花钱”的痛点，激发兴趣但不报完整方案细节；口语化、亲切，全文 90 字以内。",
+      "updated_by": "demo"
     },
     {
       "province": "shandong",
@@ -295,7 +302,16 @@
       "status": "online",
       "created_by": "import",
       "created_at": "2026-04-28 15:05:55",
-      "template_id": "tpl_shandong_1777359955744_ad30bd"
+      "template_id": "tpl_shandong_1777359955744_ad30bd",
+      "linked_vars": [
+        "current_package",
+        "usage",
+        "tags",
+        "user_profile",
+        "pkg_brief"
+      ],
+      "script_requirement": "你是山东移动套餐推荐坐席。把【话术模板】改写成自然口语的推荐话术，可直接对客播报。\n① 填槽零差错：模板中 [uniProdGrade]、[flow+giftFlow]、[uniProdGrade-discountExpenses]、[flow+giftFlow-tf]、[shareFlow] 等方括号是系统按入参算好的数值，必须原样保留，严禁改写或自行计算价格/流量。\n② 结合客户近6月真实用量与标签定卖点：流量偏高→强调升级后总流量与净增量；关注性价比→强调打折优惠期与到期恢复价的对比；只借用来定表达侧重，不得念出标签名。\n③ 只讲增加的资源与权益，不提任何减少项；口语化、无前缀、无占位符残留，全文 130 字以内。",
+      "updated_by": "demo"
     },
     {
       "province": "shandong",
@@ -460,7 +476,15 @@
       "status": "online",
       "created_by": "import",
       "created_at": "2026-04-28 15:05:55",
-      "template_id": "tpl_shandong_1777359956118_36c02f"
+      "template_id": "tpl_shandong_1777359956118_36c02f",
+      "linked_vars": [
+        "current_package",
+        "tags",
+        "user_profile",
+        "pkg_brief"
+      ],
+      "script_requirement": "你是山东移动坐席，客户说“再考虑一下”。先共情其谨慎，再用活动时效与已算清的划算点促成办理；语气真诚不逼迫，口语化，全文 120 字以内。",
+      "updated_by": "demo"
     },
     {
       "province": "shandong",

@@ -445,20 +445,31 @@
                         ? `已选 ${ifcEditForm.passthrough_fields.length} 个`
                         : `全部字段（${passthroughSampleFields.length}）` }}
                   </span>
+                  <button v-if="passthroughSampleFields.length" type="button"
+                    class="pt-select-all-btn" @click="toggleAllPassthrough">
+                    {{ passthroughAllSelected ? '清空' : '全选' }}
+                  </button>
                 </header>
-                <div class="om2-tip">
-                  勾选后仅暴露选中字段作为话术上下文；<b>不勾选任何字段则默认暴露全部顶层字段</b>。
-                  话术模板里用 <code>&#123;字段名&#125;</code> 直接引用（如 <code>&#123;recommend_actual_price&#125;</code>）。
-                  与标准域同名的字段（如 <code>current_package</code>）仍会自动写入对应标准域。
-                </div>
                 <div v-if="passthroughSampleFields.length" class="pt-field-grid">
-                  <label v-for="f in passthroughSampleFields" :key="f.key" class="pt-field-item"
-                    :class="{ checked: ifcEditForm.passthrough_fields.includes(f.key) }">
-                    <input type="checkbox" :value="f.key" v-model="ifcEditForm.passthrough_fields" />
-                    <code class="pt-field-key">{{ f.key }}</code>
-                    <span v-if="f.isStd" class="pt-field-tag">标准域</span>
-                    <span class="pt-field-preview">{{ f.preview }}</span>
-                  </label>
+                  <div v-for="f in passthroughSampleFields" :key="f.key" class="pt-field-cell">
+                    <label class="pt-field-item"
+                      :class="{ checked: ifcEditForm.passthrough_fields.includes(f.key) }">
+                      <input type="checkbox" :value="f.key" v-model="ifcEditForm.passthrough_fields" />
+                      <code class="pt-field-key">{{ f.key }}</code>
+                      <span class="pt-field-preview">{{ f.preview }}</span>
+                    </label>
+                    <!-- 下一级子字段：勾选后按叶子名直接透传，模板用 {子字段名} 引用；
+                         数组型（产品列表）勾选的是「每条产品各取自己那份」的产品字段 -->
+                    <div v-if="f.children.length" class="pt-sub-row">
+                      <span class="pt-sub-hint">{{ f.isList ? '产品字段' : '下一级' }}</span>
+                      <label v-for="c in f.children" :key="c.key" class="pt-sub-item"
+                        :class="{ checked: ifcEditForm.passthrough_fields.includes(c.key) }"
+                        :title="`${c.key}　示例：${c.preview}`">
+                        <input type="checkbox" :value="c.key" v-model="ifcEditForm.passthrough_fields" />
+                        <code>{{ c.leaf }}</code>
+                      </label>
+                    </div>
+                  </div>
                 </div>
                 <div v-else class="ifc-analysis-empty">
                   <span class="iae-icon">🔍</span>
@@ -1097,16 +1108,15 @@
         <!-- 模板匹配与填槽设置（接口查询模式）-->
         <details class="tpl-match-panel" open @toggle="e => e.target.open && ensureIfcDetails()">
           <summary class="tpl-match-summary">
-            ▶ 模板匹配与填槽设置（接口查询模式）
+            ▶ 模板匹配规则（每个产品匹配到哪条话术模板）
             <span class="tpl-match-summary-hint">
-              指定查询/推荐结果中哪个字段用于匹配话术模板；配置标准域为空时的入参兜底
+              直传模式 / 接口查询模式通用；决定每个推荐产品命中哪条模板，以及标准域为空时如何兜底
             </span>
           </summary>
           <div class="tpl-match-body">
             <div class="tpl-match-toolbar">
               <span class="tpl-match-hint" style="margin:0;">
-                打开时从已保存的 <code>biz_config.template_match</code> /
-                <code>api_nodes._domain_fallbacks</code> 自动回填；修改后请点「保存设置」写入生效配置
+                打开时自动回填已保存配置；修改后点右侧「保存设置」生效
               </span>
               <el-button
                 type="primary" size="small"
@@ -1115,12 +1125,25 @@
                 @click="saveMatchSettings"
               >保存设置</el-button>
             </div>
+
+            <!-- 匹配优先级说明：逐个产品独立匹配，从高到低 -->
+            <div class="tpl-match-priority">
+              <div class="tpl-match-priority-title">匹配优先级（每个产品各自独立匹配，从高到低）</div>
+              <ol class="tpl-match-priority-list">
+                <li><b>关联字段命中</b>：用每个产品的<b>「模板关联字段」</b>值，去匹配模板的「产品 ID」</li>
+                <li><b>产品名兜底</b>：上一步没命中、且开启开关时，用产品名关键词模糊匹配模板</li>
+                <li><b>环节 / 意图定位</b>：入参传了就用入参；没传则用下方字段从推荐结果取值，与上面共同锁定到具体模板行</li>
+              </ol>
+              <div class="tpl-match-priority-foot">命中模板后，标准域槽位若为空，再按最下方「空域入参兜底」从入参回填，保证话术有事实可填。</div>
+            </div>
+
+            <div class="tpl-match-group-title">① 选模板：产品 → 模板行</div>
             <div class="tpl-match-row">
-              <span class="tpl-match-label">产品ID取值字段</span>
+              <span class="tpl-match-label"><span class="tpl-match-step">1</span>模板关联字段</span>
               <el-select
                 v-model="tmProductIdArr" size="small" multiple filterable allow-create
                 default-first-option clearable collapse-tags collapse-tags-tooltip
-                placeholder="从接口出参映射结果中选择，或手动输入字段名/点路径；多选时按序取第一个非空值"
+                placeholder="从候选中选择，或手动输入字段名/点路径；多选时按序取第一个非空值"
                 style="width:380px;" @change="onMatchSettingsChange"
               >
                 <el-option
@@ -1134,16 +1157,27 @@
               </el-select>
               <el-button size="small" plain @click="autoRecommendMatchField">智能推荐</el-button>
               <span class="tpl-match-hint">
-                推荐结果中该字段的值用于匹配话术模板「产品 ID」；留空按默认字段
-                （offerId / product_id / package_id / offer_id）取值
+                取<b>每个产品自身</b>该字段的值，去匹配模板「产品 ID」。
+                留空则按默认字段 <code>offerId / product_id / package_id / offer_id</code> 取值
               </span>
             </div>
             <div class="tpl-match-row">
-              <span class="tpl-match-label">环节取值字段</span>
+              <span class="tpl-match-label"><span class="tpl-match-step">2</span>产品名兜底匹配</span>
+              <el-switch
+                v-model="templateMatch.name_fallback"
+                size="small" @change="onMatchSettingsChange"
+              />
+              <span class="tpl-match-hint">
+                第 1 步没命中时，再用产品名（<code>offerName</code> / <code>recommend_package_name</code>）模糊匹配关键词模板。
+                <b>关联字段是纯数字 offerId、模板却按「流量 / 套餐 / 升」等关键词配置时，建议开启</b>
+              </span>
+            </div>
+            <div class="tpl-match-row">
+              <span class="tpl-match-label"><span class="tpl-match-step">3</span>环节取值字段</span>
               <el-select
                 v-model="tmStageArr" size="small" multiple filterable allow-create
                 default-first-option clearable collapse-tags collapse-tags-tooltip
-                placeholder="可选：入参未传环节时，从推荐结果该字段取值匹配「环节」"
+                placeholder="可选：入参未传「环节」时，从推荐结果该字段取值"
                 style="width:380px;" @change="onMatchSettingsChange"
               >
                 <el-option
@@ -1154,13 +1188,14 @@
                   <span class="tpl-match-opt-src">{{ c.source }}<template v-if="c.sample"> · 样例: {{ c.sample }}</template></span>
                 </el-option>
               </el-select>
+              <span class="tpl-match-hint">入参已传「环节」则直接用入参，此项忽略</span>
             </div>
             <div class="tpl-match-row">
-              <span class="tpl-match-label">意图取值字段</span>
+              <span class="tpl-match-label"><span class="tpl-match-step">3</span>意图取值字段</span>
               <el-select
                 v-model="tmSceneArr" size="small" multiple filterable allow-create
                 default-first-option clearable collapse-tags collapse-tags-tooltip
-                placeholder="可选：入参未传意图时，从推荐结果该字段取值匹配「意图」"
+                placeholder="可选：入参未传「意图」时，从推荐结果该字段取值"
                 style="width:380px;" @change="onMatchSettingsChange"
               >
                 <el-option
@@ -1171,8 +1206,10 @@
                   <span class="tpl-match-opt-src">{{ c.source }}<template v-if="c.sample"> · 样例: {{ c.sample }}</template></span>
                 </el-option>
               </el-select>
+              <span class="tpl-match-hint">入参已传「意图」则直接用入参，此项忽略</span>
             </div>
-            <el-divider style="margin:8px 0;" />
+            <el-divider style="margin:12px 0 4px;" />
+            <div class="tpl-match-group-title">② 填槽兜底：标准域为空时从入参回填</div>
             <div class="tpl-match-row" style="align-items:flex-start;">
               <span class="tpl-match-label" style="margin-top:4px;">空域入参兜底</span>
               <div style="flex:1;">
@@ -1639,14 +1676,73 @@ const isPassthrough = computed(() => isDirectMode.value && ifcEditForm.direct_mo
 const ifcStepMockLabel = computed(() => isDirectMode.value ? '直传样例' : '响应样例')
 const ifcStepOutLabel  = computed(() => isPassthrough.value ? '透传字段' : (isDirectMode.value ? '域映射' : '出参映射'))
 
+// 直传样例归一：兼容运营把样例粘贴成「整请求体」或「网关 params 包裹」的写法，
+// 统一取到 extra_info 本体。与后端 management._normalize_direct_extra_info 判定一致。
+//   1) {"params": {...}}           → 解外层 params
+//   2) {phone, extra_info:{...}}   → 取 extra_info 本体
+//   3) {uniProdGrade:...}（裸样例） → 原样返回
+function _normalizeDirectSample(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {}
+  let cur = obj
+  const inner = cur.params
+  const hasBiz = ['phone', 'intent', 'province', 'extra_info'].some(k => k in cur)
+  if (inner && typeof inner === 'object' && !Array.isArray(inner) && Object.keys(inner).length && !hasBiz) {
+    cur = inner
+  }
+  const ei = cur.extra_info
+  if (ei && typeof ei === 'object' && !Array.isArray(ei) && Object.keys(ei).length) return ei
+  return cur
+}
+
+// 按点路径取样例里的嵌套子字段，返回 [叶子名, 值]；取不到返回 ['', undefined]。
+// 与后端 management._dig_sample_subfield / DataStep._dig_passthrough_subfield 口径一致。
+function _digSampleSubfield(sample, path) {
+  let cur = sample
+  const parts = String(path || '').split('.').filter(Boolean)
+  for (const p of parts) {
+    if (!cur || typeof cur !== 'object' || Array.isArray(cur) || !(p in cur)) return ['', undefined]
+    cur = cur[p]
+  }
+  return [parts.length ? parts[parts.length - 1] : '', cur]
+}
+
+// 列表域下的产品字段路径（recommended_packages.<字段>）是否存在于样例数组元素里。
+// 与后端 management._subfield_in_list_sample 口径一致。
+function _subfieldInListSample(sample, path) {
+  const i = String(path || '').indexOf('.')
+  if (i < 0) return false
+  const root = path.slice(0, i)
+  const rest = path.slice(i + 1)
+  if (!rest || rest.includes('.')) return false
+  const arr = sample?.[root]
+  return Array.isArray(arr) && arr.some(it => it && typeof it === 'object' && rest in it)
+}
+
 // 透传子模式：从 extra_info 样例解析出的顶层字段（供勾选 passthrough_fields）
+// 下一级子字段一并列出，勾选项存点路径（parent.child）：
+//   · 字典型（portrait_style / current_package）→ 运行时按叶子名直接透传
+//   · 数组型（recommended_packages）→ 取各产品的并集字段，作为「产品字段白名单」，
+//     逐条话术各取自己那条产品的值；不勾则整块透传、话术里用 {recommended_packages}
 const passthroughSampleFields = computed(() => {
   try {
-    const obj = JSON.parse(ifcEditForm.mock_response || '{}')
+    const obj = _normalizeDirectSample(JSON.parse(ifcEditForm.mock_response || '{}'))
     if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return []
-    const STD = new Set(['current_package','usage','tags','user_info','recommended_packages','user_profile','domain_ext'])
-    return Object.keys(obj).filter(k => !k.startsWith('_'))
-      .map(k => ({ key: k, isStd: STD.has(k), preview: _shortPreview(obj[k]) }))
+    return Object.keys(obj).filter(k => !k.startsWith('_')).map(k => {
+      const v = obj[k]
+      const children = []
+      const seen = new Set()
+      const push = (src) => {
+        if (!src || typeof src !== 'object' || Array.isArray(src)) return
+        for (const c of Object.keys(src)) {
+          if (c.startsWith('_') || seen.has(c)) continue
+          seen.add(c)
+          children.push({ key: `${k}.${c}`, leaf: c, preview: _shortPreview(src[c]) })
+        }
+      }
+      if (Array.isArray(v)) v.forEach(push)   // 数组各元素字段取并集（产品间字段可不齐）
+      else push(v)
+      return { key: k, preview: _shortPreview(v), children, isList: Array.isArray(v) }
+    })
   } catch { return [] }
 })
 function _shortPreview(v) {
@@ -1656,6 +1752,34 @@ function _shortPreview(v) {
   else s = String(v)
   return s.length > 40 ? s.slice(0, 40) + '…' : s
 }
+
+// 透传字段「全选 / 清空」：全部可勾选项 = 顶层大字段 + 各自的子字段（点路径）
+const allPassthroughKeys = computed(() => {
+  const keys = []
+  for (const f of passthroughSampleFields.value) {
+    keys.push(f.key)
+    for (const c of (f.children || [])) keys.push(c.key)
+  }
+  return keys
+})
+const passthroughAllSelected = computed(() => {
+  const all = allPassthroughKeys.value
+  if (!all.length) return false
+  const sel = new Set(ifcEditForm.passthrough_fields || [])
+  return all.every(k => sel.has(k))
+})
+function toggleAllPassthrough() {
+  ifcEditForm.passthrough_fields = passthroughAllSelected.value
+    ? [] : [...allPassthroughKeys.value]
+}
+// 默认全选：进入透传模式 / 粘贴样例后，若尚未勾选过（为空）则默认勾全部字段。
+// 只监听样例字段变化 —— 用户点「清空」不会触发（样例没变），保证能清空。
+watch([passthroughSampleFields, isPassthrough], () => {
+  if (!isPassthrough.value || !allPassthroughKeys.value.length) return
+  if ((ifcEditForm.passthrough_fields || []).length === 0) {
+    ifcEditForm.passthrough_fields = [...allPassthroughKeys.value]
+  }
+}, { immediate: true })
 
 // 出参映射样例与「模拟数据/响应样例」共用 ifcEditForm.mock_response（单一来源）
 const ifcAutoMapLoading  = ref(false)
@@ -2751,6 +2875,8 @@ async function saveIfcEdit() {
         ElMessage.warning({ message: `⚠️ 以下问题需人工处理：${json.unfixed.join('；')}`, duration: 8000 })
       }
       await loadIfcItems()
+      // 后端还会在保存时归一/补齐配置，必须重取详情，否则前端各处仍按提交前的配置渲染
+      await refreshIfcDetails(ifcEditForm.api_name)
     } else {
       ElMessage.error(json.detail || json.message || '保存失败')
     }
@@ -2960,6 +3086,7 @@ async function applyIfcMap() {
       ifcAutoMapVisible.value = false
       ElMessage.success('✅ 映射规则已应用')
       await loadIfcItems()
+      await refreshIfcDetails(api_name)
     } else {
       ElMessage.error(json.detail || json.message || '保存失败')
     }
@@ -2984,6 +3111,7 @@ async function confirmIfcDel() {
     if (json.code === 200) {
       ifcDelVisible.value = false
       ElMessage.success('✅ 删除成功')
+      delete ifcDetailsCache[api_name]
       await loadIfcItems()
     } else {
       ElMessage.error(json.detail || json.message || '删除失败')
@@ -3792,9 +3920,11 @@ function inferProducedSlotDetails(cfg) {
         from: v, include_keys: [], exclude_keys: [], unit_convert: {} })
     }
   }
-  // 直传节点零配置兜底：extra_info 样例（mock_response）顶层同名域自动透传
+  // 直传节点零配置兜底：extra_info 样例（mock_response）顶层同名域自动透传。
+  // 归一兼容 mock 被存成「整请求体 / params 包裹」的写法（生产 ES 里可能存在旧脏数据），
+  // 否则标准域（current_package 等）取不到、调色板看不到。
   if (cfg?.source_type === 'direct' && !map.size) {
-    const sample = (cfg.mock_response && typeof cfg.mock_response === 'object') ? cfg.mock_response : {}
+    const sample = _normalizeDirectSample(cfg.mock_response)
     for (const k of Object.keys(sample)) {
       if (!STANDARD_SLOTS.has(k)) continue
       const item = ensure(k)
@@ -3823,10 +3953,25 @@ function derivePassthroughInfo(cfg) {
   if (!cfg || cfg.source_type !== 'direct' || cfg.direct_mode !== 'passthrough') {
     return { passthrough: false, fields: [] }
   }
+  // 归一兼容 mock 被存成「整请求体 / params 包裹」的写法（生产 ES 旧脏数据）。
+  const sample = _normalizeDirectSample(cfg.mock_response)
   let fields = Array.isArray(cfg.passthrough_fields)
     ? cfg.passthrough_fields.filter(k => typeof k === 'string' && k) : []
+  if (fields.length) {
+    // 过滤掉指向包裹层/样例中不存在的脏透传字段（如误把整包 extra_info 选为透传字段）。
+    // 「提供变量」只呈现<顶层大字段>（current_package / portrait_style / recommended_packages），
+    // 子字段收在②模板内容上方调色板里展开——此处子路径归并到其顶层名并去重，不平铺叶子。
+    // 直传透传模式 mock 即入参形态：顶层字段必须在样例里真实存在才呈现。
+    // 标准域名若已被改名 / 删除而不在样例里（如旧 recommended_packages 改成
+    // recommended_packages11），属残留脏项，不再因「是标准域名」而保留，避免重复。
+    fields = fields
+      .filter(k => k.includes('.')
+        ? (_digSampleSubfield(sample, k)[0] !== '' || _subfieldInListSample(sample, k))
+        : (k in sample))
+      .map(k => (k.includes('.') ? k.split('.')[0] : k))
+    fields = [...new Set(fields)]
+  }
   if (!fields.length) {
-    const sample = (cfg.mock_response && typeof cfg.mock_response === 'object') ? cfg.mock_response : {}
     fields = Object.keys(sample).filter(k => k && !k.startsWith('_') && !STANDARD_SLOTS.has(k))
   }
   return { passthrough: true, fields }
@@ -3834,6 +3979,15 @@ function derivePassthroughInfo(cfg) {
 
 // 模式 A 接口详情缓存（异步拉取后填入，便于在数据流映射页展示具体字段）
 const ifcDetailsCache = reactive({})  // api_name → cfg
+
+/** 保存后强制重取接口详情：缓存只在 key 缺失时回填，不主动失效会让「可映射固定域」
+ *  调色板、模式角标、接口产出等仍按保存前的配置展示（后端已是新配置，前端读到旧的）。
+ *  apiName 省略则失效全部。 */
+async function refreshIfcDetails(apiName) {
+  if (apiName) delete ifcDetailsCache[apiName]
+  else for (const k of Object.keys(ifcDetailsCache)) delete ifcDetailsCache[k]
+  await ensureIfcDetails()
+}
 
 async function ensureIfcDetails() {
   if (!props.province || !props.intent || !ifcItems.value.length) return
@@ -4669,6 +4823,7 @@ async function saveDataflowChanges() {
     dfmDirtyApis.clear()
     ElMessage.success(`✅ 已保存 ${tasks.length} 个接口的产出域映射`)
     await loadIfcItems()
+    await refreshIfcDetails()
   } catch (e) {
     ElMessage.error(e.message || '保存失败')
   } finally {
@@ -4740,12 +4895,16 @@ const strategy = reactive({
   max_script_length: 150,
   max_parallel_scripts: 3,
 })
-// 模板匹配取值配置（biz_config.template_match）：接口查询模式下，
-// 指定推荐结果中哪个字段（支持点路径、逗号分隔多候选）用于匹配话术模板维度
+// 模板匹配取值配置（biz_config.template_match）：指定产品信息中哪个字段
+// （支持点路径、逗号分隔多候选）用于匹配话术模板维度。
+// 直传模式取 extra_info.recommended_packages[] 的字段，接口查询模式取推荐结果映射后的字段。
 const templateMatch = reactive({
   product_id_from: '',
   stage_from: '',
   scene_from: '',
+  // 产品名兜底匹配：关联字段取值匹配不到模板时，再用产品名（offerName 等）模糊匹配关键词模板。
+  // UI 用正向开关表达，落库时转成 disable_name_fallback。
+  name_fallback: true,
 })
 
 // ── 模板匹配候选字段：从接口出参映射结果（mock 样例模拟）提取可选字段 ──
@@ -4777,9 +4936,29 @@ function _simulateSlotValue(cfg, slotKey) {
     return src   // passthrough / 其它
   }
   if (re[slotKey] !== undefined) return datasets[slotKey]
-  if (cfg.source_type === 'direct') return (mock || {})[slotKey]
+  if (cfg.source_type === 'direct') {
+    // 直传（passthrough）：产品信息在请求体里。归一兼容三种样例形态（裸 extra_info /
+    // 整请求体 / 网关 params 包裹），recommended_packages 另兼容旧单产品写法 final_recommendations。
+    const body = _normalizeDirectSample(mock)
+    const hit = body[slotKey]
+    if (hit !== undefined) return hit
+    if (slotKey === 'recommended_packages') return body.final_recommendations
+    // 子路径透传（portrait_style.communication_style）：槽位名是叶子名，回溯到嵌套取值
+    for (const f of (cfg.passthrough_fields || [])) {
+      if (typeof f === 'string' && f.includes('.') && f.split('.').pop() === slotKey) {
+        const [leaf, val] = _digSampleSubfield(body, f)
+        if (leaf) return val
+      }
+    }
+    return undefined
+  }
   return undefined
 }
+
+/** 直传模式常用产品字段：接口节点无 mock 样例时也让下拉有可选项（仍可手输任意字段名）*/
+const COMMON_PRODUCT_FIELDS = [
+  'offerName', 'offerId', 'recommend_package_name', 'product_id',
+]
 
 /** 从域值提取候选字段路径（数组取首条；嵌套对象下钻一层为 a.b 点路径）*/
 function _collectFieldPaths(val, prefix = '', depth = 0, out = []) {
@@ -4829,6 +5008,12 @@ const matchFieldCandidates = computed(() => {
       }
     }
   }
+  // 常用字段兜底：直传技能包（无接口出参样例）时下拉不至于为空
+  for (const f of COMMON_PRODUCT_FIELDS) {
+    if (!seen.has(f)) {
+      seen.set(f, { field: f, sample: '', source: '常用产品字段', score: _pidScore(f) })
+    }
+  }
   return [...seen.values()].sort((a, b) => b.score - a.score)
 })
 
@@ -4851,6 +5036,8 @@ function buildTemplateMatchCfg() {
       .split(/[,，]/).map(s => s.trim()).filter(Boolean)
     if (arr.length) cfg[k] = arr.length > 1 ? arr : arr[0]
   }
+  // 仅在关闭产品名兜底时落库（默认开启，不写入以保持配置精简）
+  if (!templateMatch.name_fallback) cfg.disable_name_fallback = true
   return Object.keys(cfg).length ? cfg : null
 }
 
@@ -5005,6 +5192,7 @@ function loadFromProps(val) {
   templateMatch.product_id_from = tmStr(tm.product_id_from)
   templateMatch.stage_from      = tmStr(tm.stage_from)
   templateMatch.scene_from      = tmStr(tm.scene_from)
+  templateMatch.name_fallback   = !tm.disable_name_fallback
 
   // Mode A（有 province+intent，如 Skill 管理）：话术模板改由 loadTplItems 分页拉全量并
   // 「按场景分类/环节/意图/话术内容」合并归类展示（不同 product_id 收进同一分组行），
@@ -5492,11 +5680,13 @@ async function removeTemplate(idx) {
   flex-wrap: wrap;
 }
 .tpl-match-label {
-  width: 110px;
+  width: 128px;
   flex-shrink: 0;
   font-size: 12px;
   color: var(--text, #303133);
   font-weight: 600;
+  display: flex;
+  align-items: center;
 }
 .tpl-match-hint {
   font-size: 11px;
@@ -5512,6 +5702,52 @@ async function removeTemplate(idx) {
   margin-left: 16px;
   font-size: 11px;
   color: var(--muted, #909399);
+}
+.tpl-match-priority {
+  margin: 10px 0 4px;
+  padding: 8px 12px;
+  background: var(--el-color-primary-light-9, #ecf5ff);
+  border: 1px solid var(--el-color-primary-light-7, #d9ecff);
+  border-radius: 6px;
+}
+.tpl-match-priority-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-color-primary, #409eff);
+  margin-bottom: 4px;
+}
+.tpl-match-priority-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 12px;
+  line-height: 1.9;
+  color: var(--text, #303133);
+}
+.tpl-match-priority-list li::marker { font-weight: 700; color: var(--el-color-primary, #409eff); }
+.tpl-match-priority-foot {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted, #909399);
+}
+.tpl-match-group-title {
+  margin: 12px 0 2px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text, #303133);
+}
+.tpl-match-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--el-color-primary, #409eff);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .tpl-toolbar {
@@ -7069,6 +7305,12 @@ async function removeTemplate(idx) {
 .om2-chip-bad { background: #fff5f5; border-color: #ffe3e3; color: #c92a2a; }
 
 /* 直传透传字段勾选 */
+.pt-select-all-btn {
+  margin-left: auto; padding: 2px 12px; font-size: 12px; line-height: 20px;
+  color: #4263eb; background: #eef2ff; border: 1px solid #c7d2fe;
+  border-radius: 5px; cursor: pointer; transition: .15s;
+}
+.pt-select-all-btn:hover { background: #dfe6ff; border-color: #4263eb; }
 .pt-field-grid { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .pt-field-item {
   display: flex; align-items: center; gap: 8px;
@@ -7079,11 +7321,23 @@ async function removeTemplate(idx) {
 .pt-field-item.checked { border-color: #4263eb; background: #eef2ff; }
 .pt-field-item input { flex-shrink: 0; }
 .pt-field-key { font-family: monospace; font-size: 12px; color: #1c3faa; font-weight: 600; flex-shrink: 0; }
-.pt-field-tag {
-  flex-shrink: 0; font-size: 10px; padding: 1px 6px; border-radius: 3px;
-  background: #fff3bf; color: #b45309; border: 1px solid #ffe066;
-}
 .pt-field-preview { color: #868e96; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 透传字段的下一级子字段 */
+.pt-field-cell { display: flex; flex-direction: column; gap: 4px; }
+.pt-sub-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+  padding: 0 0 2px 26px;
+}
+.pt-sub-hint { font-size: 10px; color: #adb5bd; flex-shrink: 0; }
+.pt-sub-item {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px; border: 1px dashed #dee2e6; border-radius: 10px;
+  background: #fff; cursor: pointer; transition: .15s;
+}
+.pt-sub-item:hover { border-color: #4263eb; background: #f8f9ff; }
+.pt-sub-item.checked { border-style: solid; border-color: #4263eb; background: #eef2ff; }
+.pt-sub-item input { flex-shrink: 0; margin: 0; transform: scale(.85); }
+.pt-sub-item code { font-family: monospace; font-size: 11px; color: #1c3faa; }
 .om2-warn {
   margin-top: 6px; font-size: 11px; color: #c92a2a;
   display: flex; flex-wrap: wrap; align-items: center; gap: 4px;

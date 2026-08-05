@@ -30,7 +30,7 @@
         </select>
 
         <label>推荐数量</label>
-        <input type="number" v-model.number="form.topN" min="1" max="5">
+        <input type="number" v-model.number="form.topN" min="1">
 
         <label>环节</label>
         <select v-model="form.stage">

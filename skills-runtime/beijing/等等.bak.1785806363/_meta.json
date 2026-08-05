@@ -1,0 +1,24 @@
+{
+  "skill_id": "beijing-等等",
+  "name": "beijing-等等",
+  "description": "等等",
+  "version": "1.0.0",
+  "status": "offline",
+  "type": "scenario",
+  "province": "beijing",
+  "scenario_id": "等等",
+  "config_files": [
+    "api_nodes.json",
+    "biz_config.json"
+  ],
+  "required_plugins": [
+    "plugins.package_diff",
+    "plugins.unit_converter"
+  ],
+  "author": "admin",
+  "created_by": "auto_config_agent",
+  "created_at": "2026-07-20 16:40",
+  "updated_at": "2026-07-20 16:40",
+  "openclaw_compatible": true,
+  "offline_at": "2026-08-04 09:19"
+}

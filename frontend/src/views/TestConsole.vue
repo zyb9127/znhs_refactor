@@ -53,7 +53,7 @@
           <option v-for="i in intentOptions" :key="i" :value="i">{{ i }}</option>
         </select>
         <label>推荐数量</label>
-        <input type="number" v-model.number="form.topN" min="1" max="5">
+        <input type="number" v-model.number="form.topN" min="1">
         <label>环节</label>
         <select v-model="form.stage">
           <option value="">（不限）</option>

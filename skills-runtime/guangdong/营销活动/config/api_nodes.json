@@ -1,6 +1,6 @@
 {
   "cc": {
-    "_comment": "cc",
+    "_comment": "比赛演示·广东营销活动直传节点（本地演示，与生产无关）",
     "url": "",
     "method": "POST",
     "enabled": true,
@@ -9,50 +9,77 @@
     "response_extract": {},
     "field_transform": {},
     "mock_mode": false,
+    "_mock_note": "直传样例=extra_info 本体（运营也可直接粘贴整请求体或 {params:{...}} 包裹体，配置期会自动识别取内层 extra_info）",
     "mock_response": {
-      "callId": "20260305123xx",
-      "intent": "营销活动",
-      "phone": "15010470528",
-      "topN": 1,
-      "province": "200",
-      "extra_info": {
-        "current_package": {
-          "package_name": "",
-          "actual_price": "",
-          "voice_minutes": "",
-          "baseFlow": ""
-        },
-        "final_recommendations": {
-          "recommend_package_name": "",
-          "recommend_original_price": "",
-          "recommend_actual_price": "",
-          "recommend_discount_amount": "",
-          "recommend_base_flow": "",
-          "recommend_bonus_flow": "",
-          "recommend_total_flow": "",
-          "recommend_voice_minutes": "",
-          "recommend_preferential_period": ""
-        },
-        "diff": {
-          "diff_actual_price": "",
-          "base_flow_diff": "",
-          "bonus_flow_diff": "",
-          "voice_minutes_diff": ""
-        }
+      "portrait_style": {
+        "communication_style": "直接爽快",
+        "business_conte": "关注性价比，近期有升档意向"
       },
-      "batch_contexts": [
+      "current_package": {
+        "package_name": "139元全家享套餐（2022）",
+        "actual_price": "139元",
+        "broadband": "300M",
+        "voice_minutes": "400分钟",
+        "equity": "无"
+      },
+      "recommended_packages133": [
         {
-          "product_id": "xx",
-          "stage": "个人市场",
-          "scene": "开口话术"
+          "offerId": "2026060810324218501011930",
+          "offerName": "【广州】【纯裸升】升169套餐-2606",
+          "recommend_package_name": "【广州】【纯裸升】升169套餐-2606",
+          "recommend_original_price": "169元",
+          "recommend_actual_price": "169元",
+          "recommend_discount_amount": "0元",
+          "recommend_base_flow": "40GB/月",
+          "recommend_bonus_flow": "0GB/月",
+          "recommend_total_flow": 40,
+          "recommend_voice_minutes": "500分钟/月",
+          "recommend_preferential_period": "0个月",
+          "recommend_equity": "无",
+          "recommend_broadband": "有",
+          "rank": 1
+        },
+        {
+          "offerId": "2026060810324218501011931",
+          "offerName": "【广州】流量扩容包-20G",
+          "recommend_package_name": "【广州】流量扩容包-20G",
+          "recommend_actual_price": "20元",
+          "recommend_base_flow": "20GB/月",
+          "recommend_preferential_period": "12个月",
+          "rank": 2
         }
       ]
     },
     "direct_mode": "passthrough",
     "passthrough_fields": [
-      "extra_info"
+      "portrait_style",
+      "portrait_style.communication_style",
+      "portrait_style.business_conte",
+      "current_package",
+      "current_package.package_name",
+      "current_package.actual_price",
+      "current_package.broadband",
+      "current_package.voice_minutes",
+      "current_package.equity",
+      "recommended_packages133",
+      "recommended_packages133.offerId",
+      "recommended_packages133.offerName",
+      "recommended_packages133.recommend_package_name",
+      "recommended_packages133.recommend_original_price",
+      "recommended_packages133.recommend_actual_price",
+      "recommended_packages133.recommend_discount_amount",
+      "recommended_packages133.recommend_base_flow",
+      "recommended_packages133.recommend_bonus_flow",
+      "recommended_packages133.recommend_total_flow",
+      "recommended_packages133.recommend_voice_minutes",
+      "recommended_packages133.recommend_preferential_period",
+      "recommended_packages133.recommend_equity",
+      "recommended_packages133.recommend_broadband",
+      "recommended_packages133.rank"
     ],
-    "created_by": "admin",
-    "created_at": "2026-07-16 18:10:08"
+    "created_by": "demo",
+    "created_at": "2026-08-04 09:00:00",
+    "updated_by": "admin",
+    "updated_at": "2026-08-04 13:38:31"
   }
 }

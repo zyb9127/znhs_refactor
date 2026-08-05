@@ -1,0 +1,28 @@
+{
+  "province": "beijing",
+  "intent": "套餐推荐",
+  "cases": [
+    {
+      "name": "【比赛】北京·套餐推荐（接口查询）",
+      "payload": {
+        "callId": "bj-demo-20260804-01",
+        "intent": "套餐推荐",
+        "phone": "13910010001",
+        "topN": 3,
+        "province": "beijing",
+        "extra_data": {
+          "currentMainOffer": {
+            "curOfferName": "128元5G畅享套餐",
+            "curOfferId": "111601000461",
+            "curOfferFee": "128"
+          }
+        },
+        "extra_info": {},
+        "extra_context": {
+          "stage": "",
+          "scence": ""
+        }
+      }
+    }
+  ]
+}

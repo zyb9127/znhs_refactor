@@ -136,27 +136,35 @@
               <input type="checkbox" :checked="form.linked_apis.includes(api.api_name)"
                 @change="toggleApi(api.api_name, $event.target.checked)" />
               <span class="api-name">{{ api.api_name }}</span>
+              <!-- 取数模式：决定下方占位符的口径（透传=入参字段名，映射/查询=标准域变量）-->
+              <el-tag size="small" :type="apiModeTagType(api)" effect="plain"
+                style="margin-left:6px;" :title="apiModeHint(api)">{{ apiModeLabel(api) }}</el-tag>
               <el-tag v-if="!api.enabled" size="small" type="info" style="margin-left:6px;">已禁用</el-tag>
               <el-tag v-if="api.mock_mode" size="small" type="warning" style="margin-left:4px;">模拟数据</el-tag>
             </div>
             <div v-if="api.description" class="api-desc">{{ api.description }}</div>
             <div class="api-slots">
               <span class="api-slots-label">提供变量：</span>
-              <template v-if="api.produced_slots.length || (api.passthrough && api.passthrough_fields && api.passthrough_fields.length)">
+              <!-- 直传透传模式：只列顶层大字段（模板里用 {字段名} 引用；子字段在②模板内容上方调色板展开选）-->
+              <template v-if="api.passthrough">
+                <template v-if="api.passthrough_fields && api.passthrough_fields.length">
+                  <el-tag v-for="f in api.passthrough_fields" :key="'pt-'+f"
+                    size="small" type="success" effect="plain" class="slot-tag"
+                    :title="'直传大字段：{' + f + '}（子字段可在②模板内容上方调色板展开选）'">
+                    {{ f }}
+                  </el-tag>
+                </template>
+                <span v-else class="api-slots-empty">透传全部顶层入参字段</span>
+              </template>
+              <!-- 映射 / 接口查询模式：列映射产出的标准域 -->
+              <template v-else>
                 <el-tag v-for="s in api.produced_slots" :key="s" size="small"
                   :type="isSlotLinked(s) ? 'success' : ''"
                   class="slot-tag" :title="SLOT_LABEL[s] || s">
                   {{ SLOT_LABEL[s] || s }}
                 </el-tag>
-                <!-- 透传模式：直接暴露的入参字段（非 7 域映射，作为可引用变量）-->
-                <el-tag v-for="f in (api.passthrough ? api.passthrough_fields : [])" :key="'pt-'+f"
-                  size="small" type="success" effect="plain" class="slot-tag" :title="'透传入参字段：' + f">
-                  {{ f }}
-                </el-tag>
+                <span v-if="!api.produced_slots.length" class="api-slots-empty">未配置映射规则</span>
               </template>
-              <!-- 透传模式但未显式选字段：透传全部顶层入参字段 -->
-              <span v-else-if="api.passthrough" class="api-slots-empty">透传全部顶层入参字段</span>
-              <span v-else class="api-slots-empty">未配置映射规则</span>
             </div>
           </label>
         </div>
@@ -190,7 +198,11 @@
                   <span class="chip-caret" title="展开选择子字段（更精准匹配槽位）" @click.stop>▾</span>
                 </template>
                 <div class="subfield-panel">
-                  <div class="subfield-head">
+                  <div v-if="v.kind === 'passthrough' || v.kind === 'product'" class="subfield-head">
+                    「{{ v.label }}」下一级字段（点击/拖入即插入占位符）<br/>
+                    <span class="subfield-head-note">直传大变量<b>无需映射</b>，子字段即入参原字段名；多产品入参时每条话术各取自己那条产品的值</span>
+                  </div>
+                  <div v-else class="subfield-head">
                     「{{ v.label }}」子字段（点击/拖入 = 精准占位符 {{ '{域[子键]}' }}）<br/>
                     <span class="subfield-head-note">字段名与样例值均为<b>映射转换后</b>（重命名/单位换算完成）的最终参数，运行时按同名动态取真实值</span>
                   </div>
@@ -595,6 +607,11 @@ const _loadedVarKey = ref('')
 const generatedVarList = computed(() =>
   dynamicVarList.value.filter(v => v.source === 'script_step' && v.available !== false))
 
+// 推荐产品字段（source=recommended_product）：多产品入参时产品字段只在数组元素里，
+// 需单独暴露才能拖入模板（{offerName}/{recommend_actual_price} 等），运行时逐条取当前产品值。
+const productVars = computed(() =>
+  dynamicVarList.value.filter(v => v.source === 'recommended_product'))
+
 async function loadContextVars(province, intent) {
   const key = `${province}:${intent}`
   if (!province || !intent || _loadedVarKey.value === key) return
@@ -651,6 +668,26 @@ const SLOT_TO_VAR = {
   recommended_packages: { key: 'pkg_brief',       label: '推荐产品信息' },
 }
 
+// ── 取数模式标识：占位符口径随模式不同，需在卡片上显式标出 ──────────
+//   直传透传：入参字段/字典名直接作为占位符（{portrait_style}、{recommended_packages}）
+//   直传映射：入参按 7 标准域映射后引用（{current_package}、{pkg_brief}）
+//   接口查询：调外部接口取数后映射到标准域
+function apiMode(api) {
+  if (api?.source_type !== 'direct') return 'api'
+  return api?.passthrough ? 'passthrough' : 'mapping'
+}
+const API_MODE_META = {
+  passthrough: { label: '直传透传模式', type: 'success',
+    hint: '入参字段直接作为话术占位符，用透传的字段/字典名引用（不经 7 标准域映射）' },
+  mapping: { label: '直传映射模式', type: 'primary',
+    hint: '入参按 7 大标准域映射后引用（{current_package} / {pkg_brief} 等）' },
+  api: { label: '接口查询模式', type: 'info',
+    hint: '调用外部接口取数，再按 7 大标准域映射后引用' },
+}
+function apiModeLabel(api) { return API_MODE_META[apiMode(api)].label }
+function apiModeTagType(api) { return API_MODE_META[apiMode(api)].type }
+function apiModeHint(api) { return API_MODE_META[apiMode(api)].hint }
+
 // 当前生效的接口集合（与运行口径一致）：勾选了接口 → 勾选集合；未勾选 → 全部启用接口
 const activeApiNames = computed(() => {
   const useAll = form.linked_apis.length === 0
@@ -669,6 +706,10 @@ const mappedDomainVars = computed(() => {
   for (const api of props.availableApis) {
     const active = useAll ? api.enabled !== false : form.linked_apis.includes(api.api_name)
     if (!active) continue
+    // 透传模式的节点不走「映射固定域」口径：它产出的同名域由后端以 source=passthrough
+    // 发射，占位符直接是透传的字段/字典名（{current_package} / {recommended_packages}），
+    // 不该再被翻译成 {pkg_brief} 这类映射域变量——两种口径混排会让运营选错占位符。
+    if (apiMode(api) === 'passthrough') continue
     for (const s of (api.produced_slots || [])) {
       if (!slotApis.has(s)) slotApis.set(s, [])
       const arr = slotApis.get(s)
@@ -737,17 +778,32 @@ const insertableVars = computed(() => {
       list.push({ key: g.key, label: g.label, apis: [], kind: 'generated', subfields: sub[g.key] || [] })
     }
   }
+  for (const p of productVars.value) {
+    if (!seen.has(p.key)) {
+      seen.add(p.key)
+      // 推荐产品字段已收敛为单个分组，展开选具体字段（裸占位符 {字段名}）；
+      // 兼容后端旧响应（无 subfields、每个字段一条）时退回平铺。
+      list.push({
+        key: p.key, label: p.label || p.key, apis: [], kind: 'product',
+        subfields: Array.isArray(p.subfields) ? p.subfields : (sub[p.key] || []),
+      })
+    }
+  }
   return list
 })
 
 // 调色板 chip 的来源角标 / 悬浮提示
 function chipSrcTag(v) {
   if (v.kind === 'generated') return '计算生成'
+  if (v.kind === 'product') return '推荐产品'
   if (v.kind === 'passthrough') return v.apis[0] ? `直传·${v.apis[0]}` : '直传字段'
   return v.apis[0] ? `接口·${v.apis[0]}` : ''
 }
 function chipTitle(v) {
   const base = `点击或拖入模板：{${v.key}}`
+  if (v.kind === 'product') {
+    return `${base}\n来源：推荐产品字段（入参为多个产品时，每条话术各取自己那条产品的值）`
+  }
   if (v.kind === 'generated') return `${base}\n来源：话术生成步骤实时计算，不依赖接口`
   if (!v.apis.length) return base
   const kindTxt = v.kind === 'passthrough' ? '直传接口（透传入参）' : '接口出参映射'
@@ -1335,6 +1391,9 @@ function handleSave() {
 .chip-generated { border-color: #ffd8a8; color: #d9480f; }
 .chip-generated:hover { background: #fff4e6; border-color: #e8590c; }
 .chip-generated .chip-src { background: #fff0e0; color: #d9480f; }
+.chip-product { border-color: #d0bfff; color: #6741d9; }
+.chip-product:hover { background: #f3f0ff; border-color: #7048e8; }
+.chip-product .chip-src { background: #f3f0ff; color: #6741d9; }
 .dragvar-empty { font-size: 12px; color: #adb5bd; }
 /* 子字段展开箭头 ▾：点击弹出该域下一级子字段列表，精准插入 {域[子键]} */
 .chip-caret {

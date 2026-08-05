@@ -1,0 +1,21 @@
+{
+  "name": "shandong-package-recommend",
+  "description": "山东套餐智能推荐 Skill",
+  "version": "1.0.0",
+  "type": "scenario",
+  "province": "shandong",
+  "scenario_id": "套餐推荐",
+  "entry_script": "scripts/main_flow.py",
+  "config_files": [
+    "api_nodes.json",
+    "biz_config.json"
+  ],
+  "required_plugins": [
+    "plugins.package_diff",
+    "plugins.unit_converter"
+  ],
+  "author": "shandong-team",
+  "openclaw_compatible": true,
+  "status": "offline",
+  "offline_at": "2026-08-04 09:19"
+}

@@ -36,7 +36,7 @@ from services.api_client import api_client
 from services.cache_service import cache_service
 from utils.field_naming import match_config_keys
 from utils.observability import record_stage
-from utils.placeholder import FIXED_PARAM_MAP
+from utils.placeholder import FIXED_PARAM_MAP, dig_subfield
 
 
 # 标准 resource_context 节点白名单（6大核心域 + 1扩展域）
@@ -160,6 +160,10 @@ class DataStep:
             # 直传透传字段（运行时通道）
             if cached_data.get("passthrough"):
                 ctx.passthrough_context.update(cached_data["passthrough"])
+            # 产品字段白名单（运行时通道）：运营精确勾选了 recommended_packages.<字段> 时生效
+            for _pf in (cached_data.get("product_field_allow") or []):
+                if _pf not in ctx.product_field_allow:
+                    ctx.product_field_allow.append(_pf)
             # 接口调用轨迹（测试页展示入参/出参；含缓存命中回放）
             traces = cached_data.get("api_call_traces") or []
             if traces:
@@ -235,6 +239,7 @@ class DataStep:
         }
         raw_responses: Dict[str, Any] = {}
         passthrough: Dict[str, Any] = {}
+        product_field_allow: List[str] = []
         api_call_traces: List[Dict[str, Any]] = []
 
         for (api_name, node_cfg), result in zip(enabled_nodes.items(), results):
@@ -275,6 +280,9 @@ class DataStep:
             merged = self._deep_merge(merged, node_res)
             if result.get("passthrough"):
                 passthrough.update(result["passthrough"])
+            for _pf in (result.get("product_field_allow") or []):
+                if _pf not in product_field_allow:
+                    product_field_allow.append(_pf)
 
         # candidate_products 兼容性
         if not merged.get("recommended_packages") and merged.get("candidate_products"):
@@ -291,6 +299,7 @@ class DataStep:
             "resources": merged,
             "raw_responses": raw_responses,
             "passthrough": passthrough,
+            "product_field_allow": product_field_allow,
             "api_call_traces": api_call_traces,
         }
 
@@ -435,20 +444,43 @@ class DataStep:
                 }
                 # 选定要暴露的透传字段：配置了 passthrough_fields 用之，否则全部顶层字段；
                 # 排除标准域（走 resources 通道）与下划线开头的内部键、空值。
+                # 支持「子路径」写法（如 portrait_style.communication_style）：只暴露该子字段，
+                # 按叶子名注入，供话术模板用 {communication_style} 直接引用。
                 sel = api_cfg.get("passthrough_fields") or list(raw.keys())
-                passthrough = {
-                    k: raw[k] for k in sel
-                    if isinstance(k, str) and not k.startswith("_")
-                    and k in raw and k not in _NODE_TO_CTX_FIELD
-                    and raw[k] not in (None, "", [], {})
-                }
+                explicit_sel = bool(api_cfg.get("passthrough_fields"))
+                passthrough: Dict[str, Any] = {}
+                # 列表域下的子路径（recommended_packages.<字段>）是「逐条产品各取自己那份」的
+                # 字段，无法收敛成单个透传值，故作为产品字段白名单交给 build_prompt 逐条注入。
+                product_allow: List[str] = []
+                for k in sel:
+                    if not isinstance(k, str) or not k or k.startswith("_"):
+                        continue
+                    if "." in k:
+                        root, _, _rest = k.partition(".")
+                        if isinstance(raw.get(root), list):
+                            leaf = k.rsplit(".", 1)[-1]
+                            if leaf and leaf not in product_allow:
+                                product_allow.append(leaf)
+                            continue
+                        leaf, val = dig_subfield(raw, k)
+                        if (leaf and leaf not in _NODE_TO_CTX_FIELD
+                                and val not in (None, "", [], {})):
+                            passthrough.setdefault(leaf, val)
+                        continue
+                    if (k in raw and k not in _NODE_TO_CTX_FIELD
+                            and raw[k] not in (None, "", [], {})):
+                        passthrough[k] = raw[k]
                 # 嵌套画像对象（portrait_style）展开一层：把 communication_style /
                 # business_conte 等标量子字段提升为独立透传字段，由 build_prompt 逐条注入
-                # 【上下文数据】（带 {字段名} 锚点），供“话术要求”按名个性化引用；
-                # 同时移除父级 JSON blob，避免同一信息重复出现。
+                # 【上下文数据】（带 {字段名} 锚点），供“话术要求”按名个性化引用。
+                # 保留父级 portrait_style（不再 pop）：调色板把它作为「直传大变量」占位符
+                # {portrait_style} 暴露，运营勾选/拖入后必须在上下文里可读地体现（见
+                # build_prompt._fmt_passthrough_value 的 dict 可读化），否则占位符落空。
+                # 运营已按子路径精确勾选时不再整块展开，尊重其选择。
                 nested_style = raw.get("portrait_style")
-                if isinstance(nested_style, dict):
-                    passthrough.pop("portrait_style", None)
+                if isinstance(nested_style, dict) and (
+                    not explicit_sel or "portrait_style" in sel
+                ):
                     for ck, cv in nested_style.items():
                         if (isinstance(ck, str) and not ck.startswith("_")
                                 and cv not in (None, "", [], {})
@@ -457,9 +489,11 @@ class DataStep:
                 logger.info(
                     f"[DataStep] 直传节点 {api_name} 透传模式：同名域={list(resources.keys())}，"
                     f"透传字段={list(passthrough.keys())}"
+                    + (f"，产品字段白名单={product_allow}" if product_allow else "")
                 )
                 return {
                     "raw": raw, "resources": resources, "passthrough": passthrough,
+                    "product_field_allow": product_allow,
                     "trace": self._make_trace(
                         api_name, api_cfg, request={"extra_info": raw},
                         response=raw, elapsed_ms=(time.perf_counter() - t0) * 1000,
@@ -1016,17 +1050,15 @@ class DataStep:
     ) -> str:
         """生成缓存 key
 
-        加入各接口 URL 的哈希，确保 api_nodes 配置更新后缓存自动失效。
+        纳入**整份接口节点配置**的哈希（而非仅 URL）：保存 api_nodes 后配置立即生效。
+        只按 URL 做 key 时，改 response_extract / field_transform / passthrough_fields
+        这类只影响映射结果、不改 URL 的配置，缓存不会失效——TTL 窗口内测试页仍返回
+        改配置前的映射结果，表现为「保存了但没生效」。节点配置在两次保存之间是稳定的，
+        纳入哈希不降低命中率。
         extra_data 同样参与请求参数构造（占位符展开），必须纳入 key，
         否则不同用户的 extra_data 不同但 extra_vars 相同时会命中同一缓存。
         extra_info 是直传（source_type=direct）节点的映射数据源，同样必须纳入 key。
         """
-        api_urls = sorted(
-            cfg.get("url", "mock" if cfg.get("mock_mode") else "")
-            if cfg.get("source_type") != "direct" else f"direct:{name}"
-            for name, cfg in enabled_nodes.items()
-            if isinstance(cfg, dict)
-        )
         payload = {
             "province":   self.province,
             "phone":      ctx.phone,
@@ -1034,7 +1066,7 @@ class DataStep:
             "extra_data": ctx.extra_data,
             "extra_info": ctx.extra_info,
             "extra_vars": ctx.extra_vars,
-            "api_urls":   api_urls,
+            "api_nodes":  enabled_nodes,
         }
         h = hashlib.md5(
             json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode()

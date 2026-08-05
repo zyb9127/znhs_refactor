@@ -47,6 +47,12 @@ class FlowContext:
     由 build_prompt 逐字段注入【上下文数据】（带 {字段名} 锚点），供话术模板槽位填充。
     """
 
+    product_field_allow: List[str] = field(default_factory=list)
+    """推荐产品字段白名单（运行时通道，不进 ES）：透传节点在 passthrough_fields 里按
+    ``recommended_packages.<字段>`` 精确勾选产品字段时收集于此。非空时 build_prompt 的
+    多产品逐字段注入只注入这些字段；为空 = 注入全部非空产品字段（原行为）。
+    """
+
     batch_contexts: List[Dict[str, Any]] = field(default_factory=list)
     """话术生成上下文列表，支持单条或多条，非空时进入批量模式（统一入口）。
     每项可含（均可为空）：product_id（产品ID）、stage（环节）、scence（场景）、expand（布尔，枚举模式）。
@@ -126,7 +132,12 @@ class FlowContext:
 
     # ─── 元数据 ──────────────────────────────────────────────────
     errors: List[str] = field(default_factory=list)
+
     metadata: Dict[str, Any] = field(default_factory=dict)
+    """流程运行元数据，随响应 metadata 段一并返回（耗时/条数由 to_response 补齐）。
+    管道组件在此登记自己的运行痕迹，如 output_guard 的 guard_flags。
+    """
+
     _start_time: float = field(default_factory=time.perf_counter, repr=False)
 
     # ─── 便捷属性 ────────────────────────────────────────────────

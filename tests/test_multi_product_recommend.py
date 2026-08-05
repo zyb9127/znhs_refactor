@@ -14,6 +14,7 @@ extra_info.recommended_packages 数组，服务端对 TopN 个产品逐产品各
 5. 多产品确实并发（同时在途 > 1），且并发上限按待生成条数自适应
 6. 路由层顶层直传折叠 _fold_top_level_extra_info
 7. 宽松兜底档 select_template_loose（下游漏传 stage 时仍能命中模板）
+8. 直传模式 topN 不截断（传 N 个产品出 N 条），接口查询模式 topN 语义不变
 
 运行：cd ROOT && python -m pytest tests/test_multi_product_recommend.py -q
 约束：不调真实网络/ES/Redis/LLM（LLM 以内存桩替换）。
@@ -27,6 +28,7 @@ from typing import Any, Dict, List
 from core.context import FlowContext
 from engine.template_selector import select_template, select_template_loose
 from routers.realtime import _build_success_payload, _fold_top_level_extra_info
+from steps.recommend_step import RecommendStep
 from steps.script_step import ScriptStep
 
 INTENT = "营销活动"
@@ -177,7 +179,7 @@ class TestMultiProductExpansion(unittest.TestCase):
         self.assertGreater(llm.peak_in_flight, 1, "多产品话术必须并发生成")
 
     def test_estimate_batch_tasks(self) -> None:
-        """待生成条数估算（供诊断；并发上限本身读 concurrency.json）。"""
+        """待生成条数估算：需与 run_batch 的真实展开规则一致（用于并发定容）。"""
         step = ScriptStep()
         ctx = _make_ctx(final_recommendations=[{"offerId": f"O{i}"} for i in range(10)])
 
@@ -185,13 +187,17 @@ class TestMultiProductExpansion(unittest.TestCase):
         self.assertEqual(
             step._estimate_batch_tasks([{"product_id": ""}], ctx), 10
         )
-        # 指定 product_id → 仅 1 条
+        # 指定 product_id 同样全展开：它只作模板业务类型 hint，不过滤产品
         self.assertEqual(
-            step._estimate_batch_tasks([{"product_id": "O1"}], ctx), 1
+            step._estimate_batch_tasks([{"product_id": "O1"}], ctx), 10
         )
-        # 多条目累加
+        # 多条目累加：每个 batch 条目各展开全部产品
         self.assertEqual(
-            step._estimate_batch_tasks([{"product_id": "O1"}, {"product_id": ""}], ctx), 11
+            step._estimate_batch_tasks([{"product_id": "O1"}, {"product_id": ""}], ctx), 20
+        )
+        # 无推荐产品（旧单产品写法）→ 每个条目算 1 条
+        self.assertEqual(
+            step._estimate_batch_tasks([{"product_id": "O1"}], _make_ctx()), 1
         )
 
     def test_default_concurrency_from_config_file_is_8(self) -> None:
@@ -291,7 +297,7 @@ class TestBatchContextTemplateMatch(unittest.TestCase):
         for s in scripts:
             self.assertEqual(s["stage"], "个人市场")
             self.assertEqual(s["scence"], "开口话术")
-            # 业务类型 hint 应进入模板匹配候选（优先于 offerId）
+            # 业务类型 hint 只作模板匹配兜底候选，回显仍是产品自身 offerId
             self.assertEqual(s["_llm_prompt"].get("product_id"), s["product_id"])
 
     def test_offer_id_as_business_type_still_expands_all(self) -> None:
@@ -322,6 +328,94 @@ class TestBatchContextTemplateMatch(unittest.TestCase):
         self.assertEqual(hit["offerId"], _PKG_B["offerId"])
         stub = step._find_pkg_for_batch_pid("不存在的产品X", rec, pkgs)
         self.assertEqual(stub, {"product_id": "不存在的产品X"})
+
+
+class TestLegacyGuangdongSingleProductCompat(unittest.TestCase):
+    """广东旧版单产品（接口规范 5.5）：无 recommended_packages 数组、无 offerName。
+
+    旧写法用 extra_info.final_recommendations 单对象 + batch_contexts.product_id。
+    该形态不会落到 ctx.recommended_packages，走「占位产品」分支，因此
+    「产品自身字段优先」的候选调整与「直传不限并发」都不改变其行为。
+    """
+
+    _LEGACY_EXTRA_INFO = {
+        "current_package": {
+            "package_name": "139元全家享套餐（2022）",
+            "actual_price": "139元",
+        },
+        # 旧版单对象写法：既不是数组，也没有 offerName / offerId
+        "final_recommendations": {
+            "recommend_package_name": "流量升级包",
+            "recommend_actual_price": "19",
+            "recommend_base_flow": "30",
+        },
+        "diff": {"diff_actual_price": "-40"},
+    }
+
+    def _run_legacy(self) -> List[Dict[str, Any]]:
+        ctx = _make_ctx(
+            top_n=1,
+            final_recommendations=[],
+            extra_info=self._LEGACY_EXTRA_INFO,
+            batch_contexts=[
+                {"product_id": "流量升级包", "stage": "个人市场", "scence": "开口话术"}
+            ],
+        )
+        return _run_batch(ctx, _BIZ, _FakeLLM())
+
+    def test_still_generates_exactly_one_script(self) -> None:
+        scripts = self._run_legacy()
+        self.assertEqual(len(scripts), 1)
+        self.assertEqual(scripts[0]["product_id"], "流量升级包")
+        self.assertEqual(scripts[0]["rank"], 1)
+        self.assertTrue(scripts[0]["marketing_text"])
+
+    def test_placeholder_product_candidates_unchanged(self) -> None:
+        """占位产品只有 product_id 一个键 → 候选序列仍只有 batch 传入值，与改动前一致。"""
+        step = ScriptStep()
+        step._load_biz(_BIZ)
+        self.assertEqual(
+            step._match_product_id_candidates({"product_id": "流量升级包"}),
+            ["流量升级包"],
+        )
+
+    def test_matches_keyword_template_by_batch_product_id(self) -> None:
+        """无产品自身字段可用时，batch_contexts.product_id 仍能命中关键词模板。"""
+        scripts = self._run_legacy()
+        self.assertIn("流量 的话术正文", scripts[0]["_llm_prompt"]["template"])
+
+    def test_no_recommended_packages_keeps_global_concurrency(self) -> None:
+        """extra_info 无 recommended_packages → 不判定为直传模式，并发不放开。"""
+        step = ScriptStep()
+        step._load_biz(_BIZ)
+        ctx = _make_ctx(extra_info=self._LEGACY_EXTRA_INFO)
+        self.assertFalse(step._is_direct_mode(ctx))
+
+    def test_topn_truncation_untouched_for_legacy_shape(self) -> None:
+        """旧写法不带数组 → RecommendStep 不进入「直传不截断」分支。"""
+        self.assertEqual(
+            RecommendStep._caller_supplied_count(
+                _make_ctx(extra_info=self._LEGACY_EXTRA_INFO)
+            ),
+            0,
+        )
+
+    def test_single_element_array_without_offer_name(self) -> None:
+        """过渡写法：1 个元素的数组、无 offerName，靠 recommend_package_name 命中模板。"""
+        pkg = {"recommend_package_name": "流量升级包", "recommend_actual_price": "19", "rank": 1}
+        ctx = _make_ctx(
+            top_n=1,
+            final_recommendations=[pkg],
+            extra_info={"recommended_packages": [pkg]},
+            batch_contexts=[
+                {"product_id": "流量升级包", "stage": "个人市场", "scence": "开口话术"}
+            ],
+        )
+        scripts = _run_batch(ctx, _BIZ, _FakeLLM())
+        self.assertEqual(len(scripts), 1)
+        self.assertIn("流量 的话术正文", scripts[0]["_llm_prompt"]["template"])
+        # 无 offerId 可回显时保持空串，不得用产品名顶替
+        self.assertEqual(scripts[0]["offerId"], "")
 
 
 class TestSingleProductUnchanged(unittest.TestCase):
@@ -424,6 +518,186 @@ class TestTopLevelExtraInfoFolding(unittest.TestCase):
         body = {"phone": "139", "intent": INTENT}
         self.assertEqual(_fold_top_level_extra_info(body), [])
         self.assertNotIn("extra_info", body)
+
+
+class TestDirectModeUnlimitedConcurrency(unittest.TestCase):
+    """直传模式不限并发：待生成条数即并发数，不再按全局上限 8 分批排队。"""
+
+    @staticmethod
+    def _pkgs(n: int) -> List[Dict[str, Any]]:
+        return [
+            {"offerId": f"OID{i:02d}", "offerName": f"【广州】升{99 + i}套餐", "rank": i}
+            for i in range(1, n + 1)
+        ]
+
+    def test_direct_mode_runs_all_products_in_one_wave(self) -> None:
+        pkgs = self._pkgs(18)
+        ctx = _make_ctx(
+            final_recommendations=pkgs,
+            extra_info={"recommended_packages": pkgs},
+            batch_contexts=[{"product_id": "", "stage": "个人市场", "scence": "开口话术"}],
+        )
+        llm = _FakeLLM(delay=0.05)
+        scripts = _run_batch(ctx, _BIZ, llm)
+
+        self.assertEqual(len(scripts), 18)
+        self.assertEqual(llm.calls, 18)
+        self.assertEqual(llm.peak_in_flight, 18, "直传 18 个产品应 18 路一次并发，不分批")
+
+    def test_api_mode_still_capped_by_global_limit(self) -> None:
+        """产品来自推荐接口（extra_info 无 recommended_packages）→ 仍受 concurrency.json 限流。"""
+        ctx = _make_ctx(
+            final_recommendations=self._pkgs(18),
+            batch_contexts=[{"product_id": "", "stage": "个人市场", "scence": "开口话术"}],
+        )
+        llm = _FakeLLM(delay=0.05)
+        self.assertEqual(len(_run_batch(ctx, _BIZ, llm)), 18)
+        self.assertLessEqual(llm.peak_in_flight, 8, "接口查询模式并发上限不变")
+
+    def test_explicit_biz_config_cap_wins_over_direct_mode(self) -> None:
+        """运维显式配了 llm_max_concurrency → 直传模式也必须尊重该上限。"""
+        pkgs = self._pkgs(18)
+        ctx = _make_ctx(
+            final_recommendations=pkgs,
+            extra_info={"recommended_packages": pkgs},
+            batch_contexts=[{"product_id": "", "stage": "个人市场", "scence": "开口话术"}],
+        )
+        biz = {**_BIZ, "strategy": {"llm_max_concurrency": 4}}
+        llm = _FakeLLM(delay=0.05)
+        self.assertEqual(len(_run_batch(ctx, biz, llm)), 18)
+        self.assertLessEqual(llm.peak_in_flight, 4)
+
+    def test_batch_product_id_does_not_shrink_concurrency(self) -> None:
+        """batch_contexts.product_id 非空时仍全展开，并发定容不得按 1 条估算。"""
+        pkgs = self._pkgs(18)
+        ctx = _make_ctx(
+            final_recommendations=pkgs,
+            extra_info={"recommended_packages": pkgs},
+            batch_contexts=[{"product_id": "流量", "stage": "个人市场", "scence": "开口话术"}],
+        )
+        llm = _FakeLLM(delay=0.05)
+        self.assertEqual(len(_run_batch(ctx, _BIZ, llm)), 18)
+        self.assertEqual(llm.peak_in_flight, 18)
+
+
+class TestPerProductTemplateMatch(unittest.TestCase):
+    """逐产品按自身字段匹配模板，batch_contexts.product_id 仅兜底。
+
+    背景：广东按产品名关键词配模板（product_id="流量"/"套餐"/"升"）。此前 batch hint
+    优先，导致一个 batch 条目里 18 个不同产品全部命中 hint 那一个模板。
+    """
+
+    _PKGS = [
+        {"offerId": "OID1", "offerName": "【东莞】裸升99元套餐-2607", "rank": 1},
+        {"offerId": "OID2", "offerName": "【流量】20GB畅享包", "rank": 2},
+        {"offerId": "OID3", "offerName": "【全家享】升级138元套餐", "rank": 3},
+    ]
+
+    def _matched_pids(self, batch_pid: str, biz: Dict[str, Any] = None) -> List[str]:
+        step = ScriptStep()
+        step._load_biz(biz or _BIZ)
+        out: List[str] = []
+        for pkg in self._PKGS:
+            p = ScriptStep._attach_batch_pid_hint(pkg, batch_pid)
+            hit = None
+            for cand in step._match_product_id_candidates(p):
+                hit = select_template(_KEYWORD_TEMPLATES, INTENT, cand,
+                                      stage="个人市场", scene="开口话术")
+                if hit:
+                    break
+            out.append(hit.get("product_id") if hit else "未命中")
+        return out
+
+    def test_each_product_matches_own_template_despite_batch_hint(self) -> None:
+        """batch product_id="流量" 不再把套餐类产品也拉到流量模板。"""
+        self.assertEqual(self._matched_pids("流量"), ["套餐", "流量", "套餐"])
+
+    def test_same_result_without_batch_hint(self) -> None:
+        """带不带 hint，逐产品匹配结果一致（hint 不再干扰产品自身匹配）。"""
+        self.assertEqual(self._matched_pids(""), self._matched_pids("流量"))
+
+    def test_batch_hint_is_last_candidate(self) -> None:
+        step = ScriptStep()
+        step._load_biz(_BIZ)
+        pkg = ScriptStep._attach_batch_pid_hint(_PKG_A, "流量")
+        cands = step._match_product_id_candidates(pkg)
+        self.assertEqual(cands[0], _PKG_A["offerId"], "产品自身标识仍是首选")
+        self.assertEqual(cands[-1], "流量", "batch hint 降为最后兜底")
+
+    def test_prefer_batch_product_id_restores_old_order(self) -> None:
+        """配了 prefer_batch_product_id=true 的省份可恢复 hint 优先的旧行为。"""
+        biz = {**_BIZ, "template_match": {"prefer_batch_product_id": True}}
+        step = ScriptStep()
+        step._load_biz(biz)
+        cands = step._match_product_id_candidates(
+            ScriptStep._attach_batch_pid_hint(_PKG_A, "流量")
+        )
+        self.assertEqual(cands[0], "流量")
+        self.assertEqual(self._matched_pids("流量", biz), ["流量", "流量", "流量"])
+
+    def test_single_product_without_list_still_uses_batch_product_id(self) -> None:
+        """无推荐列表的旧单产品写法：仍按 batch_contexts.product_id 匹配，行为不变。"""
+        ctx = _make_ctx(
+            final_recommendations=[],
+            batch_contexts=[{"product_id": "流量", "stage": "个人市场", "scence": "开口话术"}],
+        )
+        scripts = _run_batch(ctx, _BIZ, _FakeLLM())
+        self.assertEqual(len(scripts), 1)
+        self.assertEqual(scripts[0]["product_id"], "流量")
+        self.assertIn("流量 的话术正文", scripts[0]["_llm_prompt"]["template"])
+
+    def test_configurable_match_field_wins(self) -> None:
+        """template_match.product_id_from 指定产品自身字段（前端可配）→ 首选该字段取值。"""
+        step = ScriptStep()
+        step._load_biz({**_BIZ, "template_match": {"product_id_from": "offerName"}})
+        cands = step._match_product_id_candidates(_PKG_A)
+        self.assertEqual(cands[0], _PKG_A["offerName"])
+
+
+class TestDirectModeIgnoresTopN(unittest.TestCase):
+    """直传模式 topN 不截断：调用方传 N 个产品就出 N 条话术。
+
+    背景：广东直传 18 个产品、topN=8 时只回了 8 条话术。topN 的语义是「从推荐接口
+    的大候选池里取前 N 个」，直传模式下候选已由上游挑定，再按 topN 截断会静默少出。
+    """
+
+    @staticmethod
+    def _run_recommend(packages: List[Dict[str, Any]], top_n: int, direct: bool) -> List[Dict[str, Any]]:
+        extra_info = {"recommended_packages": packages} if direct else {}
+        ctx = _make_ctx(
+            top_n=top_n,
+            recommended_packages=packages,
+            extra_info=extra_info,
+        )
+        asyncio.run(RecommendStep(ctx.province).run(ctx, strategy="direct"))
+        return ctx.final_recommendations
+
+    @staticmethod
+    def _pkgs(n: int) -> List[Dict[str, Any]]:
+        return [
+            {"offerId": f"OID{i:02d}", "offerName": f"【广州】升{99 + i}套餐", "rank": i}
+            for i in range(1, n + 1)
+        ]
+
+    def test_direct_mode_returns_all_products_regardless_of_topn(self) -> None:
+        pkgs = self._pkgs(18)
+        for top_n in (1, 3, 8, 18, 50):
+            with self.subTest(top_n=top_n):
+                out = self._run_recommend(pkgs, top_n=top_n, direct=True)
+                self.assertEqual(len(out), 18, f"直传 18 个产品在 topN={top_n} 下应全量返回")
+                self.assertEqual([p["offerId"] for p in out], [p["offerId"] for p in pkgs])
+
+    def test_api_mode_still_truncates_by_topn(self) -> None:
+        """产品来自推荐接口（extra_info 无 recommended_packages）时 topN 语义不变。"""
+        out = self._run_recommend(self._pkgs(18), top_n=8, direct=False)
+        self.assertEqual(len(out), 8)
+        self.assertEqual([p["offerId"] for p in out], [f"OID{i:02d}" for i in range(1, 9)])
+
+    def test_direct_mode_preserves_rank_order(self) -> None:
+        """不截断但仍按 rank 升序，乱序入参也要按 rank 排好。"""
+        pkgs = list(reversed(self._pkgs(5)))
+        out = self._run_recommend(pkgs, top_n=2, direct=True)
+        self.assertEqual([p["rank"] for p in out], [1, 2, 3, 4, 5])
 
 
 class TestLooseFallbackMatching(unittest.TestCase):

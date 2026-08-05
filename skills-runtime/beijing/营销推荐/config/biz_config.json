@@ -1067,13 +1067,18 @@
       "prompt_template": "",
       "linked_vars": [
         "current_package",
-        "pkg_brief"
+        "usage",
+        "pkg_brief",
+        "diff_str",
+        "tags"
       ],
       "linked_apis": [],
       "status": "online",
       "created_by": "import",
       "created_at": "2026-06-03 23:47:51",
-      "template_id": "tpl_beijing_1780501671421_cff8f1"
+      "template_id": "tpl_beijing_1780501671421_cff8f1",
+      "script_requirement": "直接输出话术文本，不加任何前缀，口语化、亲切，像坐席自然交流。\n① 必须用【上下文数据】真实用量数字（近6月月均流量GB、通话分钟、月消费），说明为何推荐云宽带。\n② 只强调增加的流量、宽带、全家共享、副卡/IPTV等增量权益，绝不提通话分钟减少。\n③ 严禁出现「饱和度」「百分比」及字段名/占位符原文。\n④ 不得虚构优惠金额；全文控制在120字以内，可直接对客播报。",
+      "updated_by": "demo"
     },
     {
       "province": "beijing",
@@ -4689,12 +4694,20 @@
       "product_id": "111602052881",
       "template_content": "您是北京移动优质客户，给您推荐一款移动云宽带方案，办理后主套餐资源可以全家共享，流量、通话、宽带一步到位，还有副卡优惠，我简单跟您介绍一下。",
       "prompt_template": "",
-      "linked_vars": [],
+      "linked_vars": [
+        "current_package",
+        "usage",
+        "pkg_brief",
+        "diff_str",
+        "tags"
+      ],
       "linked_apis": [],
       "status": "online",
       "created_by": "import",
       "created_at": "2026-06-03 23:47:51",
-      "template_id": "tpl_beijing_1780501674719_9b22b1"
+      "template_id": "tpl_beijing_1780501674719_9b22b1",
+      "script_requirement": "直接输出话术文本，口语化；切入环节先点明优质客户身份与云宽带全家共享卖点，不报完整资费明细；80字以内。",
+      "updated_by": "demo"
     },
     {
       "province": "beijing",
@@ -10833,12 +10846,20 @@
       "product_id": "111602052881",
       "template_content": "您平时流量通话用得多，办云宽带最合适，合约期每月固定送流量和通话时长可以全家共享，还带宽带，一举多得，非常划算。",
       "prompt_template": "",
-      "linked_vars": [],
+      "linked_vars": [
+        "current_package",
+        "usage",
+        "pkg_brief",
+        "diff_str",
+        "tags"
+      ],
       "linked_apis": [],
       "status": "online",
       "created_by": "import",
       "created_at": "2026-06-03 23:47:51",
-      "template_id": "tpl_beijing_1780501690589_290fe7"
+      "template_id": "tpl_beijing_1780501690589_290fe7",
+      "script_requirement": "直接输出话术文本，不加任何前缀，口语化、亲切，像坐席自然交流。\n① 必须用【上下文数据】真实用量数字（近6月月均流量GB、通话分钟、月消费），说明为何推荐云宽带。\n② 只强调增加的流量、宽带、全家共享、副卡/IPTV等增量权益，绝不提通话分钟减少。\n③ 严禁出现「饱和度」「百分比」及字段名/占位符原文。\n④ 不得虚构优惠金额；全文控制在120字以内，可直接对客播报。",
+      "updated_by": "demo"
     },
     {
       "province": "beijing",
@@ -23121,12 +23142,20 @@
       "product_id": "111602052881",
       "template_content": "合约期内长期享优惠，流量通话宽带全都送，平均下来每月更省钱，全家用非常合适。",
       "prompt_template": "",
-      "linked_vars": [],
+      "linked_vars": [
+        "current_package",
+        "usage",
+        "pkg_brief",
+        "diff_str",
+        "tags"
+      ],
       "linked_apis": [],
       "status": "online",
       "created_by": "import",
       "created_at": "2026-06-03 23:47:51",
-      "template_id": "tpl_beijing_1780501764743_50971c"
+      "template_id": "tpl_beijing_1780501764743_50971c",
+      "script_requirement": "直接输出话术文本，口语化；应对不想办合约：强调合约期内更省、流量通话宽带打包；100字以内。",
+      "updated_by": "demo"
     },
     {
       "province": "beijing",

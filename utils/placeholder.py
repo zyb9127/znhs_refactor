@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple
 
 # ── 从 main_service_params.json 动态加载，保证单一数据源 ──────────
 _CFG_PATH = Path(__file__).parents[1] / "management" / "interface_mapper" / "config" / "main_service_params.json"
@@ -85,3 +85,20 @@ READABLE_TO_PLACEHOLDER: Dict[str, str] = {}
 for _ph, (_, _readable) in FIXED_PARAM_MAP.items():
     if _readable not in READABLE_TO_PLACEHOLDER:
         READABLE_TO_PLACEHOLDER[_readable] = _ph
+
+
+def dig_subfield(sample: Any, path: str) -> Tuple[str, Any]:
+    """按点路径取嵌套子字段，返回 ``(叶子名, 值)``；任一级取不到返回 ``("", None)``。
+
+    透传字段（passthrough_fields）支持 ``portrait_style.communication_style``
+    这类子路径写法：运行时按**叶子名**注入上下文，话术模板即用 ``{communication_style}``
+    引用。运行时（DataStep）、预览（preview_prompt）、配置期调色板（management）
+    共用此函数，保证三处口径一致。
+    """
+    cur: Any = sample
+    parts = [p for p in str(path or "").split(".") if p]
+    for p in parts:
+        if not isinstance(cur, dict) or p not in cur:
+            return "", None
+        cur = cur[p]
+    return (parts[-1] if parts else ""), cur

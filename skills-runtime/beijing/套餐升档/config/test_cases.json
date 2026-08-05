@@ -1,0 +1,27 @@
+{
+  "cases": [
+    {
+      "name": "【比赛】北京·套餐升档（接口查询）",
+      "payload": {
+        "callId": "bj-demo-20260804-02",
+        "intent": "套餐升档",
+        "phone": "13801080001",
+        "topN": 3,
+        "province": "beijing",
+        "extra_data": {
+          "currentMainOffer": {
+            "curOfferName": "128元5G畅享套餐",
+            "curOfferId": "111601000461",
+            "curOfferFee": "128"
+          }
+        },
+        "extra_info": {},
+        "extra_context": {
+          "stage": "",
+          "scence": ""
+        }
+      },
+      "updated_at": "2026-08-04 09:16:28"
+    }
+  ]
+}

@@ -1,0 +1,146 @@
+{
+  "province": "shandong",
+  "intent": "套餐推荐",
+  "cases": [
+    {
+      "name": "【比赛】山东·算式填槽·近期超套用户（单产品）",
+      "payload": {
+        "callId": "sd-demo-01",
+        "intent": "套餐推荐",
+        "phone": "13905310001",
+        "topN": 3,
+        "province": "shandong",
+        "extra_data": {},
+        "extra_info": {
+          "current_package": {
+            "package_name": "畅享套餐98元档",
+            "actual_price": "98",
+            "baseFlow": "20",
+            "voice_minutes": "300"
+          },
+          "uniProdGrade": "128",
+          "discountExpenses": "30",
+          "privEndMonth": "2026年12月",
+          "flow": "30",
+          "giftFlow": "10",
+          "tf": "20",
+          "shareFlow": "40",
+          "usage": {
+            "data_usage": {
+              "近6月平均流量(GB)": "26",
+              "近6月流量饱和度": "130%"
+            },
+            "voice_usage": {
+              "近6月平均主叫时长": "150"
+            },
+            "consumption": {
+              "近6月平均月消费": "115"
+            }
+          },
+          "tags": {
+            "近期超套客户": "是",
+            "副卡共享": "是",
+            "价格敏感型客户": "是"
+          },
+          "user_profile": {
+            "关注点": "流量够用与省钱",
+            "家庭属性": "有副卡共享需求"
+          },
+          "recommended_packages": [
+            {
+              "offerId": "20240902586449",
+              "offerName": "5G焕新128元档套餐",
+              "initFee": "128",
+              "offerFlow": "40",
+              "offerVoice": "300",
+              "offerDesc": "套餐焕新：档次不变，流量升级至40GB，权益多选1，副卡可共享",
+              "rank": 1
+            }
+          ]
+        },
+        "batch_contexts": [
+          {
+            "product_id": "20240902586449",
+            "stage": "营销推荐环节",
+            "scence": "推荐意图"
+          }
+        ]
+      }
+    },
+    {
+      "name": "【比赛】山东·一通电话全流程（切入→推荐→挽留）",
+      "payload": {
+        "callId": "sd-demo-02",
+        "intent": "套餐推荐",
+        "phone": "13905310001",
+        "topN": 3,
+        "province": "shandong",
+        "extra_data": {},
+        "extra_info": {
+          "current_package": {
+            "package_name": "畅享套餐98元档",
+            "actual_price": "98",
+            "baseFlow": "20",
+            "voice_minutes": "300"
+          },
+          "uniProdGrade": "128",
+          "discountExpenses": "30",
+          "privEndMonth": "2026年12月",
+          "flow": "30",
+          "giftFlow": "10",
+          "tf": "20",
+          "shareFlow": "40",
+          "usage": {
+            "data_usage": {
+              "近6月平均流量(GB)": "26",
+              "近6月流量饱和度": "130%"
+            },
+            "voice_usage": {
+              "近6月平均主叫时长": "150"
+            },
+            "consumption": {
+              "近6月平均月消费": "115"
+            }
+          },
+          "tags": {
+            "近期超套客户": "是",
+            "副卡共享": "是",
+            "价格敏感型客户": "是"
+          },
+          "user_profile": {
+            "关注点": "流量够用与省钱",
+            "家庭属性": "有副卡共享需求"
+          },
+          "recommended_packages": [
+            {
+              "offerId": "20240902586449",
+              "offerName": "5G焕新128元档套餐",
+              "initFee": "128",
+              "offerFlow": "40",
+              "offerVoice": "300",
+              "offerDesc": "套餐焕新：档次不变，流量升级至40GB，权益多选1，副卡可共享",
+              "rank": 1
+            }
+          ]
+        },
+        "batch_contexts": [
+          {
+            "product_id": "20240902586449",
+            "stage": "营销切入环节",
+            "scence": "意图1-近期超套(无费用质疑)"
+          },
+          {
+            "product_id": "20240902586449",
+            "stage": "营销推荐环节",
+            "scence": "推荐意图"
+          },
+          {
+            "product_id": "20240902586449",
+            "stage": "犹豫挽留环节",
+            "scence": "意图8-再考虑一下"
+          }
+        ]
+      }
+    }
+  ]
+}

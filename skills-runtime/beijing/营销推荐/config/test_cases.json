@@ -1,0 +1,68 @@
+{
+  "cases": [
+    {
+      "name": "【比赛】北京·营销推荐（接口查询·云宽带）",
+      "payload": {
+        "callId": "bj-yx-demo-20260804-01",
+        "intent": "营销推荐",
+        "phone": "13910018888",
+        "topN": 1,
+        "province": "beijing",
+        "extra_data": {
+          "currentMainOffer": {
+            "curOfferName": "128元5G畅享套餐",
+            "curOfferId": "111601000461",
+            "curOfferFee": "128"
+          },
+          "ioId": "demo-io-001"
+        },
+        "extra_info": {},
+        "batch_contexts": [
+          {
+            "product_id": "111602052881",
+            "stage": "营销推荐环节",
+            "scence": "意图2-客户流量、通话不够用"
+          }
+        ]
+      },
+      "updated_at": "2026-08-04 09:22:44"
+    },
+    {
+      "name": "【比赛】北京·营销推荐·多场景（切入+推荐+拒绝）",
+      "payload": {
+        "callId": "bj-yx-demo-20260804-02",
+        "intent": "营销推荐",
+        "phone": "13910018888",
+        "topN": 1,
+        "province": "beijing",
+        "extra_data": {
+          "currentMainOffer": {
+            "curOfferName": "128元5G畅享套餐",
+            "curOfferId": "111601000461",
+            "curOfferFee": "128"
+          },
+          "ioId": "demo-io-002"
+        },
+        "extra_info": {},
+        "batch_contexts": [
+          {
+            "product_id": "111602052881",
+            "stage": "营销切入环节",
+            "scence": "意图1-推荐意图"
+          },
+          {
+            "product_id": "111602052881",
+            "stage": "营销推荐环节",
+            "scence": "意图2-客户流量、通话不够用"
+          },
+          {
+            "product_id": "111602052881",
+            "stage": "客户拒绝环节",
+            "scence": "意图2-不想办合约"
+          }
+        ]
+      },
+      "updated_at": "2026-08-04 09:22:44"
+    }
+  ]
+}

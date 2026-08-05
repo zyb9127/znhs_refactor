@@ -45,6 +45,7 @@ from prompt.script_generation import (
     SCRIPT_TEMPLATE_HEADER,
 )
 from utils.field_naming import canon_key, dict_fuzzy_get
+from utils.placeholder import dig_subfield
 
 if TYPE_CHECKING:
     from core.context import FlowContext
@@ -115,6 +116,39 @@ def _var_alias_group(key: str) -> tuple:
     return _VAR_ALIAS_GROUPS.get(_ALIAS_CANON.get(key, key), (key,))
 
 
+def _pkg_own_field(pkg: Dict[str, Any], key: str) -> str:
+    """当前推荐产品自身字段的取值（供 {offerName} / {recommend_actual_price} 这类裸字段名解析）。
+
+    两条硬约束：
+    - 不得占用标准域/已知变量名：推荐条里常带与标准域同名的字段（北京推荐条自带 tags），
+      若允许顶替，空的「用户标签」域会被产品的 tags 串填——正是防串填规则要杜绝的。
+    - 空值（含空列表/空字典）视为无事实，不入 Prompt。
+    """
+    if not isinstance(pkg, dict) or not isinstance(key, str) or key.startswith("_"):
+        return ""
+    if key in _RESERVED_VAR_NAMES or key not in pkg:
+        return ""
+    v = pkg.get(key)
+    if v is None or (isinstance(v, (list, dict, str)) and not v):
+        return ""
+    return _fmt_passthrough_value(v)
+
+
+def _pkg_fact_in(emitted: set, pkg: Dict[str, Any]) -> bool:
+    """已注入【上下文数据】的内容里是否已含推荐产品事实。
+
+    命中任一即算已含：产品类变量（pkg_brief / pkg_fee…）、以产品为根的子字段占位符
+    （{pkg_brief[recommend_actual_price]}）、或产品自身字段名被直接注入。
+    """
+    for token in emitted:
+        root = str(token).split("[", 1)[0]
+        if root in _PKG_FACT_VAR_KEYS:
+            return True
+        if isinstance(pkg, dict) and root in pkg:
+            return True
+    return False
+
+
 # 推荐套餐派生变量（单位已归一：元 / GB / 分钟），供模板直接引用 {pkg_fee} 等；
 # 值由 PackageDiff 的多别名提取器计算（兼容 initFee 分单位、offerFlow MB 单位等）
 _DERIVED_PKG_VAR_LABELS: Dict[str, str] = {
@@ -122,6 +156,25 @@ _DERIVED_PKG_VAR_LABELS: Dict[str, str] = {
     "pkg_flow":  "推荐套餐流量(GB)",
     "pkg_voice": "推荐套餐语音(分钟)",
 }
+
+# 承载「推荐产品事实」的变量名：这些被注入即视为上下文已带产品信息
+_PKG_FACT_VAR_KEYS = frozenset(
+    {"pkg_brief", "pkg_name", "recommended_package"} | set(_DERIVED_PKG_VAR_LABELS)
+)
+
+# 推荐产品字段兜底注入时跳过的键：纯排序/内部标记，以及不该进话术的 ID 类字段
+# （ID 一旦进上下文，模型可能把 2026070113291445801035520 这类串号念进话术）
+_PKG_INJECT_SKIP_KEYS = frozenset({
+    "rank", "offerId", "offer_id", "product_id", "package_id", "prod_id",
+})
+
+# 标准域 / 已知变量名：推荐产品字段不得占用这些名字（详见 _pkg_own_field）
+_RESERVED_VAR_NAMES = (
+    set(VAR_LABELS) | set(_ALIAS_CANON) | set(_DERIVED_PKG_VAR_LABELS)
+)
+
+# 可作为「推荐产品字段」暴露给配置页 / 运行时兜底注入的键的排除集
+PKG_FIELD_EXCLUDED_KEYS = frozenset(_PKG_INJECT_SKIP_KEYS | _RESERVED_VAR_NAMES)
 
 
 def _fmt_num(v: Any) -> str:
@@ -185,9 +238,21 @@ def resource_context_prompt_vars(
 
 
 def _fmt_passthrough_value(v: Any) -> str:
-    """直传透传字段值格式化：标量转字符串，dict/list 转紧凑 JSON，None/空 → 空串。"""
+    """直传透传字段值格式化：标量转字符串；dict 转「子键：值；…」的可读串（如 portrait_style
+    大变量 {portrait_style} 呈现为 communication_style：直接爽快；business_conte：…，而非生 JSON
+    blob，让大变量占位符在上下文里可读地体现）；list / 无标量子字段的 dict 回退紧凑 JSON。"""
     if v is None:
         return ""
+    if isinstance(v, dict):
+        parts: List[str] = []
+        for _k, _val in v.items():
+            if not isinstance(_k, str) or _k.startswith("_"):
+                continue
+            if _val in (None, "", [], {}):
+                continue
+            parts.append(f"{_k}：{_fmt_passthrough_value(_val)}")
+        if parts:
+            return "；".join(parts)
     if isinstance(v, (dict, list)):
         import json
 
@@ -426,7 +491,9 @@ def build_prompt(
                 return str(v)
             if isinstance(effective_extra_info, dict) and var_key in effective_extra_info:
                 return _fmt_passthrough_value(effective_extra_info.get(var_key))
-            return ""
+            # 当前推荐产品自身字段（offerName / recommend_actual_price…）：多产品入参下
+            # 产品字段只存在于数组元素里，不在 extra_info 顶层，按名兜底才能取到值。
+            return _pkg_own_field(pkg, var_key)
 
         # 模板实际使用的占位符 token（锚点对齐依据）
         tpl_tokens: List[str] = re.findall(r"\{(\w+)\}", template_text or "")
@@ -484,8 +551,20 @@ def build_prompt(
         # 不依赖模板占位符风格（{xx} 或 **（xx）均可），确保【上下文数据】完整展示透传入参。
         passthrough_ctx = getattr(ctx, "passthrough_context", None) or {}
         if isinstance(passthrough_ctx, dict):
+            # 被父级大变量整块体现的子字段：如 portrait_style 已渲染成
+            # 「communication_style：…；business_conte：…」，其被提升为独立透传键的同名子字段
+            # 就不必再单列一行（避免与父级重复）；仅当模板显式引用 {子字段} 时才单列以保证可填。
+            _parent_covered: set = set()
+            for _pv in passthrough_ctx.values():
+                if isinstance(_pv, dict):
+                    for _ck in _pv.keys():
+                        if isinstance(_ck, str) and _ck in passthrough_ctx:
+                            _parent_covered.add(_ck)
             for pk, pv in passthrough_ctx.items():
                 if pk in emitted:
+                    continue
+                if (pk in _parent_covered
+                        and not (template_text and ("{" + pk + "}") in template_text)):
                     continue
                 val = _fmt_passthrough_value(pv)
                 if val.strip() == "":
@@ -517,9 +596,11 @@ def build_prompt(
                     emitted.update(_var_alias_group(token))
                     emitted.add(token)
                     continue
-                if not isinstance(effective_extra_info, dict) or token not in effective_extra_info:
-                    continue
-                val = _fmt_passthrough_value(effective_extra_info.get(token))
+                if isinstance(effective_extra_info, dict) and token in effective_extra_info:
+                    val = _fmt_passthrough_value(effective_extra_info.get(token))
+                else:
+                    # 模板直接引用推荐产品字段名（{recommend_actual_price} 等）
+                    val = _pkg_own_field(pkg, token)
                 if val.strip() == "":
                     continue
                 label = VAR_LABELS.get(token, token)
@@ -572,6 +653,47 @@ def build_prompt(
                 context_lines.append(f"{_leaf_label} {{{_token}}}：{_sval}")
                 _record_slot_fact(_token, _sval)
                 emitted.add(_token)
+        # 多产品兜底注入：一次请求要为多个产品各出一条话术，而以上通道都没往上下文里
+        # 放进任何产品事实时，把当前推荐产品逐字段注入。此时产品信息是各条话术唯一的
+        # 差异来源——运营漏勾产品类关联变量，N 条话术的上下文就完全相同，模型必然生成
+        # N 条一样的话术（广东现网表现）。逐字段注入而非只给摘要，是为了兼容
+        # `**（recommend_actual_price）` 这类非花括号占位符风格：模板写什么字段名，
+        # 上下文里就有同名事实行。
+        # 仅多产品时触发：单产品沿用原有「linked_vars 驱动」语义，提示词逐字节不变。
+        if (len(getattr(ctx, "final_recommendations", None) or []) > 1
+                and isinstance(pkg, dict) and pkg and not _pkg_fact_in(emitted, pkg)):
+            _injected_pkg: List[str] = []
+            # 摘要行仅在模板确实引用 {pkg_brief}/{pkg_name} 时注入：逐字段行已覆盖同样的
+            # 事实，两者并存会让上下文长度翻倍且同一数值出现两次（易诱发串填）。
+            if pkg_brief.strip() and (set(_var_alias_group("pkg_brief")) & tpl_token_set):
+                _anchor = _anchor_for("pkg_brief")
+                context_lines.append(f"{VAR_LABELS.get('pkg_brief', '推荐产品信息')} {{{_anchor}}}：{pkg_brief}")
+                _record_slot_fact(_anchor, pkg_brief)
+                emitted.update(_var_alias_group("pkg_brief"))
+                emitted.add(_anchor)
+            # 运营在「透传字段」里按 recommended_packages.<字段> 精确勾选过产品字段时，
+            # 只注入白名单内的字段（避免十几个字段全进上下文）；未勾选则注入全部非空字段。
+            _allow = getattr(ctx, "product_field_allow", None) or []
+            for _pk in list(pkg.keys()):
+                if _pk in emitted or _pk in PKG_FIELD_EXCLUDED_KEYS:
+                    continue
+                if _allow and _pk not in _allow:
+                    continue
+                _pval = _pkg_own_field(pkg, _pk)
+                if not _pval.strip():
+                    continue
+                _plabel = _DERIVED_PKG_VAR_LABELS.get(_pk) or _pk
+                context_lines.append(f"{_plabel} {{{_pk}}}：{_pval}")
+                _record_slot_fact(_pk, _pval)
+                emitted.add(_pk)
+                _injected_pkg.append(_pk)
+            if _injected_pkg:
+                logger.warning(
+                    f"[PromptBuilder] ⚠️ 话术模板未关联任何推荐产品变量，已自动注入产品字段 "
+                    f"{_injected_pkg}（多产品时若不注入，各条话术上下文相同会生成同样内容）。"
+                    "建议在「话术模板 → 关联变量」中勾选推荐产品相关变量"
+                )
+
         # 主服务直传：未在关联变量中显式勾选时，仍注入非空的 extra_info / extra_context
         # 透传模式（passthrough_ctx 非空）下已逐字段展示，跳过整包 JSON 以免冗余。
         if "extra_info" not in emitted and ei_txt and not passthrough_ctx:
@@ -756,10 +878,31 @@ def preview_prompt(
     from core.context import FlowContext
     from plugins.package_diff import PackageDiff
 
-    data = copy.deepcopy(_DEFAULT_SAMPLE_CTX)
-    if sample_ctx_data:
-        for key, value in sample_ctx_data.items():
-            data[key] = value
+    if passthrough_fields is not None:
+        # 直传透传模式：上下文严格以「选择的透传入参」为准，不掺内置默认样例的标准域，
+        # 否则默认的 current_package（畅享套餐59元档）/ usage / tags / user_profile 会伪装成
+        # 「映射结果」混进上下文——与运行态（这些域根本没有入参、不会出现）不符。
+        data = copy.deepcopy(sample_ctx_data) if isinstance(sample_ctx_data, dict) else {}
+        # 遍历「实际透传入参」（extra_info 顶层），字段名恰与运行态标准域同名者，按入参原值直接放进
+        # 对应域槽位——「直接放入」而非字段映射/重命名（与 DataStep 一致）。域清单取运行态权威定义
+        # _NODE_TO_CTX_FIELD（单一事实源，不写死名字）；其余任意透传字段名走下方 passthrough_context
+        # 通道，按其原字段名 {字段名} 呈现，故透传参数叫什么都自动适配。
+        from steps.data_step import _NODE_TO_CTX_FIELD as _STD_DOMAINS_RT
+        _ei0 = data.get("extra_info") if isinstance(data.get("extra_info"), dict) else {}
+        for _k, _v in _ei0.items():
+            if not isinstance(_k, str) or _k not in _STD_DOMAINS_RT:
+                continue
+            if _k == "recommended_packages":
+                if (not data.get("recommended_package")
+                        and isinstance(_v, list) and _v and isinstance(_v[0], dict)):
+                    data["recommended_package"] = _v[0]
+            elif not data.get(_k) and isinstance(_v, dict) and _v:
+                data[_k] = _v
+    else:
+        data = copy.deepcopy(_DEFAULT_SAMPLE_CTX)
+        if sample_ctx_data:
+            for key, value in sample_ctx_data.items():
+                data[key] = value
 
     template = template or {}
     eff_intent = intent or str(template.get("intent") or "") or "套餐推荐"
@@ -786,16 +929,26 @@ def preview_prompt(
         _std = {"current_package", "usage", "tags", "user_info",
                 "recommended_packages", "user_profile", "domain_ext"}
         _sel = passthrough_fields if passthrough_fields else list(_ei.keys())
-        _pt = {
-            k: _ei[k] for k in _sel
-            if isinstance(k, str) and not k.startswith("_")
-            and k in _ei and k not in _std
-            and _ei[k] not in (None, "", [], {})
-        }
-        # 与运行态 DataStep 一致：展开 portrait_style 一层，personality 子字段逐条预览
+        _pt: Dict[str, Any] = {}
+        for k in _sel:
+            if not isinstance(k, str) or not k or k.startswith("_"):
+                continue
+            # 子路径写法（portrait_style.communication_style）：按叶子名预览，与运行态一致
+            if "." in k:
+                _leaf, _val = dig_subfield(_ei, k)
+                if _leaf and _leaf not in _std and _val not in (None, "", [], {}):
+                    _pt.setdefault(_leaf, _val)
+                continue
+            if k in _ei and k not in _std and _ei[k] not in (None, "", [], {}):
+                _pt[k] = _ei[k]
+        # 与运行态 DataStep 一致：展开 portrait_style 一层，personality 子字段逐条预览；
+        # 已按子路径精确勾选时不整块展开
         _nested = _ei.get("portrait_style")
-        if isinstance(_nested, dict):
-            _pt.pop("portrait_style", None)
+        if isinstance(_nested, dict) and (
+            not passthrough_fields or "portrait_style" in passthrough_fields
+        ):
+            # 保留父级 portrait_style（不再 pop）：与运行态 DataStep 一致，大变量占位符
+            # {portrait_style} 需在预览上下文里可读地体现，其子字段另按叶子名逐条展示。
             for _ck, _cv in _nested.items():
                 if (isinstance(_ck, str) and not _ck.startswith("_")
                         and _cv not in (None, "", [], {}) and _ck not in _std):

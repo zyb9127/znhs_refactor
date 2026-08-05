@@ -37,6 +37,17 @@ class RecommendStep:
         """去除产品 dict 中的空值字段（空字符串 / 空列表 / None）"""
         return {k: v for k, v in pkg.items() if v not in ("", [], None)}
 
+    @staticmethod
+    def _caller_supplied_count(ctx: FlowContext) -> int:
+        """调用方在 extra_info.recommended_packages 中直传的产品数（非直传返回 0）。
+
+        topN 的语义是「从推荐接口返回的大候选池里取前 N 个」。直传模式下候选已由
+        上游挑定并整包传入，再按 topN 截断会静默少出话术（广东 18 个产品只出 8 条
+        即为此），故直传时不截断，传多少个产品就生成多少条话术。
+        """
+        packages = (ctx.extra_info or {}).get("recommended_packages")
+        return len(packages) if isinstance(packages, list) else 0
+
     async def run(
         self,
         ctx: FlowContext,
@@ -51,6 +62,15 @@ class RecommendStep:
         t0 = time.perf_counter()
         packages = ctx.recommended_packages
         top_n    = ctx.top_n
+
+        # 直传模式：产品列表由调用方给定，topN 不参与截断（仍按 rank 排序）
+        direct_count = self._caller_supplied_count(ctx)
+        if direct_count and top_n < len(packages):
+            logger.info(
+                f"[RecommendStep] 直传模式（extra_info.recommended_packages "
+                f"{direct_count} 个产品）：忽略 topN={top_n} 的截断，全量生成话术"
+            )
+            top_n = len(packages)
 
         logger.info(
             f"[RecommendStep] strategy={strategy} "

@@ -1,0 +1,75 @@
+{
+  "callId": "gd-single-20260802001",
+  "intent": "营销活动",
+  "phone": "15010470528",
+  "topN": 18,
+  "province": "guangdong",
+  "extra_info": {
+      "portrait_style": {
+          "communication_style": "",
+          "business_conte": "升档优惠目标客户，请抓住机会！未开通宽带，无亲情网，优推金牛方案、亲情网！（营销切入语：暑期出行，给您推荐出行爆款产品，组合搭配更划算）"
+      },
+      "recommended_packages": [
+          {
+              "offerName": "【东莞】裸升99元套餐-2607-东莞中心",
+              "recommend_broadband": "无",
+              "recommend_equity": "无",
+              "recommend_package_name": "【东莞】裸升99元套餐-2607-东莞中心",
+              "recommend_bonus_flow": "0GB/月",
+              "recommend_total_flow": 0,
+              "recommend_base_flow": "0GB/月",
+              "recommend_original_price": "99元",
+              "recommend_discount_amount": "0元",
+              "recommend_preferential_period": "0个月",
+              "offerId": "2026070113291445801035520",
+              "recommend_actual_price": "99元",
+              "recommend_voice_minutes": "0分钟/月"
+          },
+          {
+              "offerName": "【裸升】升99元套餐_202608_东莞",
+              "recommend_broadband": "无",
+              "recommend_equity": "无",
+              "recommend_package_name": "【裸升】升99元套餐_202608_东莞",
+              "recommend_bonus_flow": "0GB/月",
+              "recommend_total_flow": 20,
+              "recommend_base_flow": "20GB/月",
+              "recommend_original_price": "99元",
+              "recommend_discount_amount": "0元",
+              "recommend_preferential_period": "0个月",
+              "offerId": "2026073016465704601073059",
+              "recommend_actual_price": "99元",
+              "recommend_voice_minutes": "200分钟/月"
+          },
+          {
+              "offerName": "【省统升级3季度推】13、升99送10元6个月+20GB扩容",
+              "recommend_broadband": "无",
+              "recommend_equity": "无",
+              "recommend_package_name": "【省统升级3季度推】13、升99送10元6个月+20GB扩容",
+              "recommend_bonus_flow": "0GB/月",
+              "recommend_total_flow": 0,
+              "recommend_base_flow": "0GB/月",
+              "recommend_original_price": "99元",
+              "recommend_discount_amount": "0元",
+              "recommend_preferential_period": "0个月",
+              "offerId": "2026062509282235101021920",
+              "recommend_actual_price": "99元"
+          }
+      ],
+      "current_package": {
+          "baseFlow": "",
+          "actual_price": "79元",
+          "broadband": "无",
+          "package_name": "全家享套餐（全国版）79档",
+          "voice_minutes": "150分钟",
+          "equity": "无"
+      }
+  },
+  "extra_data": {},
+  "batch_contexts": [
+      {
+          "stage": "个人市场",
+          "scence": "开口话术",
+          "product_id": "流量"
+      }
+  ]
+}

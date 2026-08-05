@@ -25,6 +25,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from utils.auth_utils import check_province_write, get_operator, get_user_province
+from utils.placeholder import dig_subfield
 from utils.skill_runtime import skill_registry
 from utils.var_infer import infer_linked_vars, infer_placeholder_vars
 
@@ -33,6 +34,91 @@ router = APIRouter(tags=["运营管理"])
 # 保存失败（外部存储不可用）时的统一错误文案
 # 收尾修复 F2 后失败即状态完全不变（不再更新本实例内存），可放心重试
 _SAVE_FAIL_MSG = "配置保存失败：外部存储不可用（本次更改未生效，可修复后重试），请联系管理员检查 ES/Redis"
+
+def _normalize_direct_extra_info(sample: Any) -> Dict[str, Any]:
+    """把直传节点的 mock_response / 粘贴样例归一到 **extra_info 本体**。
+
+    生产/网关常见三种粘贴形态，配置期都要能识别（运行时由
+    routers.realtime._unwrap_params_body 已解包，这里是配置期的对应处理）：
+      1. 裸 extra_info：``{"uniProdGrade":"58", "recommended_packages":[...]}``
+      2. 整请求体：     ``{"phone":..., "extra_info":{...}, "batch_contexts":[...]}``
+      3. 网关包裹：     ``{"params": {...同 2...}}``
+    归一后返回 extra_info 字典（取不到时返回原 dict / 空 dict），
+    供调色板字段提取、样例上下文构建、测试体生成统一使用。
+    """
+    if not isinstance(sample, dict):
+        return {}
+    cur = sample
+    # ① 解最外层 params（与 realtime._unwrap_params_body 判定一致：
+    #    仅当 params 为非空 dict 且顶层没有直接出现业务字段时才解包，避免误伤把
+    #    params 当业务字段名的情况）。
+    inner = cur.get("params")
+    if isinstance(inner, dict) and inner and not (
+        {"phone", "intent", "province", "extra_info"} & set(cur.keys())
+    ):
+        cur = inner
+    # ② 整请求体：取 extra_info 本体（非空 dict 才下钻，避免把空壳顶掉真实字段）。
+    ei = cur.get("extra_info")
+    if isinstance(ei, dict) and ei:
+        return ei
+    return cur
+
+
+def _subfield_in_list_sample(sample: Dict[str, Any], path: str) -> bool:
+    """列表域下的产品字段路径（``recommended_packages.<字段>``）是否存在于数组元素里。
+
+    逐条产品各取自己那份的字段无法收敛成单个透传值，运行时按「产品字段白名单」处理；
+    这里只负责判定该字段在样例产品里真实存在，避免保存时被当作脏项清掉。
+    """
+    root, _, rest = str(path or "").partition(".")
+    if not rest or "." in rest:
+        return False
+    arr = sample.get(root)
+    if not isinstance(arr, list):
+        return False
+    return any(isinstance(it, dict) and rest in it for it in arr)
+
+
+def _clean_direct_node_for_save(node: Dict[str, Any]) -> List[str]:
+    """保存直传节点前就地归一，保证 ES 里存的是干净数据（生产写路径自愈）：
+    - mock_response 若被粘贴成「整请求体」或「{"params":{...}} 网关包裹」，归一为 extra_info 本体；
+    - passthrough_fields 去掉指向包裹层/样例中不存在的脏项（如把整包 extra_info 误选为透传字段），
+      仅保留归一样例里真实存在的字段或标准域名（标准域值运行时才有，允许保留）。
+    就地修改 node，返回改动说明（供日志与保存提示）。非直传节点不处理。
+    """
+    notes: List[str] = []
+    if not isinstance(node, dict) or node.get("source_type") != "direct":
+        return notes
+    mock = node.get("mock_response")
+    sample: Dict[str, Any] = {}
+    if isinstance(mock, dict) and mock:
+        norm = _normalize_direct_extra_info(mock)
+        if isinstance(norm, dict) and norm != mock:
+            node["mock_response"] = norm
+            notes.append("mock_response 已归一为 extra_info 本体（原为整请求体 / params 包裹写法）")
+        sample = norm if isinstance(norm, dict) else {}
+    pf = node.get("passthrough_fields")
+    if isinstance(pf, list) and pf and sample:
+        cleaned = [
+            k for k in pf
+            if isinstance(k, str) and not k.startswith("_")
+            and (
+                # 直传透传模式 mock 即入参形态：仅保留样例里真实存在的字段。
+                # 标准域名若已被改名 / 删除而不在样例里（如旧 recommended_packages 改成
+                # recommended_packages11），属残留脏项，不再因「是标准域名」而保留。
+                k in sample
+                # 子路径写法（portrait_style.communication_style）：按路径在样例中解析；
+                # 列表域下的产品字段（recommended_packages.<字段>）按数组首元素校验
+                or ("." in k and bool(dig_subfield(sample, k)[0]))
+                or ("." in k and _subfield_in_list_sample(sample, k))
+            )
+        ]
+        if cleaned != pf:
+            dropped = [k for k in pf if k not in cleaned]
+            node["passthrough_fields"] = cleaned
+            notes.append(f"passthrough_fields 已清理无效项 {dropped}（不在样例内且非标准域）")
+    return notes
+
 
 # 7 大标准数据域（与 steps/data_step.py 的 _NODE_TO_CTX_FIELD 保持一致）
 # 用于「标准域映射防丢失」守护：见 update_interface
@@ -165,7 +251,9 @@ async def save_biz_config(province: str, intent: str, body: SkillConfigRequest, 
                 f"已自动保留原有 {len(old_tpls)} 条话术模板（如需清空请显式传空列表）"
             )
 
-    ok = skill_registry.save_biz_config(province, intent, data)
+    ok = skill_registry.save_biz_config(
+        province, intent, data, operator=get_operator(request)
+    )
     if not ok:
         raise HTTPException(500, _SAVE_FAIL_MSG)
     msg = "保存成功"
@@ -282,8 +370,15 @@ def _compute_domain_subfields(province: str, intent: str) -> Dict[str, List[Dict
         if isinstance(dom, dict) and dom:
             # extra_info（主服务补充信息/直传骨架）常为全空样例，按键结构展开；
             # 其余标准域（映射产出）保持跳过空值，避免展示注定取不到值的子字段。
+            # 推荐产品样例同理：直传省份的产品样例常是全空骨架（只声明字段名，值运行时才有），
+            # 此时若跳过空值，调色板里一个产品字段都看不到。
+            _skeleton = (
+                var_key == "pkg_brief"
+                and not any(str(v).strip() for v in dom.values()
+                            if not isinstance(v, (dict, list)))
+            )
             subs = _flatten_domain_subfields(
-                var_key, dom, include_empty=(var_key == "extra_info"))
+                var_key, dom, include_empty=(var_key == "extra_info" or _skeleton))
             if subs:
                 result[var_key] = subs
     return result
@@ -315,6 +410,13 @@ async def get_context_vars(province: str, intent: str):
     passthrough_keys: List[str] = []
     passthrough_samples: Dict[str, Any] = {}  # key → 样例值（取自 mock_response，供预览）
     passthrough_producers: Dict[str, List[str]] = {}  # key → 产出该透传字段的直传节点名列表
+    has_passthrough_node = False              # 是否存在直传透传节点（决定产品字段呈现口径）
+    product_allow: List[str] = []             # 运营精确勾选的产品字段（recommended_packages.<字段>）
+    # 字典型透传大变量（portrait_style / current_package…）被精确勾选的子字段：
+    # parent → [leaf,...]。收进父级大变量的 subfields，让调色板按「大变量→展开子字段」
+    # 一一对应，而非把 leaf 平铺成一堆顶层 chip。
+    pt_subfields: Dict[str, List[str]] = {}
+    pt_subfield_samples: Dict[tuple, Any] = {}  # (parent, leaf) → 样例值
 
     _STD_DOMAINS = {
         "current_package", "usage", "tags", "user_info",
@@ -344,13 +446,64 @@ async def get_context_vars(province: str, intent: str):
             _add_producer(api_producers, top_key, api_name)
         # 直传透传模式：把入参字段名作为可用 context 变量（供话术模板直接引用 {字段名}）
         if cfg.get("source_type") == "direct" and cfg.get("direct_mode") == "passthrough":
-            sample = cfg.get("mock_response") if isinstance(cfg.get("mock_response"), dict) else {}
+            # 归一样例：兼容 mock 粘贴成「整请求体」或「网关 params 包裹」的写法，
+            # 否则透传字段会误取到 params / extra_info / batch_contexts 顶层键。
+            sample = _normalize_direct_extra_info(cfg.get("mock_response"))
             fields = cfg.get("passthrough_fields")
             if not fields:
                 fields = list(sample.keys())
+            has_passthrough_node = True
             for key in fields:
-                if not isinstance(key, str) or key.startswith("_") or key in _STD_DOMAINS:
+                if not isinstance(key, str) or key.startswith("_"):
                     continue
+                # 子路径写法：列表域（recommended_packages.<字段>）是逐条产品各取自己那份的
+                # 产品字段，收进 product_allow 由下方「推荐产品字段」分组按勾选暴露；
+                # 字典域（portrait_style.communication_style）运行时按叶子名注入，
+                # 调色板同样暴露叶子名占位符 {communication_style}。
+                if "." in key:
+                    _root = key.split(".", 1)[0]
+                    if isinstance(sample.get(_root), list):
+                        _leaf = key.rsplit(".", 1)[-1]
+                        if _leaf and _leaf not in product_allow:
+                            product_allow.append(_leaf)
+                        # 确保父级大变量（recommended_packages）进调色板作直传占位符，
+                        # 即便运营只勾了子字段没单独勾 recommended_packages。
+                        if _root not in api_derived and _root not in passthrough_keys:
+                            passthrough_keys.append(_root)
+                        _add_producer(passthrough_producers, _root, api_name)
+                        if _root in sample and _root not in passthrough_samples:
+                            passthrough_samples[_root] = sample[_root]
+                        continue
+                    # 字典域子字段：不平铺成顶层 leaf chip，而是收进父级大变量的 subfields，
+                    # 调色板按「大变量 {portrait_style} → 展开选子字段」一一对应（与
+                    # recommended_packages 分组一致），避免十几个 leaf 平铺顶层。
+                    _leaf, _val = dig_subfield(sample, key)
+                    if not _leaf:
+                        continue
+                    _lvs = pt_subfields.setdefault(_root, [])
+                    if _leaf not in _lvs:
+                        _lvs.append(_leaf)
+                    if _val not in (None, "", [], {}):
+                        pt_subfield_samples[(_root, _leaf)] = _val
+                    # 确保父级大变量本身进调色板（运营即便只勾子字段没勾父级也要有大变量）；
+                    # 仅当父级在归一样例里真实存在时才补，避免改名后的残留父级键复活成幽灵占位符。
+                    if _root in sample:
+                        if _root not in api_derived and _root not in passthrough_keys:
+                            passthrough_keys.append(_root)
+                        _add_producer(passthrough_producers, _root, api_name)
+                        if _root in sample and _root not in passthrough_samples:
+                            passthrough_samples[_root] = sample[_root]
+                    continue
+                # 过滤历史脏透传字段：mock 被粘贴成「整请求体/params 包裹」时，
+                # passthrough_fields 可能残留指向包裹层的键（如把整包 extra_info 选成透传字段）。
+                # 直传透传模式下 mock 即入参形态，仅保留归一样例里真实存在的字段；
+                # 标准域名（如 recommended_packages）若已被改名 / 删除而不在样例里，属残留脏项，
+                # 不再因「是标准域名」而保留，避免与最新字段名（如 recommended_packages11）重复。
+                if key not in sample:
+                    continue
+                # 注意：dict 型标准域（current_package / usage / tags / user_profile 等）
+                # 也在此暴露为可展开子字段的占位符——否则纯直传节点没有 response_extract，
+                # 这些域不会进 api_derived，调色板里就完全看不到（current_package 消失的根因）。
                 if key not in api_derived and key not in passthrough_keys:
                     passthrough_keys.append(key)
                 _add_producer(passthrough_producers, key, api_name)
@@ -379,6 +532,35 @@ async def get_context_vars(province: str, intent: str):
     # 各标准域可选子字段（{域[子键]}），按接口 mock 映射样例推导，供调色板展开精确匹配
     subfields_map = _compute_domain_subfields(province, intent)
 
+    # 推荐产品字段是否来自「直传透传节点」：决定 recommended_packages 的呈现口径——
+    #   透传节点产出（无接口映射产出 recommended_packages）→ 按「直传大变量」呈现：
+    #     recommended_packages 作 source=passthrough 的直传 chip（展开=运营勾选的产品字段），
+    #     且不再另出计算生成的 {pkg_brief}（二者都指向推荐产品，属重复）；
+    #   接口/映射节点产出（混合配置）→ 保持映射模式：单独「推荐产品字段」分组自动摊开 + {pkg_brief}。
+    try:
+        from engine.prompt_builder import PKG_FIELD_EXCLUDED_KEYS as _PKG_SKIP
+    except Exception:
+        _PKG_SKIP = frozenset()
+    _prod_from_passthrough = has_passthrough_node and "recommended_packages" not in api_derived
+    # 产品字段子占位符（裸字段名 {recommend_actual_price}，多产品逐条取值）。
+    # 透传口径：只暴露运营在「透传字段」页按 recommended_packages.<字段> 精确勾选过的那几个；
+    # 映射口径：按产品样例自动摊开全部非 ID/排序字段。
+    _prod_subs: List[Dict[str, Any]] = []
+    _prod_seen: set = set()
+    for _sf in (subfields_map.get("pkg_brief") or []):
+        _path = str(_sf.get("path") or "")
+        if not _path or "." in _path or _path in _prod_seen:
+            continue
+        if _path in _PKG_SKIP:
+            # ID/排序类字段不作为话术槽位（念串号无意义且有风险）；与标准域同名的产品字段也排除。
+            continue
+        if _prod_from_passthrough and _path not in product_allow:
+            continue
+        _prod_seen.add(_path)
+        _prod_subs.append({
+            "token": _path, "label": _path, "path": _path, "sample": _sf.get("sample"),
+        })
+
     result = []
     seen = set()
 
@@ -400,6 +582,10 @@ async def get_context_vars(province: str, intent: str):
     for key in passthrough_keys:
         if key in seen:
             continue
+        # 混合配置（接口/映射节点也产出 recommended_packages）时，交给下方「推荐产品字段」
+        # 映射分组自动摊开；纯透传节点则在此按「直传大变量」呈现（下方 subfields 分支处理）。
+        if key == "recommended_packages" and not _prod_from_passthrough:
+            continue
         seen.add(key)
         label, desc = _META.get(key, (key, "直传入参字段"))
         item = {
@@ -407,21 +593,62 @@ async def get_context_vars(province: str, intent: str):
             "sample": passthrough_samples.get(key),
             "api_names": passthrough_producers.get(key, []),
         }
-        # 透传字段若为字典（如 portrait_style），拍平其子字段供调色板展开精确匹配
-        # （{字段[子键]}），与映射模式一致；子键名取自 mock_response 样例。
+        # 透传大变量按「大变量 → 展开子字段」一一对应。子字段占位符 token 用运行态可解析格式：
+        #   标准域（current_package…）→ {域[子键]}，走 resource_context 子字段解析；
+        #   非标准域字典（portrait_style）→ 裸叶子 {子键}，走 passthrough_context 叶子注入。
+        _is_std = key in _STD_DOMAINS
+        _selected = pt_subfields.get(key)
         _sample = passthrough_samples.get(key)
-        if isinstance(_sample, dict) and _sample:
-            # 透传样例常为全空骨架（仅声明字段结构），故按键结构展开（include_empty），
-            # 使 {extra_info[current_package][package_name]} 这类子字段可选。
-            _subs = _flatten_domain_subfields(key, _sample, include_empty=True)
-            if _subs:
-                item["subfields"] = _subs
+        _subs: List[Dict[str, Any]] = []
+        if isinstance(_sample, list) and _sample:
+            # 直传列表型大变量（产品/明细列表，不写死字段名）：子字段 = 数组元素字段并集，
+            # 按透传参数里的实际字段自动适配；裸占位符 {字段名}，多条时每条话术各取自己那条的值。
+            # 透传口径：只暴露运营在「透传字段」页按 <列表>.<字段> 勾选过的（product_allow），
+            # 一个没勾就只给整块 {列表名}——与「不需要摊开显示字段」一致。ID/排序/标准域同名字段排除。
+            _seen_lf: set = set()
+            for _el in _sample:
+                if not isinstance(_el, dict):
+                    continue
+                for _lf, _lv in _el.items():
+                    if (not isinstance(_lf, str) or _lf.startswith("_")
+                            or _lf in _seen_lf or isinstance(_lv, (dict, list))
+                            or _lf in _PKG_SKIP or _lf not in product_allow):
+                        continue
+                    _seen_lf.add(_lf)
+                    _subs.append({"token": _lf, "label": _lf, "path": _lf, "sample": _lv})
+        elif _selected:
+            # 运营在「透传字段」页精确勾了子字段 → 只暴露这几个
+            for _lf in _selected:
+                _subs.append({
+                    "token": f"{key}[{_lf}]" if _is_std else _lf,
+                    "label": _lf, "path": _lf,
+                    "sample": pt_subfield_samples.get((key, _lf)),
+                })
+        elif isinstance(_sample, dict) and _sample:
+            # 只勾了大变量没勾子字段 → 展开全部（一层）子字段
+            if _is_std:
+                # 标准域样例常为全空骨架（仅声明结构），按键结构展开（include_empty）
+                _subs = _flatten_domain_subfields(key, _sample, include_empty=True)
+            else:
+                for _lf, _lv in _sample.items():
+                    if not isinstance(_lf, str) or _lf.startswith("_"):
+                        continue
+                    if isinstance(_lv, (dict, list)):
+                        continue
+                    _subs.append({"token": _lf, "label": _lf, "path": _lf, "sample": _lv})
+        if _subs:
+            item["subfields"] = _subs
         result.append(item)
 
     # pkg_brief / diff_str / pkg_fee 等是话术生成层计算产出；附 available 标志，
     # 供前端隐藏「该技能样例下注定取不到值」的计算变量（避免拖入后生成 xx/空值）
     computed_avail = _computed_var_availability(province, intent)
     for key in ("pkg_brief", "diff_str", "pkg_fee", "pkg_flow", "pkg_voice", "table"):
+        # 直传口径：产品信息只用透传的 {recommended_packages}（展开选字段）呈现，不再另出
+        # 计算生成的 {pkg_brief}——二者都指向推荐产品，同列会让运营误以为重复/需映射。
+        if key == "pkg_brief" and _prod_from_passthrough:
+            seen.add(key)
+            continue
         if key not in seen:
             seen.add(key)
             label, desc = _META[key]
@@ -433,6 +660,21 @@ async def get_context_vars(province: str, intent: str):
             if subfields_map.get(key):
                 item["subfields"] = subfields_map[key]
             result.append(item)
+
+    # 推荐产品字段：
+    #   透传口径（_prod_from_passthrough）→ recommended_packages 已在上方以 source=passthrough
+    #     的「直传大变量」形式发射（展开=运营勾选的产品字段），此处不再另起「推荐产品」映射分组；
+    #   映射/接口口径 → 产品字段只在数组元素内，既不是标准域也不是透传顶层字段，需单独暴露为
+    #     「推荐产品字段」分组（自动摊开全部非 ID/排序字段），与运行时产品字段注入同名对齐。
+    if not _prod_from_passthrough and _prod_subs and "recommended_packages" not in seen:
+        seen.add("recommended_packages")
+        result.append({
+            "key": "recommended_packages",
+            "label": "推荐产品字段",
+            "source": "recommended_product",
+            "desc": "推荐产品字段（展开选具体字段作占位符；多产品时每条话术各取自己那条产品的值）",
+            "subfields": _prod_subs,
+        })
 
     # 固定变量（主服务传入 / 通用）
     for key in ("user_info", "user_profile", "domain_ext", "extra_info", "extra_context"):
@@ -530,7 +772,9 @@ async def save_api_nodes(province: str, intent: str, body: SkillConfigRequest, r
     if unfixed:
         logger.warning(f"[接口保存补齐] {province}/{intent} 仍需人工处理: {unfixed}")
 
-    ok = skill_registry.save_api_nodes(province, intent, data)
+    ok = skill_registry.save_api_nodes(
+        province, intent, data, operator=get_operator(request)
+    )
     if not ok:
         raise HTTPException(500, _SAVE_FAIL_MSG)
     msg = "保存成功"
@@ -721,13 +965,18 @@ async def gen_test_payload(province: str, intent: str):
         st = cfg.get("source_type", "api")
         if st == "direct":
             types.add("direct")
-            mock = cfg.get("mock_response")
+            mock = _normalize_direct_extra_info(cfg.get("mock_response"))
             if isinstance(mock, dict) and mock:
                 extra_info = _tc_deep_merge(extra_info, mock)
                 notes.append(f"直传节点「{name}」：extra_info 取自配置样例 mock_response")
             else:
                 for f in (cfg.get("passthrough_fields") or []):
-                    if isinstance(f, str) and not f.startswith("_"):
+                    if not isinstance(f, str) or f.startswith("_"):
+                        continue
+                    # 子路径写法生成嵌套骨架（portrait_style.communication_style）
+                    if "." in f:
+                        _tc_set_deep(extra_info, f, "")
+                    else:
                         extra_info.setdefault(f, "")
                 if cfg.get("passthrough_fields"):
                     notes.append(f"直传节点「{name}」：按 passthrough_fields 生成 extra_info 骨架，请补值")
@@ -1260,14 +1509,17 @@ def _build_sample_ctx_from_skill(province: str, intent: str) -> Optional[Dict[st
         if not isinstance(mock, dict) or not mock:
             continue
         try:
-            # 直传节点：mock 即 extra_info 样例（供透传字段展示）
+            # 直传节点：mock 即 extra_info 样例（供透传字段展示）。归一兼容 mock 被粘贴成
+            # 「整请求体」或「网关 params 包裹」的写法，取到 extra_info 本体再展示/映射。
+            eff_mock = mock
             if cfg.get("source_type") == "direct":
-                extra_info_sample.update(mock)
+                eff_mock = _normalize_direct_extra_info(mock)
+                extra_info_sample.update(eff_mock)
             if cfg.get("response_extract") or cfg.get("field_transform"):
-                extracted = ds._extract_fields(mock, cfg)
-                resources = ds._transform_fields(extracted, cfg, mock)
+                extracted = ds._extract_fields(eff_mock, cfg)
+                resources = ds._transform_fields(extracted, cfg, eff_mock)
             else:
-                resources = {k: v for k, v in mock.items() if k in _NODE_TO_CTX_FIELD}
+                resources = {k: v for k, v in eff_mock.items() if k in _NODE_TO_CTX_FIELD}
             if resources:
                 merged = ds._deep_merge(merged, resources)
         except Exception as e:
@@ -1279,8 +1531,33 @@ def _build_sample_ctx_from_skill(province: str, intent: str) -> Optional[Dict[st
         if merged.get(k):
             sample[k] = merged[k]
     recs = merged.get("recommended_packages")
+    if not (isinstance(recs, list) and recs):
+        # 直传模式：推荐产品由主服务放在 extra_info.recommended_packages 数组里，不经接口
+        # 映射，故不在 merged 中。直传节点的 mock 可能是整个请求体（产品数组嵌在 extra_info
+        # 下一层），也可能就是 extra_info 本身，两种形态都找一遍；否则调色板看不到产品字段。
+        # 兼容多种声明形态：新版多产品数组 recommended_packages、旧版单产品
+        # final_recommendations（可为单个字典），以及 mock 为整请求体时嵌套的 extra_info。
+        _nested = extra_info_sample.get("extra_info")
+        _srcs = [extra_info_sample]
+        if isinstance(_nested, dict):
+            _srcs.append(_nested)
+        for _src in _srcs:
+            for _name in ("recommended_packages", "final_recommendations"):
+                _cand = _src.get(_name)
+                if isinstance(_cand, dict) and _cand:
+                    _cand = [_cand]
+                if isinstance(_cand, list) and _cand:
+                    recs = _cand
+                    break
+            if isinstance(recs, list) and recs:
+                break
     if isinstance(recs, list) and recs:
-        sample["recommended_package"] = recs[0]
+        first = recs[0]
+        if isinstance(first, dict):
+            sample["recommended_package"] = {
+                k: v for k, v in first.items()
+                if not (isinstance(k, str) and k.startswith("_"))
+            }
     if extra_info_sample:
         sample["extra_info"] = extra_info_sample
     if not sample:
@@ -1322,11 +1599,33 @@ def _build_field_source_view(province: str, intent: str, template: Dict[str, Any
             node_label = cfg.get("description") or name
             src_type = cfg.get("source_type", "api")
             if src_type == "direct" and cfg.get("direct_mode") == "passthrough":
-                fields = cfg.get("passthrough_fields") or list((cfg.get("mock_response") or {}).keys())
+                _sample = _normalize_direct_extra_info(cfg.get("mock_response"))
+                fields = cfg.get("passthrough_fields") or list(_sample.keys())
+                # 按顶层大字段分组（与「透传字段」勾选结构、图三一致）：直传直接引用入参原值，不映射标准域。
+                # 子字段占位符 token 与调色板/运行态一致：标准域字典 → {域[子键]}；其余（含产品列表）→ 裸叶子 {子键}
+                _groups: Dict[str, List[str]] = {}
+                _order: List[str] = []
                 for f in fields:
-                    if isinstance(f, str) and not f.startswith("_"):
-                        lines.append(f"• {_lbl(f)} {{{f}}} ← 直传入参「{node_label}」透传字段 {f}")
-                        has_any = True
+                    if not isinstance(f, str) or f.startswith("_"):
+                        continue
+                    top = f.split(".", 1)[0]
+                    if top not in _groups:
+                        _groups[top] = []
+                        _order.append(top)
+                    if "." in f:
+                        leaf = f.rsplit(".", 1)[-1]
+                        if leaf and leaf not in _groups[top]:
+                            _groups[top].append(leaf)
+                for top in _order:
+                    lines.append(
+                        f"• {_lbl(top)} {{{top}}} ← 直传入参「{node_label}」透传大字段"
+                        f"（直接引用入参原值，不映射标准域）"
+                    )
+                    _top_is_dict = isinstance(_sample.get(top), dict)
+                    for leaf in _groups[top]:
+                        _tok = f"{top}[{leaf}]" if (top in STD_DOMAIN_KEYS and _top_is_dict) else leaf
+                        lines.append(f"    └ {leaf} {{{_tok}}} ← 「{top}」下一级字段")
+                    has_any = True
                 continue
             # response_extract：接口出参路径 → 标准域 / 中间变量
             for domain, path in (cfg.get("response_extract") or {}).items():
@@ -1885,6 +2184,16 @@ async def update_interface(
     existing = api_nodes_cfg.get(api_name) or {}
     merged = {**existing, **body}
 
+    # ── 直传样例归一守护（生产 ES 写路径自愈）─────────────────────
+    # 运营常把「整请求体」或网关 {"params":{...}} 包裹体直接粘进直传样例，导致
+    # ES 里存成带包裹层的 mock 与错位的 passthrough_fields，调色板/预览取不到内层字段。
+    # 保存时归一为 extra_info 本体并清理脏透传字段，保证入库即干净。
+    _direct_notes = _clean_direct_node_for_save(merged)
+    if _direct_notes:
+        logger.warning(
+            f"[接口保存守护] {province}/{intent}/{api_name} 直传样例已归一: {_direct_notes}"
+        )
+
     # ── 重命名字段名规范化守护 ──────────────────────────────────
     # field_rename / _unit_conversions.new_field 的目标名若含畸形括号（双括号、全半角混用），
     # 运行时数据键将与模板子字段占位符无法同名对齐 → 槽位取不到值。保存时统一规范化。
@@ -1940,10 +2249,14 @@ async def update_interface(
     if unfixed:
         logger.warning(f"[接口保存补齐] {province}/{intent}/{api_name} 仍需人工处理: {unfixed}")
 
-    ok = skill_registry.save_api_nodes(province, intent, api_nodes_cfg)
+    ok = skill_registry.save_api_nodes(
+        province, intent, api_nodes_cfg, operator=get_operator(request)
+    )
     if not ok:
         raise HTTPException(500, "保存失败")
     msg = "保存成功"
+    if _direct_notes:
+        msg += f"（直传样例已归一：{'；'.join(_direct_notes)}）"
     if preserved_domains:
         msg += f"（已自动保留标准域映射：{', '.join(preserved_domains)}，如需删除请将其显式置为空串）"
     if filled_notes:
@@ -1962,7 +2275,9 @@ async def delete_interface(province: str, intent: str, api_name: str, request: R
     if api_name not in api_nodes_cfg:
         raise HTTPException(404, f"接口不存在: {api_name}")
     del api_nodes_cfg[api_name]
-    ok = skill_registry.save_api_nodes(province, intent, api_nodes_cfg)
+    ok = skill_registry.save_api_nodes(
+        province, intent, api_nodes_cfg, operator=get_operator(request)
+    )
     if not ok:
         raise HTTPException(500, "删除失败")
     return {"code": 200, "message": "删除成功"}
@@ -1985,7 +2300,9 @@ async def patch_interface_status(
     if api_name not in api_nodes_cfg:
         raise HTTPException(404, f"接口不存在: {api_name}")
     api_nodes_cfg[api_name]["enabled"] = bool(enabled_val)
-    ok = skill_registry.save_api_nodes(province, intent, api_nodes_cfg)
+    ok = skill_registry.save_api_nodes(
+        province, intent, api_nodes_cfg, operator=get_operator(request)
+    )
     if not ok:
         raise HTTPException(500, "保存失败")
     return {"code": 200, "message": "状态已更新"}

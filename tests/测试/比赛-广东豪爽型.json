@@ -1,0 +1,47 @@
+{
+  "callId": "gd-demo-20260804-02",
+  "intent": "营销活动",
+  "phone": "15010470528",
+  "topN": 1,
+  "province": "guangdong",
+  "extra_data": {},
+  "extra_info": {
+    "current_package": {
+      "package_name": "畅享套餐59元档",
+      "actual_price": "59",
+      "voice_minutes": "300",
+      "baseFlow": "20",
+      "equity": "会员权益2选1",
+      "broadband": "100M宽带"
+    },
+    "recommended_packages": [
+      {
+        "offerId": "GD-FLOW-UPGRADE-01",
+        "offerName": "流量升级包",
+        "recommend_package_name": "流量升级包",
+        "recommend_original_price": "39",
+        "recommend_actual_price": "19",
+        "recommend_discount_amount": "20",
+        "recommend_base_flow": "30",
+        "recommend_bonus_flow": "10",
+        "recommend_total_flow": "40",
+        "recommend_voice_minutes": "100",
+        "recommend_preferential_period": "6",
+        "recommend_equity": "视频会员6个月",
+        "recommend_broadband": "无",
+        "rank": 1
+      }
+    ],
+    "portrait_style": {
+      "communication_style": "豪爽型",
+      "business_conte": "近半年月均流量超套餐、常在月底限速，关注流量够用与性价比"
+    }
+  },
+  "batch_contexts": [
+    {
+      "product_id": "流量",
+      "stage": "个人市场",
+      "scence": "开口话术"
+    }
+  ]
+}

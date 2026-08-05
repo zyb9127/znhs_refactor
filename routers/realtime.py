@@ -34,8 +34,11 @@ class RecommendRequest(BaseModel):
     intent: str = Field(..., description="业务意图，需与技能包目录名一致")
     province: str = Field(..., description="省份代码，如 beijing")
     topN: int = Field(
-        default=3, ge=1, le=10,
-        description="推荐产品数量，有推荐接口时生效，默认3；不调接口/无推荐场景可不传",
+        default=3, ge=1,
+        description=(
+            "推荐产品数量，仅在服务端调推荐接口取候选时生效，默认3、无上限；"
+            "直传 extra_info.recommended_packages 时不截断（传几个产品出几条话术）"
+        ),
     )
     callId: str = Field(default="", description="请求追踪ID")
     extra_data: Dict[str, Any] = Field(

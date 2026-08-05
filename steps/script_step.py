@@ -125,13 +125,13 @@ class ScriptStep:
     def __init__(self, province: str = "default") -> None:
         # province 仅兼容 Pipeline 构造参数；话术逻辑只依赖 FlowContext + biz_config
         self.max_length    = 150          # 话术最大字符数默认值（营销话术一般 150 字内；可由 biz_config.strategy.max_script_length 覆盖）
-        self.concurrency   = _DEFAULT_CONCURRENCY
         self.field_aliases: Dict[str, List[str]] = {}   # 由 _load_biz() 从 biz_config 注入
         self._match_cfg: Dict[str, Any] = {}             # biz_config.template_match（模板匹配取值配置）
         # 以下由 _load_biz() 每次请求解析注入
         self._templates_v2: List[Dict[str, Any]] = []
         self._fallback_prompt_tpl: str = ""
         self._llm_max_concurrency: int = 0   # 0 = 不限流（历史默认行为）
+        self._llm_concurrency_explicit: bool = False  # biz_config/环境变量是否显式配了上限
 
     # ── 配置解析（run / run_batch 共用）──────────────────────────
 
@@ -145,14 +145,15 @@ class ScriptStep:
         prompts  = biz_config.get("prompts", {})
 
         self.max_length  = strategy.get("max_script_length", self.max_length)
-        # 全局默认来自 config/concurrency.json（默认 8）；biz_config.max_parallel_scripts 可覆盖
+        # 全局默认并发来自 config/concurrency.json（默认 8）
+        # 注：旧键 strategy.max_parallel_scripts 已废弃不再生效（历史遗留，多个技能包里仍写着 3），
+        # 并发上限统一由 strategy.llm_max_concurrency / 环境变量 / concurrency.json 决定。
         try:
             global_cap = int(config_loader.get_script_llm_max_concurrency())
         except Exception:
             global_cap = _DEFAULT_CONCURRENCY
         if global_cap <= 0:
             global_cap = _DEFAULT_CONCURRENCY
-        self.concurrency = strategy.get("max_parallel_scripts", global_cap)
         self.field_aliases = biz_config.get("field_aliases", {})
 
         # template_match：模板匹配维度取值配置（接口查询模式：推荐结果字段 → 模板匹配键）
@@ -179,12 +180,15 @@ class ScriptStep:
         raw = strategy.get("llm_max_concurrency")
         if raw is None:
             raw = os.environ.get("ZNHS_LLM_MAX_CONCURRENCY")
+        # 显式配置标记：直传模式默认不限并发，但运维显式配了上限时必须尊重
+        self._llm_concurrency_explicit = str(raw or "").strip() != ""
         if raw is None:
             raw = global_cap
         try:
             n = int(raw) if raw is not None and str(raw).strip() != "" else 0
         except (TypeError, ValueError):
             n = 0
+            self._llm_concurrency_explicit = False
         self._llm_max_concurrency = n if n > 0 else global_cap
 
     @staticmethod
@@ -194,23 +198,57 @@ class ScriptStep:
     ) -> int:
         """估算本次批量要生成的话术条数，用于自适应并发上限。
 
-        与 run_batch 的展开规则保持一致：条目指定了 product_id → 1 条；
-        product_id 为空 → 对 final_recommendations 逐产品各 1 条。
+        与 run_batch 的展开规则保持一致：有推荐产品时**每个 batch 条目都对全部产品展开**
+        （batch_contexts.product_id 只作模板业务类型 hint，不过滤产品）；无推荐产品时
+        每个条目算 1 条。
         expand 模式条数取决于命中的模板集合，此处无法预知，按产品数估算（偏小无副作用：
         并发上限只是限流阈值，估小仅表示不额外放宽）。
         """
-        rec_n = len(ctx.final_recommendations or []) or 1
-        total = 0
-        for bc in batch_contexts or []:
-            pid = str((bc or {}).get("product_id", "") or "").strip()
-            total += 1 if pid else rec_n
+        rec_n = len(ctx.final_recommendations or [])
+        per_bc = rec_n if rec_n else 1
+        total = per_bc * len(batch_contexts or [])
         return max(total, 1)
 
-    def _make_llm_semaphore(self) -> Optional[asyncio.Semaphore]:
-        """按 _load_biz 解析出的并发上限创建信号量（来自 concurrency.json / 覆盖项）。"""
-        n = self._llm_max_concurrency if self._llm_max_concurrency > 0 else _DEFAULT_CONCURRENCY
-        logger.info(f"[ScriptStep] LLM 并发限流已启用 max_concurrency={n}")
-        return asyncio.Semaphore(n)
+    @staticmethod
+    def _is_direct_mode(ctx: FlowContext) -> bool:
+        """产品列表是否由调用方直传（extra_info.recommended_packages）。
+
+        直传模式下候选产品已由上游挑定并整包传入，条数可预期且由调用方控制，
+        因此默认全部并发；接口查询模式的候选池大小不可控，仍按全局上限限流。
+        """
+        packages = (ctx.extra_info or {}).get("recommended_packages")
+        return isinstance(packages, list) and bool(packages)
+
+    def _make_llm_semaphore(
+        self,
+        ctx: Optional[FlowContext] = None,
+        batch_contexts: Optional[List[Dict[str, Any]]] = None,
+    ) -> asyncio.Semaphore:
+        """创建 LLM 并发信号量。
+
+        上限取值：
+        - 直传模式（extra_info.recommended_packages）且未显式配置上限 → **不限流**，
+          按本次待生成条数全部并发（18 个产品即 18 路并发，不再分批排队）；
+        - 其余情况 → _load_biz 解析出的上限（biz_config / 环境变量 / concurrency.json）。
+
+        ctx 为 None 时退化为纯全局上限，兼容既有调用与测试。
+        """
+        cap = self._llm_max_concurrency if self._llm_max_concurrency > 0 else _DEFAULT_CONCURRENCY
+        if ctx is not None and not self._llm_concurrency_explicit and self._is_direct_mode(ctx):
+            total = (
+                self._estimate_batch_tasks(batch_contexts, ctx)
+                if batch_contexts is not None
+                else len(ctx.final_recommendations or []) or 1
+            )
+            if total > cap:
+                logger.info(
+                    f"[ScriptStep] 直传模式不限并发：待生成 {total} 条全部并发发起"
+                    f"（全局上限 {cap} 仅在接口查询模式生效；"
+                    "如需限流请配 biz_config.strategy.llm_max_concurrency）"
+                )
+                cap = total
+        logger.info(f"[ScriptStep] LLM 并发限流已启用 max_concurrency={cap}")
+        return asyncio.Semaphore(cap)
 
     async def _generate_llm(
         self,
@@ -278,8 +316,8 @@ class ScriptStep:
 
         # 模板索引：规模达标且未关闭时构建一次（构建后只读、线程安全，作参数传入准备函数）
         tpl_index = build_selector_index(templates_v2, ctx.intent)
-        # LLM 并发限流信号量（未配置时为 None，行为与历史一致）
-        sem = self._make_llm_semaphore()
+        # LLM 并发限流信号量（直传模式按产品数全部并发，见 _make_llm_semaphore）
+        sem = self._make_llm_semaphore(ctx)
 
         # 从 extra_context 中提取模板匹配维度
         ec = ctx.extra_context or {}
@@ -369,12 +407,8 @@ class ScriptStep:
 
         # 模板索引：构建一次后只读（线程安全），作参数传入准备函数
         tpl_index = build_selector_index(templates_v2, ctx.intent)
-        # LLM 并发限流：默认读 config/concurrency.json（8），可被 biz_config / 环境变量覆盖
-        sem = self._make_llm_semaphore()
-        if sem is None:
-            _cap = self.concurrency if isinstance(self.concurrency, int) and self.concurrency > 0 else _DEFAULT_CONCURRENCY
-            logger.info(f"[ScriptStep.batch] 使用兜底并发上限 max_concurrency={_cap}")
-            sem = asyncio.Semaphore(_cap)
+        # LLM 并发限流：直传模式按待生成条数全部并发；接口查询模式读 config/concurrency.json（8）
+        sem = self._make_llm_semaphore(ctx, batch_contexts)
 
         # 产品查找辅助：product_id → 产品 dict（来自 final_recommendations）
         # 取值走 _match_product_id：template_match.product_id_from 配置优先（支持点路径），
@@ -1068,14 +1102,24 @@ class ScriptStep:
         丢给大模型，话术质量不可控。此时产品名 offerName（【广州】【纯裸升】升169套餐-2606）
         恰好能模糊命中关键词模板。
 
-        候选顺序：显式配置 product_id_from → offerId 类别名 → 产品名类别名 →
-        recommend_package_name。
+        候选顺序（**产品自身字段优先，batch_contexts.product_id 兜底**）：
+        1. 产品自身标识：template_match.product_id_from 配置字段 → offerId 类别名
+        2. 产品自身名称：field_aliases.pkg_name（默认含 offerName）→ recommend_package_name
+        3. batch_contexts.product_id（业务类型 hint）
 
-        安全边界（保证不改变既有省份行为）：
+        为什么 batch hint 排最后：多产品场景下同一个 batch 条目作用于全部产品，若 hint 优先，
+        18 个不同产品会全部命中 hint 对应的那一个模板（如 product_id="流量" 时套餐/升档类
+        产品也拿到流量话术）。改为产品自身字段优先后，每个产品按自己的 offerName 命中各自
+        的关键词模板，hint 仅在产品自身字段全部匹配不到时兜底。
+
+        安全边界：
         - 只有**前序候选一个模板都没命中**时才会尝试后续候选；配了通用兜底模板
           （product_id 为空）的省份第一候选必命中，行为完全不变；
+        - 无推荐列表的旧单产品写法走占位产品 {"product_id": bc_pid}，其 product_id 即 hint
+          本身（占位产品不挂 hint），行为不变；
         - 回显给调用方的 product_id 仍走 _match_product_id（offerId），不受本候选序列影响；
-        - 可用 biz_config.template_match.disable_name_fallback=true 关闭名称回退。
+        - biz_config.template_match.disable_name_fallback=true 关闭名称回退；
+        - biz_config.template_match.prefer_batch_product_id=true 恢复 hint 优先（旧行为）。
         """
         cands: List[str] = []
 
@@ -1084,13 +1128,17 @@ class ScriptStep:
             if s and s not in cands:
                 cands.append(s)
 
-        # batch_contexts.product_id 指定值优先（与单产品「按入参 product_id 匹配」对齐）
-        _add(pkg.get("_batch_product_id_hint"))
+        mc = self._match_cfg or {}
+        batch_hint = pkg.get("_batch_product_id_hint")
+        if mc.get("prefer_batch_product_id"):
+            _add(batch_hint)
+
         _add(self._match_product_id(pkg))
-        if not (self._match_cfg or {}).get("disable_name_fallback"):
+        if not mc.get("disable_name_fallback"):
             name_keys = self.field_aliases.get("pkg_name", _DEFAULT_FIELD_ALIASES["pkg_name"])
             _add(self._get_field(pkg, name_keys))
             _add(pkg.get("recommend_package_name"))
+        _add(batch_hint)
         return cands
 
     @classmethod
@@ -1174,6 +1222,8 @@ class ScriptStep:
         for k in sorted(pkg.keys()):
             if k in cls._SKIP_RECOMMENDED_PKG_KEYS:
                 continue
+            if isinstance(k, str) and k.startswith("_"):
+                continue   # 内部标记（_batch_product_id_hint 等）不进 Prompt
             v = pkg.get(k)
             if v is None:
                 continue

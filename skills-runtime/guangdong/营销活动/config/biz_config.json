@@ -8,15 +8,30 @@
       "product_id": "流量",
       "scene": "开口话术",
       "stage": "个人市场",
-      "linked_vars": [],
-      "script_requirement": "结合用户信息，直接输出话术文本，不需要前缀，口语化；营销推荐话术贴合用户痛点，字数120字以内。",
+      "linked_vars": [
+        "current_package",
+        "usage",
+        "tags",
+        "user_profile",
+        "recommend_package_name",
+        "recommend_actual_price",
+        "recommend_original_price",
+        "recommend_discount_amount",
+        "recommend_preferential_period",
+        "recommend_base_flow",
+        "recommend_bonus_flow",
+        "recommend_total_flow",
+        "recommend_voice_minutes",
+        "recommend_equity"
+      ],
+      "script_requirement": "你是广东移动营销坐席，把【话术模板】改写成贴合这位客户的开口话术，可直接对客播报。\n① 数据准确（填槽）：话术里的价格、优惠期、流量、语音等数字，必须来自【上下文数据】中以 recommend_ 开头的产品字段真实值；缺失或为 0 的字段所在表述整句跳过，严禁编造或用当前套餐数值顶替。\n② 千人千面（按沟通风格改写语气与详略）：\n   · 细致型 → 条理清晰、把原价→现价、优惠期、流量构成一项项讲透，语气稳妥可信；\n   · 豪爽型 → 直奔核心优惠（每月省多少、流量翻多少），短句、干脆、有行动号召；\n   · 长辈耐心型 → 语速慢、称呼亲切、用大白话打比方，避免专业术语，多给安全感；\n   · 活泼型 → 轻松热情，可用适度语气词，突出“划算/超值”的惊喜感。\n   未标注风格时用自然亲切的默认语气。风格名/字段名一律不得出现在话术里。\n③ 结合用户真实用量与标签选择卖点侧重：流量偏高/月底限速→强调流量升级与够用；语音偏高→强调通话；价格敏感→强调省钱与性价比；只借用来定卖点顺序，不得把用量数字之外的标签原文念出。\n④ 口语化、无前缀、无占位符残留；全文 120 字以内。",
       "prompt_template": "",
       "linked_apis": [],
       "status": "online",
       "created_by": "admin",
       "template_id": "tpl_guangdong_1782093485147_93bfa1",
       "created_at": "2026-06-22 09:58:05",
-      "updated_by": "admin"
+      "updated_by": "demo"
     },
     {
       "province": "guangdong",
@@ -26,15 +41,19 @@
       "product_id": "全家享",
       "scene": "开口话术",
       "stage": "家庭市场",
-      "linked_vars": [],
-      "script_requirement": "直接返回话术模板内容，保持模板中的占位符(**)",
+      "linked_vars": [
+        "current_package",
+        "tags",
+        "user_profile"
+      ],
+      "script_requirement": "你是广东移动家庭市场坐席。按【话术模板】播报全家享礼包卖点，结合客户当前套餐是否已有宽带做切入。\n① 数字（返还/月租/优惠期）缺失或为 0 时整句跳过，不得编造。\n② 未开通宽带的客户强调“一号搞定宽带+电视+会员、全家共享”；语气亲切口语化。\n③ 无前缀、无占位符残留，全文 120 字以内。",
       "prompt_template": "",
       "linked_apis": [],
       "status": "online",
       "created_by": "admin",
       "template_id": "tpl_guangdong_1782094120854_05fbd1",
       "created_at": "2026-06-22 10:08:40",
-      "updated_by": "admin"
+      "updated_by": "demo"
     },
     {
       "province": "guangdong",
@@ -44,15 +63,18 @@
       "product_id": "提速",
       "scene": "开口话术",
       "stage": "家庭市场",
-      "linked_vars": [],
-      "script_requirement": "直接返回话术模板内容",
+      "linked_vars": [
+        "current_package",
+        "tags"
+      ],
+      "script_requirement": "你是广东移动家庭市场坐席。按【话术模板】播报宽带提速优惠，结合当前套餐档位切入。\n缺失或为 0 的数字整句跳过；口语化、无前缀、无占位符残留，全文 100 字以内。",
       "prompt_template": "",
       "linked_apis": [],
       "status": "online",
       "created_by": "admin",
       "template_id": "tpl_guangdong_1782094165400_9abf44",
       "created_at": "2026-06-22 10:09:25",
-      "updated_by": "admin"
+      "updated_by": "demo"
     },
     {
       "province": "guangdong",
@@ -62,14 +84,32 @@
       "product_id": "套餐",
       "scene": "开口话术",
       "stage": "个人市场",
-      "linked_vars": [],
-      "script_requirement": "直接输出话术文本，不需要前缀，口语化；营销推荐话术贴合用户痛点，字数120字以内。",
+      "linked_vars": [
+        "current_package",
+        "usage",
+        "tags",
+        "user_profile",
+        "recommend_package_name",
+        "recommend_actual_price",
+        "recommend_original_price",
+        "recommend_discount_amount",
+        "recommend_preferential_period",
+        "recommend_base_flow",
+        "recommend_bonus_flow",
+        "recommend_total_flow",
+        "recommend_voice_minutes",
+        "recommend_equity"
+      ],
+      "script_requirement": "你是广东移动营销坐席，把【话术模板】改写成贴合这位客户的开口话术，可直接对客播报。\n① 数据准确（填槽）：话术里的价格、优惠期、流量、语音等数字，必须来自【上下文数据】中以 recommend_ 开头的产品字段真实值；缺失或为 0 的字段所在表述整句跳过，严禁编造或用当前套餐数值顶替。\n② 千人千面（按沟通风格改写语气与详略）：\n   · 细致型 → 条理清晰、把原价→现价、优惠期、流量构成一项项讲透，语气稳妥可信；\n   · 豪爽型 → 直奔核心优惠（每月省多少、流量翻多少），短句、干脆、有行动号召；\n   · 长辈耐心型 → 语速慢、称呼亲切、用大白话打比方，避免专业术语，多给安全感；\n   · 活泼型 → 轻松热情，可用适度语气词，突出“划算/超值”的惊喜感。\n   未标注风格时用自然亲切的默认语气。风格名/字段名一律不得出现在话术里。\n③ 结合用户真实用量与标签选择卖点侧重：流量偏高/月底限速→强调流量升级与够用；语音偏高→强调通话；价格敏感→强调省钱与性价比；只借用来定卖点顺序，不得把用量数字之外的标签原文念出。\n④ 口语化、无前缀、无占位符残留；全文 120 字以内。",
       "prompt_template": "",
-      "linked_apis": [],
+      "linked_apis": [
+        "cc"
+      ],
       "status": "online",
       "created_by": "admin",
       "template_id": "tpl_guangdong_1782094602756_803401",
-      "created_at": "2026-06-22 10:16:42"
+      "created_at": "2026-06-22 10:16:42",
+      "updated_by": "demo"
     },
     {
       "province": "guangdong",
@@ -79,14 +119,32 @@
       "product_id": "升",
       "scene": "开口话术",
       "stage": "个人市场",
-      "linked_vars": [],
-      "script_requirement": "直接输出话术文本，不需要前缀，口语化；营销推荐话术贴合用户痛点，字数120字以内。",
+      "linked_vars": [
+        "current_package",
+        "usage",
+        "tags",
+        "user_profile",
+        "recommend_package_name",
+        "recommend_actual_price",
+        "recommend_original_price",
+        "recommend_discount_amount",
+        "recommend_preferential_period",
+        "recommend_base_flow",
+        "recommend_bonus_flow",
+        "recommend_total_flow",
+        "recommend_voice_minutes",
+        "recommend_equity"
+      ],
+      "script_requirement": "你是广东移动营销坐席，把【话术模板】改写成贴合这位客户的开口话术，可直接对客播报。\n① 数据准确（填槽）：话术里的价格、优惠期、流量、语音等数字，必须来自【上下文数据】中以 recommend_ 开头的产品字段真实值；缺失或为 0 的字段所在表述整句跳过，严禁编造或用当前套餐数值顶替。\n② 千人千面（按沟通风格改写语气与详略）：\n   · 细致型 → 条理清晰、把原价→现价、优惠期、流量构成一项项讲透，语气稳妥可信；\n   · 豪爽型 → 直奔核心优惠（每月省多少、流量翻多少），短句、干脆、有行动号召；\n   · 长辈耐心型 → 语速慢、称呼亲切、用大白话打比方，避免专业术语，多给安全感；\n   · 活泼型 → 轻松热情，可用适度语气词，突出“划算/超值”的惊喜感。\n   未标注风格时用自然亲切的默认语气。风格名/字段名一律不得出现在话术里。\n③ 结合用户真实用量与标签选择卖点侧重：流量偏高/月底限速→强调流量升级与够用；语音偏高→强调通话；价格敏感→强调省钱与性价比；只借用来定卖点顺序，不得把用量数字之外的标签原文念出。\n④ 口语化、无前缀、无占位符残留；全文 120 字以内。",
       "prompt_template": "",
-      "linked_apis": [],
+      "linked_apis": [
+        "cc"
+      ],
       "status": "online",
       "created_by": "admin",
       "template_id": "tpl_guangdong_1782094602768_06a3f2",
-      "created_at": "2026-06-22 10:16:42"
+      "created_at": "2026-06-22 10:16:42",
+      "updated_by": "demo"
     },
     {
       "province": "guangdong",
@@ -96,14 +154,41 @@
       "product_id": "体验",
       "scene": "开口话术",
       "stage": "个人市场",
-      "linked_vars": [],
-      "script_requirement": "直接输出话术文本，不需要前缀，口语化；营销推荐话术贴合用户痛点，字数120字以内。",
+      "linked_vars": [
+        "current_package",
+        "usage",
+        "tags",
+        "user_profile",
+        "recommend_package_name",
+        "recommend_actual_price",
+        "recommend_original_price",
+        "recommend_discount_amount",
+        "recommend_preferential_period",
+        "recommend_base_flow",
+        "recommend_bonus_flow",
+        "recommend_total_flow",
+        "recommend_voice_minutes",
+        "recommend_equity"
+      ],
+      "script_requirement": "你是广东移动营销坐席，把【话术模板】改写成贴合这位客户的开口话术，可直接对客播报。\n① 数据准确（填槽）：话术里的价格、优惠期、流量、语音等数字，必须来自【上下文数据】中以 recommend_ 开头的产品字段真实值；缺失或为 0 的字段所在表述整句跳过，严禁编造或用当前套餐数值顶替。\n② 千人千面（按沟通风格改写语气与详略）：\n   · 细致型 → 条理清晰、把原价→现价、优惠期、流量构成一项项讲透，语气稳妥可信；\n   · 豪爽型 → 直奔核心优惠（每月省多少、流量翻多少），短句、干脆、有行动号召；\n   · 长辈耐心型 → 语速慢、称呼亲切、用大白话打比方，避免专业术语，多给安全感；\n   · 活泼型 → 轻松热情，可用适度语气词，突出“划算/超值”的惊喜感。\n   未标注风格时用自然亲切的默认语气。风格名/字段名一律不得出现在话术里。\n③ 结合用户真实用量与标签选择卖点侧重：流量偏高/月底限速→强调流量升级与够用；语音偏高→强调通话；价格敏感→强调省钱与性价比；只借用来定卖点顺序，不得把用量数字之外的标签原文念出。\n④ 口语化、无前缀、无占位符残留；全文 120 字以内。",
       "prompt_template": "",
-      "linked_apis": [],
+      "linked_apis": [
+        "cc"
+      ],
       "status": "online",
       "created_by": "admin",
       "template_id": "tpl_guangdong_1782094602777_940333",
-      "created_at": "2026-06-22 10:16:42"
+      "created_at": "2026-06-22 10:16:42",
+      "updated_by": "demo"
     }
-  ]
+  ],
+  "template_match": {
+    "product_id_from": "offerName"
+  },
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 3,
+    "max_script_length": 150,
+    "max_parallel_scripts": 3
+  }
 }

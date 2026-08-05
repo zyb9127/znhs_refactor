@@ -16,13 +16,11 @@
       "enabled": true,
       "description": "北京套餐升档推荐接口 — 获取用户当前套餐、推荐套餐列表及用量标签"
     },
-    "等等": {
-      "name": "等等",
+    "营销推荐": {
+      "name": "营销推荐",
       "version": "1.0.0",
       "enabled": true,
-      "description": "等等",
-      "created_by": "auto_config_agent",
-      "created_at": "2026-07-20 16:40"
+      "description": "北京营销推荐（比赛演示：接口查询+云宽带多场景话术库）"
     }
   }
 }

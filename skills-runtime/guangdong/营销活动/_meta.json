@@ -5,8 +5,16 @@
   "type": "scenario",
   "province": "广东",
   "scenario_id": "营销活动",
-  "config_files": ["api_nodes.json", "biz_config.json"],
-  "required_plugins": ["plugins.package_diff", "plugins.unit_converter"],
+  "config_files": [
+    "api_nodes.json",
+    "biz_config.json"
+  ],
+  "required_plugins": [
+    "plugins.package_diff",
+    "plugins.unit_converter"
+  ],
   "author": "guangdong-team",
-  "openclaw_compatible": true
+  "openclaw_compatible": true,
+  "status": "published",
+  "published_at": "2026-08-04 13:24"
 }

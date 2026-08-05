@@ -1,0 +1,58 @@
+{
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 3,
+    "intent_strategies": {},
+    "max_script_length": 150,
+    "max_parallel_scripts": 3
+  },
+  "field_aliases": {
+    "_comment": "套餐字段别名（按优先级从高到低列出），ScriptStep 按此映射取值，无需硬编码字段名",
+    "pkg_name": [
+      "offerName",
+      "package_name",
+      "productName",
+      "name"
+    ],
+    "pkg_fee": [
+      "initFee",
+      "monthly_fee",
+      "price",
+      "fee"
+    ],
+    "pkg_flow": [
+      "offerFlow",
+      "data_quota",
+      "dataGB",
+      "flow"
+    ],
+    "pkg_voice": [
+      "offerVoice",
+      "voice_quota",
+      "voiceMinutes",
+      "voice"
+    ]
+  },
+  "script_templates_v2": [
+    {
+      "template_id": "tpl_01",
+      "template_name": "推荐话术",
+      "intent": "等等",
+      "province": "beijing",
+      "product_id": "",
+      "scene": "",
+      "stage": "推荐环节",
+      "template_content": "为您推荐 {pkg_brief}，更适合您的使用习惯。",
+      "prompt_template": "你是移动套餐营销推荐坐席。\n请基于以下用户信息和话术模板生成个性化套餐营销推荐话术：\n\n话术模板：{template_content}\n\n直接输出话术文本，不需要前缀，口语化；营销推荐话术贴合用户痛点，字数{max_length}字以内。",
+      "linked_vars": [
+        "pkg_brief",
+        "cur_brief"
+      ],
+      "script_requirement": "直接输出话术文本，口语化，字数150字以内。",
+      "linked_apis": [],
+      "status": "online",
+      "created_by": "auto_config_agent",
+      "created_at": "2026-07-20 16:40:23"
+    }
+  ]
+}

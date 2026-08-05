@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 from utils.auth_utils import check_province_write, get_operator, get_user_province
 from utils.placeholder import dig_subfield
 from utils.skill_runtime import skill_registry
-from utils.var_infer import infer_linked_vars, infer_placeholder_vars
+from utils.var_infer import infer_linked_vars, infer_placeholder_vars, _KEY_ALIAS
 
 router = APIRouter(tags=["运营管理"])
 
@@ -732,7 +732,7 @@ def _merge_auto_domain_vars(province: str, intent: str, linked_vars) -> List[str
 
 
 def _fill_placeholder_vars(content: Any, linked_vars: Any) -> tuple:
-    """保存即补齐：把模板里真实写出的占位符所属数据域并入 linked_vars（只增不减）。
+    """保存即补齐：按当前模板内容重新计算占位符变量，同时清理已不再引用的变量。
 
     子字段占位符 ``{usage[consumption][近6月平均月消费]}`` 只写了根名 ``usage`` 的子键，
     历史推断（infer_linked_vars 的 ``\\{(\\w+)\\}`` 精确层）匹配不到，模板若又没手动勾选
@@ -743,9 +743,19 @@ def _fill_placeholder_vars(content: Any, linked_vars: Any) -> tuple:
         (补齐后的 linked_vars, 新增的变量列表)
     """
     merged = list(linked_vars or [])
-    added = [v for v in infer_placeholder_vars(str(content or "")) if v not in merged]
-    merged.extend(added)
-    return merged, added
+    current = set(infer_placeholder_vars(str(content or "")))
+    # 占位符体系能产出的所有变量值（_KEY_ALIAS 的值集合）
+    # 用于区分"占位符来源"与"API域变量来源"：后者不应被清理
+    placeholder_values = set(_KEY_ALIAS.values())
+    # 保留：非占位符来源的变量（API域变量等）+ 当前模板仍在引用的占位符变量
+    kept = [v for v in merged if v not in placeholder_values or v in current]
+    removed = [v for v in merged if v in placeholder_values and v not in current]
+    if removed:
+        logger.info(f"[_fill_placeholder_vars] 清理已不再引用的占位符变量: {removed}")
+    # 补充新增的占位符变量
+    added = [v for v in current if v not in kept]
+    kept.extend(added)
+    return kept, added
 
 
 @router.put("/api/skills/{province}/{intent}/api_nodes")

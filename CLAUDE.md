@@ -45,6 +45,13 @@ npm run build:artifacts
 npm run build:artifact:gray
 ```
 
+> ⚠️ **前端改了但页面没变化？先强刷浏览器（Cmd+Shift+R）。**
+> 这是 Vue SPA：后端部署了新版带 hash 的 JS 后，浏览器里跑的还是内存中的旧版，
+> 路由切换不会重新请求资源，JS 走 last-modified/ETag 启发式缓存，同名文件直接复用旧的。
+> 正常访问 index.html 是 no-store，但 SPA 运行中不刷新就看不到新代码——**不是构建问题**。
+> 验证部署是否生效时，用构建产物里【真正渲染的文案】比对（注释会被压缩剥掉，如
+> "取数模式"只出现在源码注释里，产物里永远找不到，不能当"没部署"的证据）。
+
 ### 测试
 
 ```bash

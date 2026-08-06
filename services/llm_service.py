@@ -309,8 +309,7 @@ class LLMService:
     def _clean_llm_output(raw: str) -> str:
         """清洗模型输出，只保留正式话术正文。
 
-        由于已通过 /no_think 前缀 + enable_thinking=False 双重关闭 Qwen3 思考模式，
-        正常情况下不会出现 <think> 块或推理段落，此处仅做轻量正文清洗：
+        - 去除 <think>...</think> 思考块（开启思考模式时 Qwen3 会输出）
         - 去除残留 Markdown 格式符号
         - 去除「话术：」前缀
         - 不含中文视为异常，返回空
@@ -320,6 +319,9 @@ class LLMService:
         text = raw.strip()
         if not text:
             return ""
+
+        # 去 <think>...</think> 思考块（开启思考模式时可能出现）
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
         # 去 Markdown 格式符号（加粗/标题）
         text = re.sub(r"\*{1,2}([^*]+)\*{1,2}", r"\1", text)

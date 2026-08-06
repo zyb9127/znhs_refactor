@@ -610,9 +610,32 @@ async def get_context_vars(province: str, intent: str):
                 if not isinstance(_el, dict):
                     continue
                 for _lf, _lv in _el.items():
-                    if (not isinstance(_lf, str) or _lf.startswith("_")
-                            or _lf in _seen_lf or isinstance(_lv, (dict, list))
-                            or _lf in _PKG_SKIP or _lf not in product_allow):
+                    if not isinstance(_lf, str) or _lf.startswith("_"):
+                        continue
+                    if _lf in _seen_lf or isinstance(_lv, list) or _lf in _PKG_SKIP:
+                        continue
+                    if isinstance(_lv, dict):
+                        # 嵌套字典字段（如 diff）：product_allow 可能勾了它本身
+                        # （recommended_packages.diff）或其子键
+                        # （recommended_packages.diff.diff_actual_price），
+                        # 两种都应展开子字段为多级子路径占位符
+                        _nested_allow = (
+                            _lf in product_allow
+                            or any(k in product_allow for k in _lv if isinstance(k, str))
+                        )
+                        if not _nested_allow:
+                            continue
+                        _seen_lf.add(_lf)
+                        for _nf, _nv in _lv.items():
+                            if (not isinstance(_nf, str) or _nf.startswith("_")
+                                    or isinstance(_nv, (dict, list))
+                                    or _nf in _PKG_SKIP):
+                                continue
+                            _token = f"recommended_package[{_lf}][{_nf}]"
+                            _path = f"{_lf}.{_nf}"
+                            _subs.append({"token": _token, "label": _nf, "path": _path, "sample": _nv})
+                        continue
+                    if _lf not in product_allow:
                         continue
                     _seen_lf.add(_lf)
                     _subs.append({"token": _lf, "label": _lf, "path": _lf, "sample": _lv})

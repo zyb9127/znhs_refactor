@@ -8147,14 +8147,12 @@
       "province": "shandong",
       "intent": "套餐升档",
       "template_name": "套餐升档",
-      "template_content": "近三月超套情况：当前套餐{extra_info[current_package][actual_price]},当前流量{extra_info[current_package][baseFlow]}，推荐你办理套餐{recommend_package_name}。",
-      "product_id": "100",
+      "template_content": "截止到{date},当前套餐{current_package[package_name]},当前流量{current_package[baseFlow]}G，当前价格{current_package[actual_price]}元，推荐您办理{recommend_package_name},流量{recommend_base_flow}G，区别是话费 {recommended_package[diff][diff_actual_price]}，流量 {recommended_package[diff][base_flow_diff]}G。",
+      "product_id": "1125620240902586449",
       "scene": "营销推荐-融合权益",
       "stage": "营销推荐",
       "linked_vars": [
-        "pkg_brief",
-        "diff_str",
-        "extra_info"
+        "current_package"
       ],
       "script_requirement": "空值 / 零值：字段为空、缺失或为 0 时 删除分句，其它数值字段（流量 / 语音 / 赠送）删除包含它的整个分句，不保留占位、不编造。\n结合【上下文数据】中的当前套餐、历史用量与用户标签，先点出最突出的用户痛点，再用推荐套餐对应字段的真实值说明如何解决；只讲有数据支撑的卖点，口语化、可直接对客播报，150字以内，结尾自然引导办理。",
       "prompt_template": "",
@@ -8163,8 +8161,9 @@
       ],
       "status": "online",
       "created_by": "import",
-      "created_at": "2026-08-03 11:14:34",
-      "template_id": "tpl_shandong_1785726874179_19d175"
+      "template_id": "tpl_shandong_1785919298685_c3954f",
+      "created_at": "2026-08-05 16:41:38",
+      "updated_by": "admin"
     }
   ]
 }

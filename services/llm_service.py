@@ -181,6 +181,7 @@ class LLMService:
 
         # 关闭思考模式：不同模型厂商参数不同
         # - Qwen3/DashScope: chat_template_kwargs.enable_thinking=false
+        # - Qwen3/九天MOMA(vLLM): enable_thinking=false（顶层 OpenAI 兼容参数）
         # - DeepSeek: reasoning_effort="none" 或 thinking={"type":"disabled"}（部分版本支持）
         url_str = str(self.llm_config.get("url", ""))
         model_str = str(self.llm_config.get("model", "") or self.llm_config.get("model_id", ""))
@@ -189,7 +190,10 @@ class LLMService:
             # 取 low 以最小化思考链 token 占用（none 会 400）
             data["reasoning_effort"] = "low"
         else:
-            # Qwen3 / DashScope 系列
+            # Qwen3 / DashScope 系列：同时发顶层和 chat_template_kwargs 两层参数
+            # - 九天MOMA / vLLM 等 OpenAI 兼容平台读顶层 enable_thinking
+            # - DashScope 原生平台读 chat_template_kwargs.enable_thinking
+            data["enable_thinking"] = False
             data["chat_template_kwargs"] = {"enable_thinking": False}
 
         last_error = None
@@ -395,6 +399,7 @@ class LLMService:
             "max_tokens": max_tokens,
             "tools": tools,
             "tool_choice": "auto",
+            "enable_thinking": False,
             "chat_template_kwargs": {"enable_thinking": False},
         }
         client = await self._get_client()

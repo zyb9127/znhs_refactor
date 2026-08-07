@@ -263,6 +263,21 @@ def _fmt_passthrough_value(v: Any) -> str:
     return str(v)
 
 
+def _is_numeric_zero(val: str) -> bool:
+    """格式化后的值是否为数值零（"0" / "0.0" / "0.00" / 0 / 0.0 等）。
+
+    【上下文数据】注入处统一用此函数过滤零值字段，
+    避免 LLM 把「0 分钟 / 0GB / 0 元」写进话术。
+    """
+    s = str(val).strip() if val is not None else ""
+    if not s:
+        return True
+    try:
+        return float(s) == 0.0
+    except (ValueError, TypeError):
+        return False
+
+
 # ── 子字段路径占位符（{域[子键]} / {域[子键1][子键2]}）────────────────
 # 允许话术模板精确引用某个标准域字典下的具体字段（而非整块 JSON），实现字段级槽位对齐，
 # 让「入参字段 → 模板槽位」的匹配更精准。语法用方括号包裹子键（子键可含中文 / 括号 / 点号，
@@ -533,8 +548,8 @@ def build_prompt(
             if var_key in emitted:
                 continue   # 同义组已注入（如 cur_brief 与 current_package 同时勾选时只出一行）
             var_val = _resolve_var(var_key)
-            if var_val.strip() == "":
-                continue   # 空事实不展示（防止“标签：”空槽诱导编造）
+            if var_val.strip() == "" or _is_numeric_zero(var_val):
+                continue   # 空/零事实不展示（防止"0分钟/0GB/0元"进 Prompt）
             # 行首标注该事实对应的模板占位符 {anchor}，给模型精确的字符串锚点；
             # 锚点对齐模板实际用名，避免 linked_vars 与模板占位符别名错位导致槽位被跳过
             anchor = _anchor_for(var_key)
@@ -567,7 +582,7 @@ def build_prompt(
                         and not (template_text and ("{" + pk + "}") in template_text)):
                     continue
                 val = _fmt_passthrough_value(pv)
-                if val.strip() == "":
+                if val.strip() == "" or _is_numeric_zero(val):
                     continue
                 label = VAR_LABELS.get(pk, pk)
                 context_lines.append(f"{label} {{{pk}}}：{val}")
@@ -601,7 +616,7 @@ def build_prompt(
                 else:
                     # 模板直接引用推荐产品字段名（{recommend_actual_price} 等）
                     val = _pkg_own_field(pkg, token)
-                if val.strip() == "":
+                if val.strip() == "" or _is_numeric_zero(val):
                     continue
                 label = VAR_LABELS.get(token, token)
                 context_lines.append(f"{label} {{{token}}}：{val}")
@@ -647,8 +662,8 @@ def build_prompt(
                     continue
                 _keys = re.findall(r"\[([^\[\]]+)\]", _m.group(2))
                 _sval = _fmt_passthrough_value(_subfield_walk(_subfield_roots.get(_root), _keys))
-                if _sval.strip() == "":
-                    continue   # 取不到值的子字段不入 Prompt，避免模型对空槽臆造
+                if _sval.strip() == "" or _is_numeric_zero(_sval):
+                    continue   # 取不到值或零值的子字段不入 Prompt
                 _leaf_label = _keys[-1] if _keys else _root
                 context_lines.append(f"{_leaf_label} {{{_token}}}：{_sval}")
                 _record_slot_fact(_token, _sval)

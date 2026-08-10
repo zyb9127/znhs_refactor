@@ -3,5 +3,14 @@
   "province_name": "福建",
   "enabled": true,
   "version": "1.0.0",
-  "intents": {}
+  "intents": {
+    "测试": {
+      "name": "测试",
+      "version": "1.0.0",
+      "enabled": true,
+      "description": "测试",
+      "created_by": "auto_config_agent",
+      "created_at": "2026-08-10 15:59"
+    }
+  }
 }

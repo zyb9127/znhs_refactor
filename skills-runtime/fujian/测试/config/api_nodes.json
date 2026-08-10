@@ -1,0 +1,105 @@
+{
+  "main_api": {
+    "enabled": true,
+    "_comment": "福建测试接口",
+    "url": "",
+    "method": "POST",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "timeout": 30,
+    "max_retries": 2,
+    "mock_mode": false,
+    "created_by": "auto_config_agent",
+    "created_at": "2026-08-10 15:59",
+    "source_type": "direct",
+    "direct_mode": "passthrough",
+    "passthrough_fields": [
+      "current_package",
+      "current_package.package_name",
+      "current_package.actual_price",
+      "current_package.voice_minutes",
+      "current_package.baseFlow",
+      "current_package.equity",
+      "current_package.broadband",
+      "recommended_packages",
+      "recommended_packages.offerId",
+      "recommended_packages.offerName",
+      "recommended_packages.rank",
+      "recommended_packages.recommend_package_name",
+      "recommended_packages.recommend_original_price",
+      "recommended_packages.recommend_actual_price",
+      "recommended_packages.recommend_discount_amount",
+      "recommended_packages.recommend_base_flow",
+      "recommended_packages.recommend_bonus_flow",
+      "recommended_packages.recommend_total_flow",
+      "recommended_packages.recommend_voice_minutes",
+      "recommended_packages.recommend_preferential_period",
+      "recommended_packages.recommend_equity",
+      "recommended_packages.recommend_broadband",
+      "recommended_packages.diff_actual_price",
+      "recommended_packages.base_flow_diff",
+      "recommended_packages.bonus_flow_diff",
+      "recommended_packages.voice_minutes_diff",
+      "portrait_style",
+      "portrait_style.communication_style",
+      "portrait_style.business_conte",
+      "tags",
+      "tags.avg_3month_voice",
+      "tags.avg_3month_flow",
+      "tags.voice_over_fee",
+      "tags.flow_over_fee",
+      "tags.total_over_fee",
+      "tags.user_profile"
+    ],
+    "request_template": {},
+    "response_extract": {},
+    "field_transform": {},
+    "mock_response": {
+      "current_package": {
+        "package_name": "4G飞享套餐38元档",
+        "actual_price": "38",
+        "voice_minutes": "100",
+        "baseFlow": "5",
+        "equity": "无",
+        "broadband": "无"
+      },
+      "recommended_packages": [
+        {
+          "offerId": "GD5G59",
+          "offerName": "5G畅享套餐59元档",
+          "rank": 1,
+          "recommend_package_name": "5G畅享套餐59元档",
+          "recommend_original_price": "79",
+          "recommend_actual_price": "59",
+          "recommend_discount_amount": "20",
+          "recommend_base_flow": "20",
+          "recommend_bonus_flow": "10",
+          "recommend_total_flow": "30",
+          "recommend_voice_minutes": "200",
+          "recommend_preferential_period": "12",
+          "recommend_equity": "视频会员",
+          "recommend_broadband": "无",
+          "diff_actual_price": "+21",
+          "base_flow_diff": "+15",
+          "bonus_flow_diff": "+10",
+          "voice_minutes_diff": "+100"
+        }
+      ],
+      "portrait_style": {
+        "communication_style": "直接爽快，对价格敏感",
+        "business_conte": "近3个月流量持续超套，升档接受度高"
+      },
+      "tags": {
+        "avg_3month_voice": "300",
+        "avg_3month_flow": "30000",
+        "voice_over_fee": "5",
+        "flow_over_fee": "5",
+        "total_over_fee": "10",
+        "user_profile": "近三个月平均流量超套金额X；近3个月语音超套费用X；上月超套流量费用X；当月超套语音费用X；近3月平均通用流量饱和度_含结转X；近三个月语音饱和度X"
+      }
+    },
+    "updated_by": "admin",
+    "updated_at": "2026-08-10 16:00:30"
+  }
+}

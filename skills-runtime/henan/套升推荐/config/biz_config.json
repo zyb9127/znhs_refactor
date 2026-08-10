@@ -1,0 +1,59 @@
+{
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 3,
+    "intent_strategies": {},
+    "max_script_length": 150,
+    "max_parallel_scripts": 3
+  },
+  "field_aliases": {
+    "_comment": "套餐字段别名（按优先级从高到低列出），ScriptStep 按此映射取值，无需硬编码字段名",
+    "pkg_name": [
+      "offerName",
+      "package_name",
+      "productName",
+      "name"
+    ],
+    "pkg_fee": [
+      "initFee",
+      "monthly_fee",
+      "price",
+      "fee"
+    ],
+    "pkg_flow": [
+      "offerFlow",
+      "data_quota",
+      "dataGB",
+      "flow"
+    ],
+    "pkg_voice": [
+      "offerVoice",
+      "voice_quota",
+      "voiceMinutes",
+      "voice"
+    ]
+  },
+  "script_templates_v2": [
+    {
+      "province": "henan",
+      "intent": "套升推荐",
+      "template_name": "套升推荐",
+      "template_content": "你当前的套餐是{current_package[package_name]}，{current_package[baseFlow]}G流量，通话{current_package[voice_minutes]}分钟，现在推荐您办理{recommend_package_name}，新套餐流量{recommend_base_flow}G,{recommend_voice_minutes}分钟通话，套餐价格为{recommend_original_price}，要不要考虑一下？",
+      "product_id": "",
+      "scene": "营销推荐-融合权益",
+      "stage": "营销推荐",
+      "linked_vars": [
+        "current_package"
+      ],
+      "script_requirement": "严格遵守：\n占位符：{xxx} 必须全部替换为真实数值；话术禁止出现 *、**、x、xx、XX、字段英文名，以及「0 个月 / 0GB/0 元 / 0 分钟」。\n空值 / 零值：字段为空、缺失或为 0 时，改说「连续包月」（禁止「连续 0 个月」）；其它数值字段（流量 / 语音 / 赠送）删除包含它的整个分句，不保留占位、不编造。",
+      "prompt_template": "",
+      "linked_apis": [
+        "main_api"
+      ],
+      "status": "online",
+      "created_by": "import",
+      "created_at": "2026-08-10 15:16:51",
+      "template_id": "tpl_henan_1786346211374_f23f30"
+    }
+  ]
+}

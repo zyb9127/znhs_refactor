@@ -1,0 +1,16 @@
+{
+  "province_code": "anhui",
+  "province_name": "anhui",
+  "enabled": true,
+  "version": "1.0.0",
+  "intents": {
+    "流量包": {
+      "name": "流量包",
+      "version": "1.0.0",
+      "enabled": true,
+      "description": "安徽流量包",
+      "created_by": "auto_config_agent",
+      "created_at": "2026-08-12 16:05"
+    }
+  }
+}

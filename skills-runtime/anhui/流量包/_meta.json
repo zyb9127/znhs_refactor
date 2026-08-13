@@ -1,12 +1,12 @@
 {
-  "skill_id": "beijing-等等",
-  "name": "beijing-等等",
-  "description": "等等",
+  "skill_id": "anhui-流量包",
+  "name": "anhui-流量包",
+  "description": "安徽流量包",
   "version": "1.0.0",
-  "status": "offline",
+  "status": "published",
   "type": "scenario",
-  "province": "beijing",
-  "scenario_id": "等等",
+  "province": "anhui",
+  "scenario_id": "流量包",
   "config_files": [
     "api_nodes.json",
     "biz_config.json"
@@ -17,8 +17,8 @@
   ],
   "author": "admin",
   "created_by": "auto_config_agent",
-  "created_at": "2026-07-20 16:40",
-  "updated_at": "2026-07-20 16:40",
+  "created_at": "2026-08-12 16:05",
+  "updated_at": "2026-08-12 16:05",
   "openclaw_compatible": true,
-  "offline_at": "2026-08-04 09:19"
+  "published_at": "2026-08-13 10:05"
 }

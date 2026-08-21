@@ -402,7 +402,7 @@ const editingId = ref(null)
 const editIntents = ref([])
 const showPromptPreview = ref(false)
 const showGroupPromptPreview = ref(false)
-const DEFAULT_SCRIPT_REQ = '结合【上下文数据】中的当前套餐、历史用量与用户标签，先点出最突出的用户痛点，再用推荐套餐对应字段的真实值说明如何解决；只讲有数据支撑的卖点，口语化、可直接对客播报，150字以内，结尾自然引导办理。'
+const DEFAULT_SCRIPT_REQ = '以用户专属客户经理的口吻，用自然、口语化、像真人一对一沟通的语气说话，杜绝生硬模板腔与官话套话（如"尊敬的客户""钜惠来袭"）。话术骨架以【话术模板】为准：模板已给出句子顺序与结构时就照模板走，只做占位符填充和语句通顺化，不要另起一套结构、不要增删模板里没有的卖点；模板没写明结构时，再按「亲切开场 → 结合【上下文数据】中的当前套餐、历史用量与用户标签点出 1 个最突出的痛点 → 用推荐套餐对应字段的真实值（月费/流量/语音等）说清如何解决、并做前后对比放大获得感 → 一句自然的办理引导」组织。各句衔接顺滑不生硬；只讲有数据支撑的卖点，无数据的点不提、不夸大；有真实的专属/限时权益可点明（无则不编）。控制在 150 字以内，只保留一个明确的行动引导，结尾干脆不啰嗦。'
 const editForm = reactive({ province:'', intent:'', product_id:'', stage:'', scene:'', template_content:'', script_requirement: DEFAULT_SCRIPT_REQ, created_by:'admin', status:'online', linked_vars: [] })
 
 // ── 调后端 infer_vars 接口推断推荐变量 ─────────────────────────

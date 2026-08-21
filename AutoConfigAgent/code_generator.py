@@ -143,7 +143,9 @@ class SkillPackageGenerator:
         # 否则生成后会被当作普通接口查询节点（url 为空 → 运行时报错）。
         if api.get("source_type") == "direct" or api.get("direct_mode"):
             node["source_type"] = "direct"
-            node["direct_mode"] = api.get("direct_mode", "mapping")
+            # 智能映射(mapping)子模式已下线：新生成的直传节点统一为透传；
+            # 仅当显式传入 mapping 时才保留（兼容历史/程序化调用，运行时仍支持）。
+            node["direct_mode"] = api.get("direct_mode", "passthrough")
             node["url"] = ""
             node["mock_mode"] = False
             if node["direct_mode"] == "passthrough":
@@ -372,7 +374,7 @@ EXAMPLE_TEMPLATE: Dict[str, Any] = {
             "stage": "",
             "product_id": "",
             "template_content": "您好，您当前套餐为{cur_brief}，根据您近期使用情况{usage_line}，为您推荐{pkg_brief}套餐，{diff_str}，即可享受更多权益。",
-            "script_requirement": "直接输出话术文本，不需要前缀，口语化，亲切；营销推荐话术贴合用户痛点；字数80字以内。",
+            "script_requirement": "以用户专属客户经理的口吻自然、口语化沟通，别用官话套话；结合历史用量/标签点出最突出的痛点，再用推荐套餐真实字段值说清如何解决、做前后对比放大获得感；只讲有数据支撑的卖点，不编造不夸大；80字以内，结尾一句自然的办理引导。",
             "linked_vars": ["cur_brief", "pkg_brief", "diff_str", "usage_line"],
         },
         {
@@ -381,7 +383,7 @@ EXAMPLE_TEMPLATE: Dict[str, Any] = {
             "stage": "切入环节",
             "product_id": "",
             "template_content": "您好，看到您近期流量/语音使用较多，我们现在有{pkg_brief}套餐，很适合您，给您简单介绍下。",
-            "script_requirement": "直接输出话术文本，不需要前缀，口语化；字数50字以内。",
+            "script_requirement": "像真人坐席自然开口、别生硬；一句话结合用户近期用量/标签切入并点出关注点，自然过渡到要介绍的产品；口语化、50字以内，不喊口号不夸大。",
             "linked_vars": ["pkg_brief", "usage_line"],
         },
     ],

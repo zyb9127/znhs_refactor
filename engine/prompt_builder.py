@@ -39,6 +39,7 @@ from prompt.script_generation import (
     SCRIPT_MISSING_FACTS_HEAD,
     SCRIPT_MISSING_FACTS_TAIL,
     SCRIPT_LEGACY_USER_TEMPLATE,
+    SCRIPT_LENGTH_RULE,
     SCRIPT_OUTPUT_SUFFIX,
     SCRIPT_PERSONA_RULE,
     SCRIPT_SYSTEM_HEADER,
@@ -49,6 +50,12 @@ from utils.placeholder import dig_subfield
 
 if TYPE_CHECKING:
     from core.context import FlowContext
+
+
+# 话术字数默认上限：与 ScriptStep.max_length 默认值保持一致（营销话术一般 150 字内），
+# 技能包可用 biz_config.strategy.max_script_length 覆盖。此处是「调用方没给」时的兜底，
+# 预览端点同用，避免预览与运行时字数约束不一致。
+_DEFAULT_MAX_LENGTH = 150
 
 
 # ── 变量标签单一真源 ──────────────────────────────────────────────
@@ -164,8 +171,13 @@ _PKG_FACT_VAR_KEYS = frozenset(
 
 # 推荐产品字段兜底注入时跳过的键：纯排序/内部标记，以及不该进话术的 ID 类字段
 # （ID 一旦进上下文，模型可能把 2026070113291445801035520 这类串号念进话术）
+# 后半段是营销助手统一接口（灵运交叉营销）的 ID / 标志位字段：activityTypeCode 是活动
+# 分类编码、两个 marketing*Flag 只用于判断是否生成话术（见 utils.marketing_assistant），
+# 都不是话术素材。已上线省份的产品对象里没有这些字段，排除它们不改变现网上下文。
 _PKG_INJECT_SKIP_KEYS = frozenset({
     "rank", "offerId", "offer_id", "product_id", "package_id", "prod_id",
+    "productId", "activityId", "activityTypeCode",
+    "marketingProductFlag", "marketingActivityFlag",
 })
 
 # 标准域 / 已知变量名：推荐产品字段不得占用这些名字（详见 _pkg_own_field）
@@ -261,21 +273,6 @@ def _fmt_passthrough_value(v: Any) -> str:
         except (TypeError, ValueError):
             return str(v)
     return str(v)
-
-
-def _is_numeric_zero(val: str) -> bool:
-    """格式化后的值是否为数值零（"0" / "0.0" / "0.00" / 0 / 0.0 等）。
-
-    【上下文数据】注入处统一用此函数过滤零值字段，
-    避免 LLM 把「0 分钟 / 0GB / 0 元」写进话术。
-    """
-    s = str(val).strip() if val is not None else ""
-    if not s:
-        return True
-    try:
-        return float(s) == 0.0
-    except (ValueError, TypeError):
-        return False
 
 
 # ── 子字段路径占位符（{域[子键]} / {域[子键1][子键2]}）────────────────
@@ -431,7 +428,7 @@ def build_prompt(
     script_requirement: str = "",
     extra_info_override: Optional[Dict[str, Any]] = None,
     field_aliases: Optional[Dict[str, Any]] = None,
-    max_length: int = 100,
+    max_length: int = _DEFAULT_MAX_LENGTH,
     slot_facts_out: Optional[Dict[str, str]] = None,
     parts_out: Optional[Dict[str, str]] = None,
 ) -> str:
@@ -548,8 +545,8 @@ def build_prompt(
             if var_key in emitted:
                 continue   # 同义组已注入（如 cur_brief 与 current_package 同时勾选时只出一行）
             var_val = _resolve_var(var_key)
-            if var_val.strip() == "" or _is_numeric_zero(var_val):
-                continue   # 空/零事实不展示（防止"0分钟/0GB/0元"进 Prompt）
+            if var_val.strip() == "":
+                continue   # 空事实不展示（防止“标签：”空槽诱导编造）
             # 行首标注该事实对应的模板占位符 {anchor}，给模型精确的字符串锚点；
             # 锚点对齐模板实际用名，避免 linked_vars 与模板占位符别名错位导致槽位被跳过
             anchor = _anchor_for(var_key)
@@ -582,7 +579,7 @@ def build_prompt(
                         and not (template_text and ("{" + pk + "}") in template_text)):
                     continue
                 val = _fmt_passthrough_value(pv)
-                if val.strip() == "" or _is_numeric_zero(val):
+                if val.strip() == "":
                     continue
                 label = VAR_LABELS.get(pk, pk)
                 context_lines.append(f"{label} {{{pk}}}：{val}")
@@ -616,7 +613,7 @@ def build_prompt(
                 else:
                     # 模板直接引用推荐产品字段名（{recommend_actual_price} 等）
                     val = _pkg_own_field(pkg, token)
-                if val.strip() == "" or _is_numeric_zero(val):
+                if val.strip() == "":
                     continue
                 label = VAR_LABELS.get(token, token)
                 context_lines.append(f"{label} {{{token}}}：{val}")
@@ -662,8 +659,8 @@ def build_prompt(
                     continue
                 _keys = re.findall(r"\[([^\[\]]+)\]", _m.group(2))
                 _sval = _fmt_passthrough_value(_subfield_walk(_subfield_roots.get(_root), _keys))
-                if _sval.strip() == "" or _is_numeric_zero(_sval):
-                    continue   # 取不到值或零值的子字段不入 Prompt
+                if _sval.strip() == "":
+                    continue   # 取不到值的子字段不入 Prompt，避免模型对空槽臆造
                 _leaf_label = _keys[-1] if _keys else _root
                 context_lines.append(f"{_leaf_label} {{{_token}}}：{_sval}")
                 _record_slot_fact(_token, _sval)
@@ -775,8 +772,16 @@ def build_prompt(
             lines.append(template_text)
         other_parts: List[str] = [SCRIPT_SYSTEM_HEADER, SCRIPT_GEN_RULES]
         lines.append(SCRIPT_GEN_RULES)
-        # 个性化润色规则：上下文含用户标签/画像/性格类信息时自动追加（编号顺延）
+        # 字数规则：紧跟固定规则 1-4，排在「话术要求」之前 —— 运营在模板里写的字数要求
+        # 更具体，应当能覆盖这条框架默认值（规则正文里也显式让位）
         rule_no = 5
+        length_line = f"{rule_no}. " + SCRIPT_LENGTH_RULE.replace(
+            "{max_length}", str(max_length)
+        )
+        lines.append(length_line)
+        other_parts.append(length_line)
+        rule_no += 1
+        # 个性化润色规则：上下文含用户标签/画像/性格类信息时自动追加（编号顺延）
         if _has_persona_context(emitted, passthrough_ctx):
             persona_line = f"{rule_no}. {SCRIPT_PERSONA_RULE}"
             lines.append(persona_line)
@@ -864,7 +869,7 @@ _DEFAULT_SAMPLE_CTX: Dict[str, Any] = {
     "extra_info": {},
     "extra_context": {},
     "field_aliases": {},
-    "max_length": 100,
+    "max_length": _DEFAULT_MAX_LENGTH,
 }
 
 
@@ -979,9 +984,9 @@ def preview_prompt(
     tpl_script_req = template.get("script_requirement", "") or ""
 
     try:
-        max_length = int(data.get("max_length") or 100)
+        max_length = int(data.get("max_length") or _DEFAULT_MAX_LENGTH)
     except (TypeError, ValueError):
-        max_length = 100
+        max_length = _DEFAULT_MAX_LENGTH
 
     return build_prompt(
         user_prompt_tpl=tpl_prompt,

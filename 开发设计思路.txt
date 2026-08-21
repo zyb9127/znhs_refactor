@@ -2609,3 +2609,269 @@ params{
 
 提示：mockresponseJSON格式错误
 请针对带外面一层的，优化前端识别，针对这种情况的槽位选取逻辑也判断是否需要优化
+
+
+
+
+
+
+现在话术模板和话术要求
+智能填充占位符 AI优先把XX/***待填标记替换为可映射占位符，尽量保留原文不改写；替换前会展示对比供确认
+
+近三月超套情况：流量超套{excessTrafficCount3M}次，语音超套{excessVoiceCount3M}次，近三月月均流量{avgMonthlyTraffic3M}G，近三月月均语音{avgMonthlyVoice3M}分钟
+【切入语】您现在使用的套餐是{package_name}，流量有{baseFlow}G流量、语音有{voice_minutes}分钟，推荐您升级为新套餐，有更多分钟数和流量，非常划算，考虑一下吧
+
+✓模板占位符均已对应可映射固定域
+
+④话术要求 字数、语气与卖点组织等风格要求（防编造/防串填/占位符匹配已由系统内置生成规则保证，此处只需补充业务侧重）；可直接选用下方context工程标准模板
+标准话术要求： 标准 精简 痛点驱动 严谨合规 恢复默认
+
+空值/零值：字段为空、缺失或为0时，不得直接说"0元/0个月/0年"，对应的话术不能说；应删除包含该字段的整个分句，不保留占位、不编造数字（如"最高返还"缺失则不提该句）。
+
+
+
+
+生成话术如下：
+近三月超套情况：流量超套1次，语音超套2次，近三月月均流量3G，近三月月均语音100分钟 您现在使用的套餐是自由选流量套餐‑8元（100M），流量有0.09G流量、语音有0分钟，推荐您升级为新套餐，有更多分钟数和流量，非常划算，考虑一下吧；
+
+
+
+备注： 入参里面{voice_minutes} =0，但是字段为空、缺失或为0时，不得直接说"0元/0个月/0年"，对应的话术不能说这个没有生效
+
+请优化话术要求
+
+
+一、需要单独适配营销助手的统一接口入参
+1、在skill的接口配置页面，直传模式的透传模式下，前端增加一个选项：“营销助手统一接口”。 之前的模式选择“标准接口”
+2、在这个“营销助手统一接口”模式下，接口参数参考文档：
+   1、入参参考：灵运前置接口入参示例.txt
+   2、接口说明：参考文档《灵运平台交叉营销接口规范.docx》章节：一、交叉营销数据来源接口---默认GB（除了宽带）-传数值
+
+3、生成话术后的响应参数，不直接返回，需要回调另外一个接口；
+   回调接口文档参考：交叉营销网关-preload_cache_接口文档.docx
+
+要求：
+1、“营销助手统一接口”的增加，不能影响现在已经上线的“标准接口”模式的配置；
+2、“营销助手统一接口”模式下，参数可以正常解析，话术模板可以正常选取占位符；
+
+
+
+
+营销助手模式下的匹配话术模板的逻辑
+1、先匹配场景skill 用字段
+省份，以及下面的名称
+params.inputs.products.activityTypeName，活动名称
+
+2、匹配话术模板，根据下面的字段匹配
+params.inputs.products.business_type，业务类型
+
+params.inputs.products.productId,产品id
+
+params.inputs.products.productName，产品名称，
+
+3、下面两个字段判断是否生成话术
+
+params.inputs.products.marketingProductFlag
+params.inputs.products.marketingActivityFlag 
+
+请确认，并优化，不影响通用模式的线上服务。
+同时，评估话术模板配置页面是否需要优化；
+
+
+
+
+同时，响应的结果里面，注意下面的要求
+object.data.result.words	-	string	商品话术（推荐话术在这）
+object.data.result.rank	-	string	排序
+object.data.result.activityType	1	string	活动分类编码
+object.data.result.aiPitchMarketingDesc	话术	string	灵运营销切入话术
+object.data.result.aiRetentionMarketingDesc	话术	string	灵运挽留指引话术
+
+
+
+
+
+如果
+切入
+
+
+现在话术模板的默认的话术要求比较简单，请进一步优化，让生成话术效果更好
+
+
+
+针对营销助手接口模式的，相关生成日志是否需要优化，因为需要回调到redis接口
+
+
+请确认直传透传模式新增营销接口模式后，针对之前普通透传模式的配置，例如：广东、山东，再生产环境（ES）是否有影响
+
+
+请确认，不同营销助手、普通透传模式下，话术模板导入的csv是否需要同步更新？
+
+
+在接口直传模式下，智能映射模式的选项可以删除，只保留透传模式下的营销助手 和  通用模式
+请优化前端和后端
+
+
+
+在接口营销助手模式下，下面两个字段都等于 1 的时候才生成话术，只要有一个是 0 的 话就不生成
+          "marketingProductFlag": "",
+          "marketingActivityFlag": "",
+
+
+针对营销助手接口模式，以及 通用接口模式，在透传字段的页面可以有个按钮，自动填入默认参数
+1、营销助手默认参数，并提供参数对象的说明；
+2、通用接口默认完整入参参数（参考广东多产品话术模式），并提供参数对象说明；
+
+
+回调接口的参数有变化，参考下面的（回调接口唯一标识以 touchNumber 字段回传，
+作为 Redis key 的一部分：preload:{servNumber}:{touchNumber}:{identifier}）
+请求示例：
+{
+    "touchNumber": "call-001",
+    "servNumber": "13800138000",
+    "identifier": "tj",
+    "value": {
+        "productId": "P1001",
+        "productName": "尊享套餐",
+        "price": 99.9
+    },
+    "expireMinutes": 10
+}
+
+
+skill测试页面，如果是营销助手接口模式的，测试页面也需要体现是否回调成功，以及回调后响应结果；
+
+
+请确认
+1、现在营销助手模式下，是不是根据入参活动名称，来匹配skill，根据skill的场景分类名称来匹配；
+2、一个skill里面是不是只能有一个场景分类？
+
+
+
+
+
+参数
+{
+  "params": {
+    "systemId": "NGRC",
+    "optType": "0,1,2",
+    "inputs": {
+      "sequenceNo": "91579d34-1ea8-4635-90d7-76700281a64e",
+      "servNumber": "13800138000",
+      "provinceCode": "371",
+      "callId": "CALL_20230810_0001",
+      "staffId": "A10086",
+      "staffNo": "10086",
+      "touchNumber": "TOUCH_20230810_0001",
+      "userinfo": {
+        "currentPackageProductId": "PKG_123456",
+        "currentPackageProductName": "5G畅享融合套餐129元档",
+        "currPrice": 129,
+        "currDomesticTraffic": 30,
+        "currDescribe": "含30GB通用流量",
+        "currDirectedTraffic": 10,
+        "currDomesticVoice": 500,
+        "userExtra": {
+          "last3mFlowSaturation": 10,
+          "last3mVoiceSaturation": 10
+        }
+      },
+      "products": [
+        {
+          "activityId": "ACT_20230801",
+          "productId": "PROD_001",
+          "price": 59,
+          "discountPrice": 39.58,
+          "cmnFlow": 20,
+          "voice": 200,
+          "directFlow": 30,
+          "businessType": "流量包",
+          "giftCmnFlow": 0,
+          "productDesc": "高性价比5G套餐，含大流量和语音",
+          "marketingProductFlag": "1",
+          "marketingActivityFlag": "1",
+          "productName": "5G特惠月租卡",
+          "activityTypeCode": "TYPE_01",
+          "activityTypeName": "流量语音包"
+        }
+      ],
+      "userinfoJson": [
+        {
+          "timeType": "0",
+          "overCmnFlow": 1,
+          "overVoice": 20,
+          "userConsume": 145,
+          "overFlowFee": 7.5,
+          "overVoiceFee": 4.05
+        }
+      ]
+    }
+  }
+}
+
+看图，测试的话
+切入 和挽留的话术没出现
+
+但是话术模板配置了切入和挽留，请确认
+
+
+
+
+参数
+{
+  "params": {
+    "systemId": "NGRC",
+    "optType": "0,1,2",
+    "inputs": {
+      "sequenceNo": "91579d34-1ea8-4635-90d7-76700281a64e",
+      "servNumber": "13800138000",
+      "provinceCode": "022",
+      "callId": "CALL_20230810_0001",
+      "staffId": "A10086",
+      "staffNo": "10086",
+      "touchNumber": "TOUCH_20230810_0001",
+      "userinfo": {
+        "currentPackageProductId": "PKG_123456",
+        "currentPackageProductName": "5G畅享融合套餐129元档",
+        "currPrice": 129,
+        "currDomesticTraffic": 30,
+        "currDescribe": "含30GB通用流量",
+        "currDirectedTraffic": 10,
+        "currDomesticVoice": 500,
+        "userExtra": {
+          "last3mFlowSaturation": 10,
+          "last3mVoiceSaturation": 10
+        }
+      },
+      "products": [
+        {
+          "activityId": "ACT_20230801",
+          "productId": "PROD_001",
+          "price": 59,
+          "discountPrice": 39.58,
+          "cmnFlow": 20,
+          "voice": 200,
+          "directFlow": 30,
+          "businessType": "流量包",
+          "giftCmnFlow": 0,
+          "productDesc": "高性价比5G套餐，含大流量和语音",
+          "marketingProductFlag": "1",
+          "marketingActivityFlag": "1",
+          "productName": "5G特惠月租卡",
+          "activityTypeCode": "TYPE_01",
+          "activityTypeName": "流量语音包"
+        }
+      ],
+      "userinfoJson": [
+        {
+          "timeType": "0",
+          "overCmnFlow": 1,
+          "overVoice": 20,
+          "userConsume": 145,
+          "overFlowFee": 7.5,
+          "overVoiceFee": 4.05
+        }
+      ]
+    }
+  }
+}

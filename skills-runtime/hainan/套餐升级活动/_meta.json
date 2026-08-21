@@ -1,0 +1,20 @@
+{
+  "name": "hainan-marketing-assistant-upgrade",
+  "description": "海南 · 营销助手统一接口本地测试 · 套餐升级活动（推荐/切入/挽留三环节，演示 words + aiPitchMarketingDesc + aiRetentionMarketingDesc 三字段归并）",
+  "version": "1.0.0",
+  "type": "scenario",
+  "province": "海南",
+  "scenario_id": "套餐升级活动",
+  "config_files": [
+    "api_nodes.json",
+    "biz_config.json"
+  ],
+  "required_plugins": [
+    "plugins.package_diff",
+    "plugins.unit_converter"
+  ],
+  "author": "local-test",
+  "openclaw_compatible": true,
+  "status": "published",
+  "published_at": "2026-08-11 16:07"
+}

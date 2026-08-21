@@ -1,0 +1,86 @@
+{
+  "params": {
+    "systemId": "local-test",
+    "optType": "0",
+    "inputs": {
+      "sequenceNo": "SEQ20260811001",
+      "servNumber": "13800138000",
+      "provinceCode": "898",
+      "callId": "CALL_TEST_20260811_0001",
+      "staffId": "S001",
+      "touchNumber": "T001",
+      "current_package": {
+        "package_name": "全球通畅享套餐99元档",
+        "actual_price": "99元",
+        "base_flow": "30GB/月",
+        "voice_minutes": "500分钟/月"
+      },
+      "userinfo": {
+        "custName": "王先生",
+        "age": "38",
+        "userExtra": {
+          "vipLevel": "金卡",
+          "riskLevel": "低"
+        }
+      },
+      "userinfo_json": "{\"lastMonthFlow\":\"48GB\",\"flowSaturation\":\"96%\",\"lastMonthVoice\":\"620分钟\"}",
+      "products": [
+        {
+          "productId": "P20260810001",
+          "offerId": "P20260810001",
+          "productName": "畅享5G升级套餐169元档",
+          "business_type": "套餐升级",
+          "activityTypeName": "套餐升级活动",
+          "activityTypeCode": "ACT_UPGRADE",
+          "activityId": "ACT2026080101",
+          "marketingProductFlag": "1",
+          "marketingActivityFlag": "1",
+          "recommend_package_name": "畅享5G升级套餐169元档",
+          "recommend_original_price": "199元",
+          "recommend_actual_price": "169元",
+          "recommend_discount_amount": "30元",
+          "recommend_base_flow": "60GB/月",
+          "recommend_bonus_flow": "20GB/月",
+          "recommend_total_flow": "80",
+          "recommend_voice_minutes": "1000分钟/月",
+          "recommend_preferential_period": "12个月",
+          "recommend_equity": "视频会员任选一",
+          "rank": 1
+        },
+        {
+          "productId": "P20260810002",
+          "offerId": "P20260810002",
+          "productName": "尊享套餐299元档",
+          "business_type": "套餐升级",
+          "activityTypeName": "套餐升级活动",
+          "activityTypeCode": "ACT_UPGRADE",
+          "activityId": "ACT2026080101",
+          "marketingProductFlag": "0",
+          "marketingActivityFlag": "1",
+          "recommend_package_name": "尊享套餐299元档",
+          "recommend_actual_price": "299元",
+          "recommend_base_flow": "150GB/月",
+          "recommend_preferential_period": "0个月",
+          "rank": 2
+        },
+        {
+          "productId": "P20260810003",
+          "offerId": "P20260810003",
+          "productName": "20G流量加油包",
+          "business_type": "流量包",
+          "activityTypeName": "流量包活动",
+          "activityTypeCode": "ACT_FLOW",
+          "activityId": "ACT2026080102",
+          "marketingProductFlag": "1",
+          "marketingActivityFlag": "1",
+          "recommend_package_name": "20G流量加油包",
+          "recommend_original_price": "30元",
+          "recommend_actual_price": "20元",
+          "recommend_base_flow": "20GB/月",
+          "recommend_preferential_period": "6个月",
+          "rank": 3
+        }
+      ]
+    }
+  }
+}

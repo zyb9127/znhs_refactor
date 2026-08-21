@@ -84,14 +84,14 @@ TPL_PACKAGE_RECOMMEND: Dict[str, Any] = {
                 "您好，您当前套餐为{cur_brief}，根据您近期使用情况{usage_line}，"
                 "为您推荐{pkg_brief}套餐，{diff_str}，即可享受更多权益。"
             ),
-            "script_requirement": "口语化、亲切，贴合用户痛点；80字以内。",
+            "script_requirement": "口语自然、像真人客户经理，别用官话套话；结合用户用量/痛点，用推荐套餐真实值说清好处并做前后对比；只讲有数据支撑的卖点，不夸大；80字以内，结尾一句自然的办理引导。",
             "linked_vars": ["cur_brief", "pkg_brief", "diff_str", "usage_line"],
         },
         {
             "template_name": "切入环节话术",
             "stage": "切入环节",
             "template_content": "您好，看到您近期流量/语音使用较多，为您简单介绍下{pkg_brief}套餐。",
-            "script_requirement": "口语化，50字以内。",
+            "script_requirement": "像真人坐席自然开口，一句话结合近期用量切入、点出关注点并过渡到产品；口语化、50字以内，不喊口号。",
             "linked_vars": ["pkg_brief", "usage_line"],
         },
     ],
@@ -136,7 +136,7 @@ TPL_FLOW_RECOMMEND: Dict[str, Any] = {
             "template_name": "流量告急提醒",
             "stage": "切入环节",
             "template_content": "您本月流量使用较多，建议加办{pkg_brief}流量包。",
-            "script_requirement": "简洁明了，50字以内。",
+            "script_requirement": "口语自然、有紧迫感但不夸大，用真实用量点出流量吃紧、自然引出流量包；50字以内。",
             "linked_vars": ["pkg_brief", "usage_line"],
         },
         {
@@ -145,7 +145,7 @@ TPL_FLOW_RECOMMEND: Dict[str, Any] = {
             "template_content": (
                 "为您推荐{pkg_brief}，{diff_str}，办理后流量更够用。"
             ),
-            "script_requirement": "口语化，60字以内。",
+            "script_requirement": "口语化，用真实差异说清办理后流量更够用、更划算；只讲有数据支撑的点；60字以内，结尾一句办理引导。",
             "linked_vars": ["pkg_brief", "diff_str"],
         },
     ],
@@ -182,7 +182,7 @@ TPL_RENEW_RETAIN: Dict[str, Any] = {
             "template_name": "挽留切入话术",
             "stage": "切入环节",
             "template_content": "您好，注意到您即将到期，我们为您准备了专属续约权益{pkg_brief}。",
-            "script_requirement": "礼貌、热情，60字以内。",
+            "script_requirement": "礼貌热情、像真人客户经理，点出到期并自然带出专属续约权益、营造被重视感；60字以内，不夸大。",
             "linked_vars": ["pkg_brief"],
         },
         {
@@ -191,7 +191,7 @@ TPL_RENEW_RETAIN: Dict[str, Any] = {
             "template_content": (
                 "续约{pkg_brief}套餐可享{diff_str}，更划算。"
             ),
-            "script_requirement": "突出优惠，70字以内。",
+            "script_requirement": "突出续约真实优惠、做前后对比放大划算感，不编造不夸大；口语化、70字以内，结尾一句办理引导。",
             "linked_vars": ["pkg_brief", "diff_str"],
         },
     ],

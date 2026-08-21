@@ -57,12 +57,17 @@ from engine.template_selector import (
 _DEFAULT_CONCURRENCY = 8
 
 # 内置默认字段别名（biz_config 未配置时的兜底）
+# 末位的 productId / Cmn_flow 是营销助手统一接口（灵运交叉营销）产品字段名，
+# 追加在链尾：仅当前面各别名都取不到值时才生效，已上线省份取值完全不变。
 _DEFAULT_FIELD_ALIASES: Dict[str, List[str]] = {
     "pkg_name":  ["offerName",  "package_name",   "productName",  "name"],
     "pkg_fee":   ["initFee",    "monthly_fee",     "price",        "fee"],
-    "pkg_flow":  ["offerFlow",  "data_quota",      "dataGB",       "flow"],
+    "pkg_flow":  ["offerFlow",  "data_quota",      "dataGB",       "flow",     "Cmn_flow"],
     "pkg_voice": ["offerVoice", "voice_quota",     "voiceMinutes", "voice"],
-    "product_id": ["offerId",    "product_id",      "package_id",   "offer_id"],
+    "product_id": ["offerId",   "product_id",      "package_id",   "offer_id", "productId"],
+    # 业务类型：话术模板匹配的粗粒度维度，仅在产品 ID 匹配不到模板时作候选
+    # （营销助手统一接口的 business_type；标准接口省份的产品对象无此字段，自动跳过）
+    "pkg_biz_type": ["business_type", "businessType"],
 }
 
 # LLM 未填充的残留占位符：{var} 或 {域[子键]}（根名为 ASCII 变量名，子键允许中文）
@@ -158,7 +163,8 @@ class ScriptStep:
 
         # template_match：模板匹配维度取值配置（接口查询模式：推荐结果字段 → 模板匹配键）
         # 形如 {"product_id_from": "curOfferId" 或 ["curOfferId","productInfo.offerId"],
-        #       "stage_from": "...", "scene_from": "..."}；支持点路径与多候选。
+        #       "business_type_from": "...", "stage_from": "...", "scene_from": "..."}；
+        # 支持点路径与多候选。
         # 未配置时行为不变（走 field_aliases.product_id / 默认别名）。
         mc = biz_config.get("template_match")
         self._match_cfg = mc if isinstance(mc, dict) else {}
@@ -211,13 +217,15 @@ class ScriptStep:
 
     @staticmethod
     def _is_direct_mode(ctx: FlowContext) -> bool:
-        """产品列表是否由调用方直传（extra_info.recommended_packages）。
+        """产品列表是否由调用方直传（extra_info 里的产品数组）。
 
         直传模式下候选产品已由上游挑定并整包传入，条数可预期且由调用方控制，
         因此默认全部并发；接口查询模式的候选池大小不可控，仍按全局上限限流。
+
+        判定不写死键名，与 RecommendStep 的「直传不按 topN 截断」共用同一口径，
+        详见 FlowContext.caller_supplied_package_count。
         """
-        packages = (ctx.extra_info or {}).get("recommended_packages")
-        return isinstance(packages, list) and bool(packages)
+        return ctx.caller_supplied_package_count() > 0
 
     def _make_llm_semaphore(
         self,
@@ -262,7 +270,7 @@ class ScriptStep:
             return await llm_service.generate(
                 prompt,
                 temperature=0.3,
-                max_tokens=4096,
+                max_tokens=300,
                 stage=stage,
                 provider="script_step",
                 province=ctx.province,
@@ -271,7 +279,7 @@ class ScriptStep:
             return await llm_service.generate(
                 prompt,
                 temperature=0.3,
-                max_tokens=4096,
+                max_tokens=300,
                 stage=stage,
                 provider="script_step",
                 province=ctx.province,
@@ -1102,10 +1110,16 @@ class ScriptStep:
         丢给大模型，话术质量不可控。此时产品名 offerName（【广州】【纯裸升】升169套餐-2606）
         恰好能模糊命中关键词模板。
 
-        候选顺序（**产品自身字段优先，batch_contexts.product_id 兜底**）：
+        候选顺序（**精确优先：产品 → 业务类型 → 名称，batch_contexts.product_id 兜底**）：
         1. 产品自身标识：template_match.product_id_from 配置字段 → offerId 类别名
-        2. 产品自身名称：field_aliases.pkg_name（默认含 offerName）→ recommend_package_name
-        3. batch_contexts.product_id（业务类型 hint）
+        2. 产品自身业务类型：field_aliases.pkg_biz_type（默认 business_type/businessType）
+        3. 产品自身名称：field_aliases.pkg_name（默认含 offerName）→ recommend_package_name
+        4. batch_contexts.product_id（业务类型 hint）
+
+        为什么业务类型排在产品 ID 之后：业务类型是一类产品共用的粗粒度维度（营销助手接口
+        的 business_type，如"流量包"），若它优先，产品专属模板将永远命不中。产品自身没有
+        该字段时（广东/山东等标准接口省份的产品对象里没有 business_type）本候选自动跳过，
+        候选序列与原来逐项一致。
 
         为什么 batch hint 排最后：多产品场景下同一个 batch 条目作用于全部产品，若 hint 优先，
         18 个不同产品会全部命中 hint 对应的那一个模板（如 product_id="流量" 时套餐/升档类
@@ -1118,6 +1132,7 @@ class ScriptStep:
         - 无推荐列表的旧单产品写法走占位产品 {"product_id": bc_pid}，其 product_id 即 hint
           本身（占位产品不挂 hint），行为不变；
         - 回显给调用方的 product_id 仍走 _match_product_id（offerId），不受本候选序列影响；
+        - biz_config.template_match.business_type_from 可指定业务类型取值字段/点路径；
         - biz_config.template_match.disable_name_fallback=true 关闭名称回退；
         - biz_config.template_match.prefer_batch_product_id=true 恢复 hint 优先（旧行为）。
         """
@@ -1134,6 +1149,10 @@ class ScriptStep:
             _add(batch_hint)
 
         _add(self._match_product_id(pkg))
+        biz_keys = self.field_aliases.get(
+            "pkg_biz_type", _DEFAULT_FIELD_ALIASES["pkg_biz_type"]
+        )
+        _add(self._resolve_match_dim(pkg, "business_type_from", biz_keys))
         if not mc.get("disable_name_fallback"):
             name_keys = self.field_aliases.get("pkg_name", _DEFAULT_FIELD_ALIASES["pkg_name"])
             _add(self._get_field(pkg, name_keys))

@@ -39,14 +39,16 @@ class RecommendStep:
 
     @staticmethod
     def _caller_supplied_count(ctx: FlowContext) -> int:
-        """调用方在 extra_info.recommended_packages 中直传的产品数（非直传返回 0）。
+        """调用方在 extra_info 里直传的产品数（非直传返回 0）。
 
         topN 的语义是「从推荐接口返回的大候选池里取前 N 个」。直传模式下候选已由
         上游挑定并整包传入，再按 topN 截断会静默少出话术（广东 18 个产品只出 8 条
         即为此），故直传时不截断，传多少个产品就生成多少条话术。
+
+        产品数组的键名不写死（营销助手统一接口叫 products），判定与 ScriptStep 的
+        「直传不限并发」共用 FlowContext.caller_supplied_package_count。
         """
-        packages = (ctx.extra_info or {}).get("recommended_packages")
-        return len(packages) if isinstance(packages, list) else 0
+        return ctx.caller_supplied_package_count()
 
     async def run(
         self,

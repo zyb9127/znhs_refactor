@@ -43,20 +43,47 @@
   },
   "elasticsearch": {
     "_comment": "ES 配置存储（znhs-agent 专属 index，不影响其他服务）",
-    "hosts": [],
-    "username": "",
-    "password": "",
+    "hosts": [
+      "http://172.19.89.131:9211",
+      "http://172.19.89.150:9211",
+      "http://172.19.89.126:9211"
+    ],
+    "username": "developer",
+    "password": "DXgK&7CY",
     "index_configs": "znhs-agent-skill-configs",
     "index_meta": "znhs-agent-skill-config-meta",
     "max_versions": 5
+  },
+  "cross_sell": {
+    "_comment": "交叉营销「营销助手统一接口」：入参走《灵运平台交叉营销接口规范》，话术生成后不直接返回，回调交叉营销网关 preload/cache 写 Redis，下游用结果获取接口取。仅对接口配置为 request_variant=marketing_assistant 的直传透传节点生效，标准接口模式不受影响。",
+    "_comment_env": "各项均可被环境变量覆盖：ZNHS_CROSS_SELL_ENABLED / ZNHS_CROSS_SELL_CALLBACK_BASE / ZNHS_CROSS_SELL_CALLBACK_PATH / ZNHS_CROSS_SELL_EXPIRE_MINUTES / ZNHS_CROSS_SELL_TIMEOUT / ZNHS_CROSS_SELL_DEFAULT_INTENT",
+    "enabled": true,
+    "callback_base_url": "http://bigmodel.zhiduo.cmos:8080/cslm_crosssell_gateway",
+    "callback_path": "/api/gateway/preload/cache",
+    "callback_expire_minutes": 5,
+    "callback_timeout_seconds": 5,
+    "callback_max_retries": 1,
+    "_comment_default_intent": "场景 skill 匹配：先按 params.inputs.products.activityTypeName（活动名称）找同名意图的技能包；找不到时回退到该省份唯一勾选营销助手的技能包，再回退到这里的兜底意图，留空表示不兜底（直接告警并丢弃）",
+    "default_intent": "",
+    "_comment_stage": "回调话术字段与话术模板「应用环节」的对应：推荐环节话术 → words，切入环节话术 → aiPitchMarketingDesc，挽留环节话术 → aiRetentionMarketingDesc。一个产品配了切入/推荐/挽留三行模板时，三条话术各自生成并归并成一条产品话术。各省环节命名不统一，故按候选列表取第一个在该技能包模板里真实存在的；words 未配「推荐」环节时回退到无环节常规话术（始终有值），切入/挽留没配对应环节模板时不生成（对应字段留空，绝不拿其它话术顶替）",
+    "recommend_stage": ["推荐", "推荐环节", "营销推荐"],
+    "pitch_stage": ["切入", "切入环节", "营销切入"],
+    "retention_stage": ["挽留", "挽留环节", "挽留指引"]
   },
   "redis_bus": {
     "_comment": "Redis 配置总线（znhs:agent: 前缀隔离，不影响其他服务）",
     "_comment_sync": "多实例配置同步方式：sync_mode=pubsub|poll|hybrid（默认 hybrid，Pub/Sub 低延迟 + ES 定时轮询自愈兜底）；poll_interval_seconds 为 ES 轮询间隔秒数（默认 300 即 5 分钟，仅 poll/hybrid 生效）",
     "sync_mode": "hybrid",
     "poll_interval_seconds": 300,
-    "cluster_nodes": [],
-    "password": "",
+    "cluster_nodes": [
+      {"host": "ha-znkf-0.ha-znkf.zjjpt-redis.svc.huaarmcore.hpc", "port": 3158},
+      {"host": "ha-znkf-1.ha-znkf.zjjpt-redis.svc.huaarmcore.hpc", "port": 3158},
+      {"host": "ha-znkf-2.ha-znkf.zjjpt-redis.svc.huaarmcore.hpc", "port": 3158},
+      {"host": "ha-znkf-3.ha-znkf.zjjpt-redis.svc.huaarmcore.hpc", "port": 3158},
+      {"host": "ha-znkf-4.ha-znkf.zjjpt-redis.svc.huaarmcore.hpc", "port": 3158},
+      {"host": "ha-znkf-5.ha-znkf.zjjpt-redis.svc.huaarmcore.hpc", "port": 3158}
+    ],
+    "password": "znkf0724",
     "key_prefix": "znhs:agent:cfg:",
     "cache_ttl": 7200,
     "pubsub_channel": "znhs:agent:config:changed"

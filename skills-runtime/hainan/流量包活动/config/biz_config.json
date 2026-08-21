@@ -1,0 +1,43 @@
+{
+  "script_templates_v2": [
+    {
+      "province": "hainan",
+      "intent": "流量包活动",
+      "template_name": "流量包活动",
+      "template_content": "您好{custName}，看您这个月流量用得比较快，给您推荐{recommend_package_name}，现在只要每月{recommend_actual_price}就能加{recommend_base_flow}，还能优惠{recommend_preferential_period}，现在帮您加办上好吗？",
+      "product_id": "流量包",
+      "scene": "开口话术",
+      "stage": "推荐环节",
+      "linked_vars": [
+        "current_package",
+        "usage",
+        "tags",
+        "recommend_package_name",
+        "recommend_actual_price",
+        "recommend_original_price",
+        "recommend_base_flow",
+        "recommend_preferential_period"
+      ],
+      "script_requirement": "以用户专属客户经理的口吻自然、口语化沟通，别用官话套话；结合用户近期流量用量点出流量吃紧的痛点，再用以 recommend_ 开头的产品字段真实值说清加办后的好处；数字缺失或为 0 的表述整句跳过，不编造不夸大；100 字以内，结尾一句自然的办理引导。",
+      "prompt_template": "",
+      "linked_apis": [
+        "cc"
+      ],
+      "status": "online",
+      "created_by": "local-test",
+      "template_id": "tpl_hainan_flow_recommend",
+      "created_at": "2026-08-11 15:00:00",
+      "updated_by": "local-test"
+    }
+  ],
+  "template_match": {
+    "product_id_from": "productId",
+    "business_type_from": "business_type"
+  },
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 10,
+    "max_script_length": 120,
+    "max_parallel_scripts": 5
+  }
+}

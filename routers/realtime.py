@@ -15,18 +15,19 @@ from loguru import logger
 from pydantic import BaseModel, Field, ValidationError
 from typing import Any, Dict, List, Optional
 
+from routers.cross_sell import handle_marketing_assistant_payload
+from utils.marketing_assistant import is_marketing_assistant_payload
 from utils.observability import begin_request_context, reset_request_context, summarize_request_context
+from utils.province_code import province_code_map, resolve_province
 from utils.skill_runtime import skill_registry
 from utils import province_logger
 
 router = APIRouter(tags=["实时服务"])
 
-# 省份编码 → 技能包 province key 映射表
-# 下游系统可传入数字编码，由此表转为内部标准 code
-PROVINCE_CODE_MAP: dict = {
-    "200": "guangdong",
-    # 如需扩展其他省份编码，在此继续添加
-}
+# 省份编码 → 技能包 province key 映射表（中文省名 + 数字省码，真源在
+# config/province_mapping.json，运维可直接改配置扩省，不必改代码）。
+# 保留本模块级名称是为了兼容既有引用；取值请统一走 utils.province_code.resolve_province。
+PROVINCE_CODE_MAP: dict = province_code_map()
 
 
 class RecommendRequest(BaseModel):
@@ -185,6 +186,11 @@ async def recommend(request: Request):
         raw_body = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="请求体不是合法 JSON")
+    # 营销助手统一接口报文（params.inputs 形状）打到本地址时自动分流到交叉营销异步链路，
+    # 避免下游配错地址就完全不通。标准接口报文没有 params.inputs，判定互斥、行为不变。
+    if is_marketing_assistant_payload(raw_body):
+        logger.info("[recommend] 识别为营销助手统一接口报文，转交交叉营销异步链路处理")
+        return await handle_marketing_assistant_payload(raw_body)
     body_data = _unwrap_params_body(raw_body)
     if not isinstance(body_data, dict):
         raise HTTPException(status_code=400, detail="请求体格式错误：需为 JSON 对象")
@@ -219,8 +225,8 @@ async def recommend(request: Request):
         )
 
     try:
-        # 省份编码转换：支持下游传入数字编码（如 "200" → "guangdong"）
-        province_key = PROVINCE_CODE_MAP.get(req.province, req.province)
+        # 省份编码转换：支持下游传入数字编码（如 "200" / "371"）或中文省名
+        province_key = resolve_province(req.province)
         if province_key != req.province:
             logger.info(
                 f"[recommend] 省份编码转换: {req.province!r} → {province_key!r}"
@@ -284,7 +290,7 @@ async def recommend(request: Request):
         # 分省日志：记录异常出参，便于分省排查失败请求
         try:
             province_logger.log_response(
-                PROVINCE_CODE_MAP.get(req.province, req.province), req.intent,
+                resolve_province(req.province), req.intent,
                 trace_id, req.phone, code=500, elapsed_ms=elapsed,
                 metadata=summarize_request_context(), error=str(exc),
             )

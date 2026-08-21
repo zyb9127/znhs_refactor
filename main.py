@@ -294,6 +294,7 @@ import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parent / "AutoConfigAgent"))
 
 from routers.realtime import router as realtime_router
+from routers.cross_sell import router as cross_sell_router
 from routers.management import router as management_router
 from management.interface_mapper.router import router as interface_mapper_router
 from routers.spa import gray_router as spa_gray_router, prod_router as spa_prod_router
@@ -302,6 +303,8 @@ from management.config_agent.router import router as config_agent_router
 
 # 实时服务固定使用 /znhs 前缀，与环境无关
 app.include_router(realtime_router, prefix="/znhs")
+# 交叉营销「营销助手统一接口」（异步 ack + 回调网关缓存），与实时服务同前缀
+app.include_router(cross_sell_router, prefix="/znhs")
 
 # ── 管理 API：灰度和生产各挂一套，不依赖 SERVICE_PREFIX ──────────
 # 灰度前端（/znhs-gray/）下的管理接口

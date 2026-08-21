@@ -62,11 +62,18 @@
       <el-form-item v-if="multiProduct" prop="product_ids_text">
         <template #label>
           <span class="fl">产品 ID</span>
-          <span class="fh">该模板适用的套餐产品编码；多个用逗号 / 换行分隔；留空 = 该场景分类兜底模板（无匹配产品时使用）</span>
+          <span class="fh">{{ productIdHint }}</span>
         </template>
         <el-input v-model="form.product_ids_text" type="textarea"
           :autosize="{ minRows: 2, maxRows: 6 }"
-          placeholder="例：prod001, prod002, prod003" />
+          :placeholder="productIdPlaceholder" />
+        <div v-if="productIdCandidates.length" class="pid-cands">
+          <span class="pid-cands-hint">接口样例里的可选值（点击填入）</span>
+          <button v-for="c in productIdCandidates" :key="c.value" type="button"
+            class="pid-cand" :title="c.tip" @click="appendProductId(c.value)">
+            {{ c.value }}<i>{{ c.role }}</i>
+          </button>
+        </div>
       </el-form-item>
 
       <!-- ── 单产品 Product ID + Stage（非多产品模式） ── -->
@@ -75,9 +82,9 @@
           <el-form-item prop="product_id">
             <template #label>
               <span class="fl">产品 ID</span>
-              <span class="fh">留空 = 兜底模板</span>
+              <span class="fh">{{ marketingAssistantMode ? '可填产品 ID / 业务类型 / 产品名称；留空 = 兜底模板' : '留空 = 兜底模板' }}</span>
             </template>
-            <el-input v-model="form.product_id" placeholder="套餐产品 ID（可留空）" clearable />
+            <el-input v-model="form.product_id" :placeholder="productIdPlaceholder" clearable />
           </el-form-item>
         </el-col>
         <el-col :span="12">
@@ -440,6 +447,11 @@ const props = defineProps({
   multiProduct: { type: Boolean, default: false },
   /** 多产品模式下，省份显示名映射（如 { beijing: '北京' }），用于头部 disabled 展示 */
   provinceMap: { type: Object, default: () => ({}) },
+  /**
+   * 「产品 ID」栏的可选值：从接口样例的产品列表抽出，形如
+   * [{ value: 'PROD_001', role: '产品ID', tip: '…' }, …]，点击填入避免手打错。
+   */
+  productIdCandidates: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits(['update:modelValue', 'save', 'province-change'])
@@ -454,19 +466,20 @@ const dialogWidth = computed(() => {
   return Math.min(960, Math.round(window.innerWidth * 0.92)) + 'px'
 })
 
-// ── 默认话术要求（context 工程版：只补充"风格 + 业务侧重"，防编造/防串填/占位符匹配
+// ── 默认话术要求（context 工程版：只补充"风格 + 结构 + 业务侧重"，防编造/防串填/占位符匹配
 //    已由后端 SCRIPT_GEN_RULES 内置为生成规则 1-4，此处不重复）─────────────
-const DEFAULT_SCRIPT_REQ = '结合【上下文数据】中的当前套餐、历史用量与用户标签，先点出最突出的用户痛点，再用推荐套餐对应字段的真实值说明如何解决；只讲有数据支撑的卖点，口语化、可直接对客播报，150字以内，结尾自然引导办理。'
+const DEFAULT_SCRIPT_REQ = '以用户专属客户经理的口吻，用自然、口语化、像真人一对一沟通的语气说话，杜绝生硬模板腔与官话套话（如"尊敬的客户""钜惠来袭"）。话术骨架以【话术模板】为准：模板已给出句子顺序与结构时就照模板走，只做占位符填充和语句通顺化，不要另起一套结构、不要增删模板里没有的卖点；模板没写明结构时，再按「亲切开场 → 结合【上下文数据】中的当前套餐、历史用量与用户标签点出 1 个最突出的痛点 → 用推荐套餐对应字段的真实值（月费/流量/语音等）说清如何解决、并做前后对比放大获得感 → 一句自然的办理引导」组织。各句衔接顺滑不生硬；只讲有数据支撑的卖点，无数据的点不提、不夸大；有真实的专属/限时权益可点明（无则不编）。控制在 150 字以内，只保留一个明确的行动引导，结尾干脆不啰嗦。'
 
 // ── 标准话术要求预设（context 工程优化模板，点击即填入）──────────
-// 定位：引导模型把「入参/映射域事实」精准对应到「话术槽位」，突出痛点→卖点闭环；
+// 定位：引导模型把「入参/映射域事实」精准对应到「话术槽位」，突出痛点→卖点→行动闭环；
 // 机械层规则（不臆造/不串填/空值跳过/同名占位符匹配）由框架 SCRIPT_GEN_RULES 保证。
 // 字数：营销话术一般 150 字以内；「精简」为更短的单卖点变体。
 const SCRIPT_REQ_PRESETS = [
   { name: '标准', text: DEFAULT_SCRIPT_REQ },
-  { name: '精简', text: '口语化、60字以内；只讲 1 个最贴合用户用量/痛点的核心卖点（用对应字段真实值支撑），结尾一句办理引导。' },
-  { name: '痛点驱动', text: '先用历史用量与用户标签点出痛点（如流量饱和度高、超套、老旧套餐），再用推荐套餐差异（月费/流量/语音等对应字段真实值）说明如何针对性解决；无对应数据的痛点或卖点不提；口语化、150字以内，结尾引导办理。' },
-  { name: '严谨合规', text: '严格只用给定字段的真实值，不虚构数字/套餐名/优惠；任一字段缺失或为 0 时不提及该项，也不得用其他字段代填；150字以内，结尾引导办理。' },
+  { name: '精简', text: '口语化、60 字以内；像真人坐席一句话切入，只讲 1 个最贴合用户用量/痛点的核心卖点（用对应字段真实值支撑），结尾一句自然的办理引导，不啰嗦。' },
+  { name: '痛点驱动', text: '先用历史用量与用户标签点出 1 个最扎心的痛点（如流量饱和度高、频繁超套、套餐老旧资费偏高），再用推荐套餐差异（月费/流量/语音等对应字段真实值）做前后对比、说清如何针对性解决；无数据支撑的痛点或卖点一律不提；口语自然、150 字以内，结尾一个明确的办理引导。' },
+  { name: '促单转化', text: '讲清 1-2 个核心卖点后，用真实的专属/限时/立省金额等权益营造合理紧迫感（无则不编不夸大），给一个清晰、低门槛的行动指令（如"现在就帮您开通"）；口语化、130 字以内，全程只留一个 CTA。' },
+  { name: '严谨合规', text: '严格只用给定字段的真实值，不虚构数字/套餐名/优惠；任一字段缺失或为 0 时不提及该项，也不得用其他字段代填；150 字以内，结尾引导办理。' },
 ]
 
 // ── 关联变量定义（与 steps/script_step.py 中 _VAR_LABELS 严格对齐）──
@@ -600,12 +613,32 @@ const FALLBACK_DYN_VARS = [
 const dynamicVarList = ref([...FALLBACK_DYN_VARS])
 const _loadedVarKey = ref('')
 
+// 当前技能是否为「纯直传透传」数据源：生效接口全是直传透传（含营销助手统一接口）。
+// 这种模式下话术只引用**原字段名**（{products}/{userinfo}/{userinfo_json}/{recommended_packages}
+// 及其子字段），不走「推荐套餐 vs 当前套餐」的 PackageDiff 标准管线，故 pkg_fee/pkg_flow/
+// pkg_voice/diff_str/table 这些「计算生成」变量对它没有意义（table/diff_str 更是缺当前套餐取不到值）。
+// 映射模式（direct_mode=mapping）与接口查询模式产出标准域、确实会算出这些派生量，仍保留。
+const isPassthroughOnlySkill = computed(() => {
+  if (!props.multiProduct) return false
+  const apis = props.availableApis || []
+  const useAll = form.linked_apis.length === 0
+  const active = apis.filter(a => useAll ? a.enabled !== false : form.linked_apis.includes(a.api_name))
+  if (!active.length) return false
+  return active.every(a => {
+    const m = apiMode(a)
+    return m === 'passthrough' || m === 'marketing_assistant'
+  })
+})
+
 // 生成变量 = 话术生成层自动产出（pkg_brief / diff_str / pkg_fee / pkg_flow / pkg_voice / table）
 // available===false 表示该技能样例下注定取不到值（如推荐条无语音 → pkg_voice、当前套餐缺失 → diff_str），
 // 隐藏对应标签，避免拖入模板后运行时被防编造规则跳过、生成 xx/空值。
+// 纯直传透传技能整组隐藏（口径见 isPassthroughOnlySkill）。
 // 注：「接口数据域变量」手选区已按首页优化要求移除，改由后端默认全选，故不再需要 domainVarList。
 const generatedVarList = computed(() =>
-  dynamicVarList.value.filter(v => v.source === 'script_step' && v.available !== false))
+  isPassthroughOnlySkill.value
+    ? []
+    : dynamicVarList.value.filter(v => v.source === 'script_step' && v.available !== false))
 
 // 推荐产品字段（source=recommended_product）：多产品入参时产品字段只在数组元素里，
 // 需单独暴露才能拖入模板（{offerName}/{recommend_actual_price} 等），运行时逐条取当前产品值。
@@ -672,13 +705,19 @@ const SLOT_TO_VAR = {
 //   直传透传：入参字段/字典名直接作为占位符（{portrait_style}、{recommended_packages}）
 //   直传映射：入参按 7 标准域映射后引用（{current_package}、{pkg_brief}）
 //   接口查询：调外部接口取数后映射到标准域
+//   营销助手统一接口：直传透传的一种接口规范，入参为灵运前置交叉营销报文，结果走回调
 function apiMode(api) {
   if (api?.source_type !== 'direct') return 'api'
-  return api?.passthrough ? 'passthrough' : 'mapping'
+  if (!api?.passthrough) return 'mapping'
+  return api?.request_variant === 'marketing_assistant' ? 'marketing_assistant' : 'passthrough'
 }
 const API_MODE_META = {
   passthrough: { label: '直传透传模式', type: 'success',
     hint: '入参字段直接作为话术占位符，用透传的字段/字典名引用（不经 7 标准域映射）' },
+  marketing_assistant: { label: '直传透传·营销助手统一接口', type: 'success',
+    hint: '灵运前置交叉营销报文（params.inputs）里的业务对象按原名原层级直接引用'
+        + '（{userinfo} / {products} / {userinfo_json}…）；products 每条产品各出一条话术，'
+        + '结果回调网关缓存不直接返回' },
   mapping: { label: '直传映射模式', type: 'primary',
     hint: '入参按 7 大标准域映射后引用（{current_package} / {pkg_brief} 等）' },
   api: { label: '接口查询模式', type: 'info',
@@ -687,6 +726,35 @@ const API_MODE_META = {
 function apiModeLabel(api) { return API_MODE_META[apiMode(api)].label }
 function apiModeTagType(api) { return API_MODE_META[apiMode(api)].type }
 function apiModeHint(api) { return API_MODE_META[apiMode(api)].hint }
+
+// 营销助手统一接口模式：「产品 ID」栏的语义变宽（产品 ID / 业务类型 / 产品名称三选一），
+// 与后端模板匹配候选链一致（precise-first：productId → business_type → productName）
+const marketingAssistantMode = computed(() =>
+  props.availableApis.some(a =>
+    apiMode(a) === 'marketing_assistant'
+    && (form.linked_apis.length ? form.linked_apis.includes(a.api_name) : a.enabled !== false)
+  )
+)
+const productIdHint = computed(() => marketingAssistantMode.value
+  ? '按「精确优先」逐个尝试：产品 ID（productId）→ 业务类型（business_type）→ 产品名称（productName），'
+    + '填哪个就按哪个维度命中；多个用逗号 / 换行分隔；留空 = 该场景分类兜底模板'
+  : '该模板适用的套餐产品编码；多个用逗号 / 换行分隔；留空 = 该场景分类兜底模板（无匹配产品时使用）')
+const productIdPlaceholder = computed(() => marketingAssistantMode.value
+  ? '例：PROD_001（产品 ID）或 流量包（业务类型）或 30GB流量畅享包（产品名称）'
+  : (props.multiProduct ? '例：prod001, prod002, prod003' : '套餐产品 ID（可留空）'))
+
+/** 点击候选值填入「产品 ID」栏（多产品模式追加，单产品模式覆盖）*/
+function appendProductId(val) {
+  if (!props.multiProduct) {
+    form.product_id = val
+    return
+  }
+  const cur = (form.product_ids_text || '').trim()
+  const items = cur.split(/[,，\n]+/).map(s => s.trim()).filter(Boolean)
+  if (items.includes(val)) return
+  items.push(val)
+  form.product_ids_text = items.join(', ')
+}
 
 // 当前生效的接口集合（与运行口径一致）：勾选了接口 → 勾选集合；未勾选 → 全部启用接口
 const activeApiNames = computed(() => {
@@ -1284,6 +1352,18 @@ function handleSave() {
 .fl { font-size: 13px; font-weight: 600; color: #212529; }
 .req-star { color: #c92a2a; margin-left: 2px; }
 .fh { font-size: 11px; color: #868e96; margin-left: 8px; font-weight: 400; }
+
+/* 「产品 ID」栏的候选值（来自接口样例的产品列表，点击填入避免手打错）*/
+.pid-cands { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.pid-cands-hint { font-size: 11px; color: #adb5bd; }
+.pid-cand {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 7px; border: 1px dashed #dee2e6; border-radius: 10px;
+  background: #fff; cursor: pointer; font-size: 11px; color: #1c3faa;
+  font-family: monospace; transition: .15s;
+}
+.pid-cand:hover { border-color: #4263eb; background: #f8f9ff; }
+.pid-cand i { font-style: normal; font-family: inherit; color: #adb5bd; }
 
 .req-preset-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
 .req-preset-label { font-size: 12px; color: #868e96; }

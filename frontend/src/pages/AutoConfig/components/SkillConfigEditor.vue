@@ -43,10 +43,13 @@
                 <span style="font-size:11px;color:var(--muted);margin-left:4px;">{{ row.enabled ? '已启用' : '已禁用' }}</span>
               </template>
             </el-table-column>
-          <el-table-column label="数据来源" width="90" align="center">
+          <el-table-column label="数据来源" width="120" align="center">
               <template #default="{ row }">
                 <el-tag v-if="row.source_type === 'direct'" size="small" type="success">直传</el-tag>
                 <el-tag v-else size="small" type="info">接口查询</el-tag>
+                <!-- 营销助手统一接口：入参为灵运前置报文，结果回调网关缓存，需在列表一眼可辨 -->
+                <el-tag v-if="row.request_variant === 'marketing_assistant'" size="small" type="warning"
+                  style="margin-top:2px;" title="营销助手统一接口：灵运前置报文入参 + 回调网关缓存">营销助手</el-tag>
               </template>
             </el-table-column>
           <el-table-column label="映射规则" width="130">
@@ -68,8 +71,6 @@
                 <button class="ifc-btn-link" @click="openMapResult(row)">映射结果</button>
                 <span class="ifc-sep">|</span>
                 <button class="ifc-btn-link" @click="openIfcEdit(row)">编辑</button>
-                <span class="ifc-sep">|</span>
-                <button class="ifc-btn-link" @click="openIfcAutoMap(row)">智能映射</button>
                 <span class="ifc-sep">|</span>
                 <button class="ifc-btn-link danger" @click="openIfcDel(row)">删除</button>
               </template>
@@ -284,21 +285,41 @@
               <b>不调外部接口</b>：调用方（CTI/坐席系统）在请求的 <code>extra_info</code> 字段直接传入用户/产品信息。
             </div>
 
-            <!-- 直传子模式：智能映射到标准域 / 直接透传字段 -->
-            <el-form-item v-if="isDirectMode" label="映射方式" label-width="90px">
-              <el-radio-group v-model="ifcEditForm.direct_mode">
-                <el-radio-button value="passthrough">直接透传字段 · 推荐</el-radio-button>
-                <el-radio-button value="mapping">智能映射到标准域</el-radio-button>
+            <!-- 直传模式统一为「透传」：入参按原字段名直接进话术上下文，无需映射到 7 大标准域。
+                 只在「通用模式」与「营销助手统一接口」之间选择接口规范。 -->
+            <el-form-item v-if="isDirectMode" label="接口规范" label-width="90px">
+              <el-radio-group v-model="ifcEditForm.request_variant">
+                <el-radio-button value="standard">通用模式 · 默认</el-radio-button>
+                <el-radio-button value="marketing_assistant">营销助手统一接口</el-radio-button>
               </el-radio-group>
             </el-form-item>
-            <div v-if="isPassthrough" class="ifc-hint" style="margin-top:4px;">
-              <b>直接透传</b>：<code>extra_info</code> 的入参字段<b>按原字段名</b>直接作为话术上下文，
-              话术模板里用 <code>&#123;字段名&#125;</code> 即可引用（无需映射到 7 大标准域）。
-              在第② <a class="ifc-link" @click="ifcEditTab='outparam'">透传字段</a> 粘贴样例并勾选要暴露的字段。
+            <div v-if="isMarketingAssistant" class="ifc-hint ifc-hint-ma" style="margin-top:4px;">
+              <div>
+                <b>营销助手统一接口</b>（《灵运平台交叉营销接口规范》）：入参为
+                <code>&#123;"params":&#123;"systemId","optType","inputs":&#123;…&#125;&#125;&#125;</code>，
+                服务端只剥掉 <code>params</code> 外壳与网关元数据（<code>sequenceNo</code> /
+                <code>servNumber</code> / <code>staffId</code> 等），
+                <b>业务对象一律按报文原名原层级</b>进话术上下文：
+                <code>userinfo</code>（含 <code>userExtra</code>）、<code>products</code>、
+                <code>userinfo_json</code> 等在②透传字段与话术调色板里看到的就是原字段名。
+                <code>products</code> 里每个产品各出一条话术（键名不变，不会另生成
+                <code>recommended_packages</code> 占位符）。
+              </div>
+              <div style="margin-top:4px;">
+                <b>响应为异步</b>：接口只回 <code>&#123;"rtnCode":"0","rtnMsg":"数据接收成功！"&#125;</code>，
+                话术生成完成后回调交叉营销网关 <code>/api/gateway/preload/cache</code> 写入
+                <code>preload:&#123;手机号&#125;:&#123;callId&#125;:hs</code>，下游用结果获取接口取。
+                回调地址在 <code>config/config.json → cross_sell</code> 配置。
+              </div>
+              <div style="margin-top:4px;">
+                对端调用地址：<code>/znhs/marketing/preload</code>（打到
+                <code>/znhs/marketing/recommend</code> 也会自动识别转发）。本省份只需<b>一个</b>技能包勾选该模式。
+              </div>
             </div>
             <div v-else-if="isDirectMode" class="ifc-hint" style="margin-top:4px;">
-              <b>智能映射</b>：把 <code>extra_info</code> 按映射规则写入 <b>7 大标准域</b>。
-              若不配置映射规则，顶层与标准域<b>同名</b>的 key（如 <code>current_package</code>）会自动透传。
+              <b>通用模式</b>（直接透传）：调用方把业务字段按<b>原字段名</b>放在 <code>extra_info</code> 里直传，
+              字段直接作为话术上下文，话术模板用 <code>&#123;字段名&#125;</code> 引用（无需映射到 7 大标准域）；
+              响应同步返回 <code>recommend_results</code>。在第② <a class="ifc-link" @click="ifcEditTab='outparam'">透传字段</a> 粘贴样例并勾选要暴露的字段。已上线配置（如广东/山东）保持此模式即可。
             </div>
 
 
@@ -386,7 +407,9 @@
             </div>
             <div v-else class="om-hint om-hint-lead">
               <span class="om-hint-step">第 1 步</span>
-              粘贴一份 <code>extra_info</code> 入参 JSON 样例
+              粘贴一份
+              <template v-if="isMarketingAssistant">灵运前置<b>原始报文</b>样例（<code>params.inputs</code>）</template>
+              <template v-else><code>extra_info</code> 入参 JSON 样例</template>
               <span class="om-hint-arrow">→</span>
               <span class="om-hint-step">第 2 步</span>
               勾选要作为话术上下文的<b>透传字段</b>（不勾则默认全部顶层字段）
@@ -401,11 +424,35 @@
               <section class="om2-sec">
                 <header class="om2-sec-head">
                   <span class="om2-no">①</span>
-                  <span class="om2-title">{{ isDirectMode ? 'extra_info 样例 JSON' : '响应样例 JSON' }}</span>
+                  <span class="om2-title">
+                    {{ isMarketingAssistant ? '灵运前置报文样例 JSON'
+                        : (isDirectMode ? 'extra_info 样例 JSON' : '响应样例 JSON') }}
+                  </span>
+                  <span v-if="isPassthrough" class="om2-aux">
+                    <el-button v-if="isMarketingAssistant" size="small" plain @click="fillMarketingAssistantSample">填充默认参数</el-button>
+                    <el-button v-else size="small" plain @click="fillStandardSample">填充默认参数</el-button>
+                    <el-button size="small" text @click="showSampleDesc = !showSampleDesc">
+                      {{ showSampleDesc ? '收起字段说明' : '字段说明' }}
+                    </el-button>
+                  </span>
                   <span v-if="!isPassthrough" class="om2-aux">
                     <el-button size="small" type="primary" :loading="ifcAutoMapLoading" @click="runIfcAutoMap">智能分析</el-button>
                   </span>
                 </header>
+                <div v-if="isPassthrough && showSampleDesc" class="om2-tip ma-sample-desc">
+                  <div class="msd-title">
+                    {{ isMarketingAssistant ? '营销助手统一接口·参数对象说明' : '通用接口·参数对象说明（参考广东多产品模式）' }}
+                  </div>
+                  <div v-for="d in sampleFieldDesc" :key="d.field" class="msd-row">
+                    <code class="msd-field">{{ d.field }}</code>
+                    <span class="msd-desc">{{ d.desc }}</span>
+                  </div>
+                </div>
+                <div v-if="isMarketingAssistant" class="om2-tip">
+                  粘贴对端<b>原始报文</b>（含 <code>params.inputs</code>）即可，保存时不会被改写；
+                  下方透传字段列出的是<b>归一后</b>的字段，与运行时话术上下文完全一致。
+                  注意示例文档里的 <code>//</code> 注释不是合法 JSON，请用「填充示例报文」或自行删除注释。
+                </div>
                 <!-- 与「模拟数据」共用同一份样例（单一来源，无需再从第②步复制） -->
                 <el-input v-model="ifcEditForm.mock_response" type="textarea"
                   :autosize="{ minRows: 3, maxRows: 8 }" spellcheck="false"
@@ -464,12 +511,24 @@
                       <span class="pt-sub-hint">{{ f.isList ? '产品字段' : '下一级' }}</span>
                       <label v-for="c in f.children" :key="c.key" class="pt-sub-item"
                         :class="{ checked: ifcEditForm.passthrough_fields.includes(c.key) }"
-                        :title="`${c.key}　示例：${c.preview}`">
+                        :title="maFieldRole(c.leaf)
+                          ? `${c.key}　${maFieldRole(c.leaf).tip}`
+                          : `${c.key}　示例：${c.preview}`">
                         <input type="checkbox" :value="c.key" v-model="ifcEditForm.passthrough_fields" />
                         <code>{{ c.leaf }}</code>
+                        <span v-if="maFieldRole(c.leaf)" class="pt-sub-role">
+                          {{ maFieldRole(c.leaf).tag }}
+                        </span>
                       </label>
                     </div>
                   </div>
+                </div>
+                <div v-if="isMarketingAssistant && passthroughSampleFields.length" class="om2-tip">
+                  营销助手统一接口的产品字段里有几个是<b>控制字段</b>，不作为话术素材：
+                  <code>activityTypeName</code>（活动名称）决定这批产品路由到哪个<b>技能包</b>（按同名意图匹配）；
+                  <code>marketingProductFlag</code> / <code>marketingActivityFlag</code> <b>两个都为 1 才生成话术</b>，任一非 1（含 0/空）都不生成；
+                  <code>business_type</code> / <code>productId</code> / <code>productName</code> 用于<b>匹配话术模板</b>
+                  （见「话术模板 → 模板匹配规则」）。ID 与标志类字段即使勾选也不会进话术上下文，避免把串号念进话术。
                 </div>
                 <div v-else class="ifc-analysis-empty">
                   <span class="iae-icon">🔍</span>
@@ -1126,124 +1185,158 @@
               >保存设置</el-button>
             </div>
 
-            <!-- 匹配优先级说明：逐个产品独立匹配，从高到低 -->
+            <!-- 默认规则说明：开箱即用，一般无需配置 -->
             <div class="tpl-match-priority">
-              <div class="tpl-match-priority-title">匹配优先级（每个产品各自独立匹配，从高到低）</div>
+              <div class="tpl-match-priority-title">默认怎么匹配（开箱即用，大多数技能包<b>无需任何配置</b>）</div>
               <ol class="tpl-match-priority-list">
-                <li><b>关联字段命中</b>：用每个产品的<b>「模板关联字段」</b>值，去匹配模板的「产品 ID」</li>
-                <li><b>产品名兜底</b>：上一步没命中、且开启开关时，用产品名关键词模糊匹配模板</li>
-                <li><b>环节 / 意图定位</b>：入参传了就用入参；没传则用下方字段从推荐结果取值，与上面共同锁定到具体模板行</li>
+                <li>先用产品的 <b>产品 ID</b>（<code>offerId / productId</code> 等）去匹配模板「产品 ID」列</li>
+                <li>没命中，再用 <b>业务类型</b>（<code>business_type</code>，一类产品共用一条话术）匹配</li>
+                <li>还没命中，再用 <b>产品名</b>关键词模糊匹配（模板「产品 ID」写「流量 / 套餐 / 升」等片段）</li>
               </ol>
-              <div class="tpl-match-priority-foot">命中模板后，标准域槽位若为空，再按最下方「空域入参兜底」从入参回填，保证话术有事实可填。</div>
-            </div>
-
-            <div class="tpl-match-group-title">① 选模板：产品 → 模板行</div>
-            <div class="tpl-match-row">
-              <span class="tpl-match-label"><span class="tpl-match-step">1</span>模板关联字段</span>
-              <el-select
-                v-model="tmProductIdArr" size="small" multiple filterable allow-create
-                default-first-option clearable collapse-tags collapse-tags-tooltip
-                placeholder="从候选中选择，或手动输入字段名/点路径；多选时按序取第一个非空值"
-                style="width:380px;" @change="onMatchSettingsChange"
-              >
-                <el-option
-                  v-for="c in matchFieldCandidates" :key="c.field"
-                  :value="c.field" :label="c.field"
-                >
-                  <span style="font-family:monospace;">{{ c.field }}</span>
-                  <el-tag v-if="c.score >= 2" size="small" type="success" style="margin-left:6px;">推荐</el-tag>
-                  <span class="tpl-match-opt-src">{{ c.source }}<template v-if="c.sample"> · 样例: {{ c.sample }}</template></span>
-                </el-option>
-              </el-select>
-              <el-button size="small" plain @click="autoRecommendMatchField">智能推荐</el-button>
-              <span class="tpl-match-hint">
-                取<b>每个产品自身</b>该字段的值，去匹配模板「产品 ID」。
-                留空则按默认字段 <code>offerId / product_id / package_id / offer_id</code> 取值
-              </span>
-            </div>
-            <div class="tpl-match-row">
-              <span class="tpl-match-label"><span class="tpl-match-step">2</span>产品名兜底匹配</span>
-              <el-switch
-                v-model="templateMatch.name_fallback"
-                size="small" @change="onMatchSettingsChange"
-              />
-              <span class="tpl-match-hint">
-                第 1 步没命中时，再用产品名（<code>offerName</code> / <code>recommend_package_name</code>）模糊匹配关键词模板。
-                <b>关联字段是纯数字 offerId、模板却按「流量 / 套餐 / 升」等关键词配置时，建议开启</b>
-              </span>
-            </div>
-            <div class="tpl-match-row">
-              <span class="tpl-match-label"><span class="tpl-match-step">3</span>环节取值字段</span>
-              <el-select
-                v-model="tmStageArr" size="small" multiple filterable allow-create
-                default-first-option clearable collapse-tags collapse-tags-tooltip
-                placeholder="可选：入参未传「环节」时，从推荐结果该字段取值"
-                style="width:380px;" @change="onMatchSettingsChange"
-              >
-                <el-option
-                  v-for="c in matchFieldCandidates" :key="c.field"
-                  :value="c.field" :label="c.field"
-                >
-                  <span style="font-family:monospace;">{{ c.field }}</span>
-                  <span class="tpl-match-opt-src">{{ c.source }}<template v-if="c.sample"> · 样例: {{ c.sample }}</template></span>
-                </el-option>
-              </el-select>
-              <span class="tpl-match-hint">入参已传「环节」则直接用入参，此项忽略</span>
-            </div>
-            <div class="tpl-match-row">
-              <span class="tpl-match-label"><span class="tpl-match-step">3</span>意图取值字段</span>
-              <el-select
-                v-model="tmSceneArr" size="small" multiple filterable allow-create
-                default-first-option clearable collapse-tags collapse-tags-tooltip
-                placeholder="可选：入参未传「意图」时，从推荐结果该字段取值"
-                style="width:380px;" @change="onMatchSettingsChange"
-              >
-                <el-option
-                  v-for="c in matchFieldCandidates" :key="c.field"
-                  :value="c.field" :label="c.field"
-                >
-                  <span style="font-family:monospace;">{{ c.field }}</span>
-                  <span class="tpl-match-opt-src">{{ c.source }}<template v-if="c.sample"> · 样例: {{ c.sample }}</template></span>
-                </el-option>
-              </el-select>
-              <span class="tpl-match-hint">入参已传「意图」则直接用入参，此项忽略</span>
-            </div>
-            <el-divider style="margin:12px 0 4px;" />
-            <div class="tpl-match-group-title">② 填槽兜底：标准域为空时从入参回填</div>
-            <div class="tpl-match-row" style="align-items:flex-start;">
-              <span class="tpl-match-label" style="margin-top:4px;">空域入参兜底</span>
-              <div style="flex:1;">
-                <div
-                  v-for="(row, i) in domainFallbacks" :key="i"
-                  class="tpl-match-row" style="margin-bottom:4px;"
-                >
-                  <el-select v-model="row.domain" size="small" style="width:210px;" @change="onMatchSettingsChange">
-                    <el-option
-                      v-for="s in STANDARD_SLOT_LIST" :key="s.key"
-                      :label="`${s.label}（${s.key}）`" :value="s.key"
-                    />
-                  </el-select>
-                  <span class="tpl-match-arrow">←&nbsp;extra_data.</span>
-                  <el-input
-                    v-model="row.path" size="small" clearable
-                    placeholder="入参路径，如 currentMainOffer"
-                    style="width:220px;" @change="onMatchSettingsChange"
-                  />
-                  <el-button
-                    size="small" link type="danger"
-                    @click="domainFallbacks.splice(i, 1); onMatchSettingsChange()"
-                  >删除</el-button>
-                </div>
-                <el-button
-                  size="small" plain
-                  @click="domainFallbacks.push({ domain: 'current_package', path: '' })"
-                >+ 添加兜底</el-button>
-                <div class="tpl-match-hint" style="margin-top:4px;">
-                  接口映射后标准域仍为空时，用主服务入参 extra_data 对应字段回填，
-                  保证话术槽位有事实可填（如：当前套餐 ← currentMainOffer）；接口有数据时不生效
-                </div>
+              <div class="tpl-match-priority-foot">
+                命中模板后，若某个话术槽位没数据，会自动从入参回填。
+                <b>只有当默认字段取不到、或要自定义时，才需要展开下面的「高级设置」。</b>
               </div>
             </div>
+
+            <!-- 当前生效配置一览：一眼看出是全默认还是已自定义 -->
+            <div class="tpl-match-summary-line">
+              <span class="tpl-match-summary-cap">当前配置</span>
+              <el-tag v-if="hasCustomMatch" size="small" type="warning">已自定义</el-tag>
+              <el-tag v-else size="small" type="success">全部默认</el-tag>
+              <span class="tpl-match-summary-txt">{{ matchConfigSummary }}</span>
+            </div>
+
+            <!-- 高级设置：自定义取值字段与兜底，默认折叠，未配置时不影响默认行为 -->
+            <details class="tpl-adv" :open="hasCustomMatch">
+              <summary class="tpl-adv-summary">⚙ 高级设置：自定义取值字段与兜底（默认可不填）</summary>
+              <div class="tpl-adv-body">
+                <div class="tpl-match-group-title">改「用哪个字段」去匹配模板</div>
+                <div class="tpl-match-row">
+                  <span class="tpl-match-label"><span class="tpl-match-step">1</span>产品 ID 字段</span>
+                  <el-select
+                    v-model="tmProductIdArr" size="small" multiple filterable allow-create
+                    default-first-option clearable collapse-tags collapse-tags-tooltip
+                    placeholder="留空=默认 offerId/product_id…；可从候选选或手输字段名"
+                    style="width:380px;" @change="onMatchSettingsChange"
+                  >
+                    <el-option
+                      v-for="c in matchFieldCandidates" :key="c.field"
+                      :value="c.field" :label="c.field"
+                    >
+                      <span style="font-family:monospace;">{{ c.field }}</span>
+                      <el-tag v-if="c.score >= 2" size="small" type="success" style="margin-left:6px;">推荐</el-tag>
+                      <span class="tpl-match-opt-src">{{ c.source }}<template v-if="c.sample"> · 样例: {{ c.sample }}</template></span>
+                    </el-option>
+                  </el-select>
+                  <el-button size="small" plain @click="autoRecommendMatchField">智能推荐</el-button>
+                  <span class="tpl-match-hint">留空即用默认字段，通常不用改</span>
+                </div>
+                <div class="tpl-match-row">
+                  <span class="tpl-match-label"><span class="tpl-match-step">2</span>业务类型字段</span>
+                  <el-select
+                    v-model="tmBizTypeArr" size="small" multiple filterable allow-create
+                    default-first-option clearable collapse-tags collapse-tags-tooltip
+                    placeholder="留空=默认 business_type/businessType"
+                    style="width:380px;" @change="onMatchSettingsChange"
+                  >
+                    <el-option
+                      v-for="c in matchFieldCandidates" :key="c.field"
+                      :value="c.field" :label="c.field"
+                    >
+                      <span style="font-family:monospace;">{{ c.field }}</span>
+                      <span class="tpl-match-opt-src">{{ c.source }}<template v-if="c.sample"> · 样例: {{ c.sample }}</template></span>
+                    </el-option>
+                  </el-select>
+                  <span class="tpl-match-hint">产品里没这个字段会自动跳过，留空即可</span>
+                </div>
+                <div class="tpl-match-row">
+                  <span class="tpl-match-label"><span class="tpl-match-step">3</span>产品名兜底</span>
+                  <el-switch
+                    v-model="templateMatch.name_fallback"
+                    size="small" @change="onMatchSettingsChange"
+                  />
+                  <span class="tpl-match-hint">
+                    默认开启。产品 ID 是纯数字、模板却按「流量 / 套餐 / 升」等关键词配置时，靠它兜底命中
+                  </span>
+                </div>
+
+                <el-divider style="margin:12px 0 6px;" />
+                <div class="tpl-match-group-title">改「环节 / 意图」从哪里取（入参已传则忽略）</div>
+                <div class="tpl-match-row">
+                  <span class="tpl-match-label">环节取值字段</span>
+                  <el-select
+                    v-model="tmStageArr" size="small" multiple filterable allow-create
+                    default-first-option clearable collapse-tags collapse-tags-tooltip
+                    placeholder="可选：入参未传「环节」时，从推荐结果该字段取值"
+                    style="width:380px;" @change="onMatchSettingsChange"
+                  >
+                    <el-option
+                      v-for="c in matchFieldCandidates" :key="c.field"
+                      :value="c.field" :label="c.field"
+                    >
+                      <span style="font-family:monospace;">{{ c.field }}</span>
+                      <span class="tpl-match-opt-src">{{ c.source }}<template v-if="c.sample"> · 样例: {{ c.sample }}</template></span>
+                    </el-option>
+                  </el-select>
+                  <span class="tpl-match-hint">入参已传「环节」则忽略</span>
+                </div>
+                <div class="tpl-match-row">
+                  <span class="tpl-match-label">意图取值字段</span>
+                  <el-select
+                    v-model="tmSceneArr" size="small" multiple filterable allow-create
+                    default-first-option clearable collapse-tags collapse-tags-tooltip
+                    placeholder="可选：入参未传「意图」时，从推荐结果该字段取值"
+                    style="width:380px;" @change="onMatchSettingsChange"
+                  >
+                    <el-option
+                      v-for="c in matchFieldCandidates" :key="c.field"
+                      :value="c.field" :label="c.field"
+                    >
+                      <span style="font-family:monospace;">{{ c.field }}</span>
+                      <span class="tpl-match-opt-src">{{ c.source }}<template v-if="c.sample"> · 样例: {{ c.sample }}</template></span>
+                    </el-option>
+                  </el-select>
+                  <span class="tpl-match-hint">入参已传「意图」则忽略</span>
+                </div>
+
+                <el-divider style="margin:12px 0 6px;" />
+                <div class="tpl-match-group-title">话术槽位没数据时，从入参回填（空域兜底）</div>
+                <div class="tpl-match-row" style="align-items:flex-start;">
+                  <span class="tpl-match-label" style="margin-top:4px;">空域入参兜底</span>
+                  <div style="flex:1;">
+                    <div
+                      v-for="(row, i) in domainFallbacks" :key="i"
+                      class="tpl-match-row" style="margin-bottom:4px;"
+                    >
+                      <el-select v-model="row.domain" size="small" style="width:210px;" @change="onMatchSettingsChange">
+                        <el-option
+                          v-for="s in STANDARD_SLOT_LIST" :key="s.key"
+                          :label="`${s.label}（${s.key}）`" :value="s.key"
+                        />
+                      </el-select>
+                      <span class="tpl-match-arrow">←&nbsp;extra_data.</span>
+                      <el-input
+                        v-model="row.path" size="small" clearable
+                        placeholder="入参路径，如 currentMainOffer"
+                        style="width:220px;" @change="onMatchSettingsChange"
+                      />
+                      <el-button
+                        size="small" link type="danger"
+                        @click="domainFallbacks.splice(i, 1); onMatchSettingsChange()"
+                      >删除</el-button>
+                    </div>
+                    <el-button
+                      size="small" plain
+                      @click="domainFallbacks.push({ domain: 'current_package', path: '' })"
+                    >+ 添加兜底</el-button>
+                    <div class="tpl-match-hint" style="margin-top:4px;">
+                      仅当接口映射后标准域仍为空时生效（如：当前套餐 ← currentMainOffer）；接口有数据则不覆盖
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </details>
           </div>
         </details>
 
@@ -1428,6 +1521,7 @@
         mode="skill"
         :multi-product="true"
         :available-apis="availableApisForTpl"
+        :product-id-candidates="templateProductIdCandidates"
         @save="handleTemplateSave"
       />
 
@@ -1644,8 +1738,11 @@ const ifcEditForm    = reactive({
   enabled: true, request_template: '', response_extract: '{}',
   field_transform: '{}', mock_mode: false, mock_response: '{}',
   source_type: 'api',   // 'api' 接口查询模式 | 'direct' 直传模式（extra_info）
-  direct_mode: 'mapping', // 直传子模式：'mapping' 智能映射到标准域 | 'passthrough' 直接透传字段
+  direct_mode: 'passthrough', // 直传模式统一为透传（智能映射 mapping 子模式已下线，仅后端保留兼容存量）
   passthrough_fields: [], // 透传子模式下选定的入参字段（空=全部顶层字段）
+  // 透传子模式下的接口规范：'standard' 标准接口 | 'marketing_assistant' 营销助手统一接口
+  // （灵运前置交叉营销报文入参 + 话术生成后回调网关缓存，不直接返回结果）
+  request_variant: 'standard',
   headers_pairs: [],    // 接口查询模式请求头（键值对，保存时转 headers 对象）
 })
 
@@ -1672,17 +1769,81 @@ function removeHeaderRow(i) { ifcEditForm.headers_pairs.splice(i, 1) }
 // ── 直传模式辅助 ──────────────────────────────────────
 const isDirectMode = computed(() => ifcEditForm.source_type === 'direct')
 // 直接透传子模式：入参字段按原字段名直接作为 context，不强制映射到 7 标准域
-const isPassthrough = computed(() => isDirectMode.value && ifcEditForm.direct_mode === 'passthrough')
+// 直传模式统一为透传：智能映射(mapping)子模式已从 UI 下线，直传即透传
+const isPassthrough = computed(() => isDirectMode.value)
+// 营销助手统一接口（灵运前置交叉营销）：入参形状与标准接口不同，且响应走回调而非直接返回
+const isMarketingAssistant = computed(
+  () => isPassthrough.value && ifcEditForm.request_variant === 'marketing_assistant'
+)
+/** 营销助手统一接口的「控制类」产品字段 → 角色标签（与后端同口径，仅用于提示）。
+ *  这些字段决定路由/是否生成/模板匹配，不是话术素材；ID 与标志位不会进话术上下文
+ *  （后端 engine.prompt_builder.PKG_FIELD_EXCLUDED_KEYS 已排除）。 */
+const MA_FIELD_ROLES = {
+  activityTypeName:      { tag: '选技能包', tip: '活动名称：决定这批产品路由到哪个技能包（按同名意图匹配）' },
+  marketingProductFlag:  { tag: '控制生成', tip: '营销产品标志：与营销活动标志两个都为 1 才生成话术，非 1（含 0/空）不生成' },
+  marketingActivityFlag: { tag: '控制生成', tip: '营销活动标志：与营销产品标志两个都为 1 才生成话术，非 1（含 0/空）不生成' },
+  business_type:         { tag: '选模板',   tip: '业务类型：产品 ID 没命中模板时用它匹配（一类产品共用话术）' },
+  productId:             { tag: '选模板',   tip: '产品 ID：模板匹配的首选维度，同时用于回调结果对齐产品' },
+  productName:           { tag: '选模板',   tip: '产品名称：前两个维度都没命中时用它模糊匹配关键词模板' },
+  activityTypeCode:      { tag: '直接回填', tip: '活动分类编码：原样回填到回调结果 activityType，不进话术' },
+}
+function maFieldRole(leaf) {
+  return isMarketingAssistant.value ? (MA_FIELD_ROLES[leaf] || null) : null
+}
+
 const ifcStepMockLabel = computed(() => isDirectMode.value ? '直传样例' : '响应样例')
 const ifcStepOutLabel  = computed(() => isPassthrough.value ? '透传字段' : (isDirectMode.value ? '域映射' : '出参映射'))
 
+// ── 营销助手统一接口报文剥壳（与后端 utils/marketing_assistant.py 同口径）──────
+// 灵运前置报文 {"params":{"systemId","optType","inputs":{...}}} → extra_info 本体：
+//   · inputs 下的业务对象（userinfo / products / userinfo_json / 各活动列表 …）
+//     一律**按原名、原层级**保留，不改名、不提层、不派生别名字段 ——
+//     调色板与话术模板里引用的就是报文里的原字段名
+//   · 只剥掉传输层：params 外壳 + 网关元数据（sequenceNo/staffId/touchNumber 等）
+const _MA_STANDARD_MARKERS = ['phone', 'intent', 'province', 'extra_info']
+// 网关元数据键：只用于回调寻址，不进话术上下文（与后端 _META_KEYS 一致）
+const _MA_META_KEYS = [
+  'sequenceNo', 'servNumber', 'provinceCode', 'callId', 'staffId', 'staffNo', 'touchNumber',
+]
+function _isPlainObj(v) { return !!v && typeof v === 'object' && !Array.isArray(v) }
+function _maEnvelope(obj) {
+  if (!_isPlainObj(obj)) return null
+  const cands = []
+  if (_isPlainObj(obj.params) && Object.keys(obj.params).length) cands.push(obj.params)
+  cands.push(obj)
+  for (const cur of cands) {
+    if (_MA_STANDARD_MARKERS.some(k => k in cur)) continue
+    const inputs = cur.inputs
+    if (!_isPlainObj(inputs) || !Object.keys(inputs).length) continue
+    if ('systemId' in cur || 'optType' in cur || 'servNumber' in inputs || 'sequenceNo' in inputs) return cur
+  }
+  return null
+}
+function isMarketingAssistantSample(obj) { return _maEnvelope(obj) !== null }
+function _normalizeMarketingAssistantSample(obj) {
+  const env = _maEnvelope(obj)
+  if (!env) return null
+  const inputs = env.inputs || {}
+  const ei = {}
+  for (const [k, v] of Object.entries(inputs)) {
+    if (k.startsWith('_') || _MA_META_KEYS.includes(k)) continue
+    if (v === null || v === undefined || v === '') continue
+    if (Array.isArray(v) ? !v.length : (_isPlainObj(v) && !Object.keys(v).length)) continue
+    ei[k] = v
+  }
+  return ei
+}
+
 // 直传样例归一：兼容运营把样例粘贴成「整请求体」或「网关 params 包裹」的写法，
 // 统一取到 extra_info 本体。与后端 management._normalize_direct_extra_info 判定一致。
-//   1) {"params": {...}}           → 解外层 params
-//   2) {phone, extra_info:{...}}   → 取 extra_info 本体
-//   3) {uniProdGrade:...}（裸样例） → 原样返回
+//   1) 营销助手统一接口报文       → 剥掉 params 外壳与网关元数据，业务对象保留原名
+//   2) {"params": {...}}           → 解外层 params
+//   3) {phone, extra_info:{...}}   → 取 extra_info 本体
+//   4) {uniProdGrade:...}（裸样例） → 原样返回
 function _normalizeDirectSample(obj) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {}
+  const ma = _normalizeMarketingAssistantSample(obj)
+  if (ma) return ma
   let cur = obj
   const inner = cur.params
   const hasBiz = ['phone', 'intent', 'province', 'extra_info'].some(k => k in cur)
@@ -1721,8 +1882,11 @@ function _subfieldInListSample(sample, path) {
 // 透传子模式：从 extra_info 样例解析出的顶层字段（供勾选 passthrough_fields）
 // 下一级子字段一并列出，勾选项存点路径（parent.child）：
 //   · 字典型（portrait_style / current_package）→ 运行时按叶子名直接透传
-//   · 数组型（recommended_packages）→ 取各产品的并集字段，作为「产品字段白名单」，
-//     逐条话术各取自己那条产品的值；不勾则整块透传、话术里用 {recommended_packages}
+//   · 数组型（recommended_packages / products）→ 取各元素的并集字段，作为「产品字段
+//     白名单」，逐条话术各取自己那条产品的值；不勾则整块透传、话术里用 {字段名}
+// 字典型子字段本身又是对象时（如营销助手报文的 userinfo.userExtra 各省个性化字段）
+// 再展开一级（parent.child.leaf）：报文里字段名/层级都不改写，深一层的叶子也要能勾，
+// 运行时同样按叶子名注入（模板用 {last3mFlowSaturation}）。
 const passthroughSampleFields = computed(() => {
   try {
     const obj = _normalizeDirectSample(JSON.parse(ifcEditForm.mock_response || '{}'))
@@ -1731,20 +1895,168 @@ const passthroughSampleFields = computed(() => {
       const v = obj[k]
       const children = []
       const seen = new Set()
-      const push = (src) => {
+      const push = (src, isList) => {
         if (!src || typeof src !== 'object' || Array.isArray(src)) return
         for (const c of Object.keys(src)) {
           if (c.startsWith('_') || seen.has(c)) continue
           seen.add(c)
-          children.push({ key: `${k}.${c}`, leaf: c, preview: _shortPreview(src[c]) })
+          const cv = src[c]
+          // 嵌套对象子字段（userinfo.userExtra）：只列它的叶子，父级本身仍可整块勾选
+          if (!isList && _isPlainObj(cv) && Object.keys(cv).length) {
+            children.push({ key: `${k}.${c}`, leaf: c, preview: _shortPreview(cv) })
+            for (const g of Object.keys(cv)) {
+              if (g.startsWith('_')) continue
+              children.push({ key: `${k}.${c}.${g}`, leaf: `${c}.${g}`, preview: _shortPreview(cv[g]) })
+            }
+            continue
+          }
+          children.push({ key: `${k}.${c}`, leaf: c, preview: _shortPreview(cv) })
         }
       }
-      if (Array.isArray(v)) v.forEach(push)   // 数组各元素字段取并集（产品间字段可不齐）
-      else push(v)
+      if (Array.isArray(v)) v.forEach(it => push(it, true))  // 数组各元素字段取并集（产品间字段可不齐）
+      else push(v, false)
       return { key: k, preview: _shortPreview(v), children, isList: Array.isArray(v) }
     })
   } catch { return [] }
 })
+// 营销助手统一接口示例报文（对齐《灵运平台交叉营销接口规范》，给两个产品便于验证多产品话术）。
+// 规范文档里的示例带 // 注释、不是合法 JSON，这里给可直接保存的干净版本。
+const MARKETING_ASSISTANT_SAMPLE = {
+  params: {
+    systemId: 'NGRC',
+    optType: '0',
+    inputs: {
+      sequenceNo: '91579d34-1ea8-4635-90d7-76700281a64e',
+      servNumber: '13800138000',
+      provinceCode: '371',
+      callId: 'CALL_20230810_0001',
+      staffId: 'A10086',
+      staffNo: '10086',
+      touchNumber: 'TOUCH_20230810_0001',
+      userinfo: {
+        currentPackageProductId: 'PKG_123456',
+        currentPackageProductName: '5G畅享融合套餐129元档',
+        currPrice: '129',
+        currDomesticTraffic: '30',
+        currDescribe: '含30GB通用流量',
+        currDirectedTraffic: '10',
+        currDomesticVoice: '500',
+        currBroadband: '500M',
+        is_sub_card: '0',
+        userExtra: { last3mFlowSaturation: '10', last3mVoiceSaturation: '10' },
+      },
+      products: [
+        {
+          activityId: 'ACT_20230801', productId: 'PROD_001',
+          price: '59', discount_price: '39.58',
+          Cmn_flow: '20', voice: '200', direct_flow: '30',
+          business_type: '流量包', gift_cmn_flow: '0',
+          product_desc: '高性价比5G套餐，含大流量和语音',
+          marketingProductFlag: '1', marketingActivityFlag: '1',
+          productName: '5G特惠月租卡',
+          activityTypeCode: 'TYPE_01', activityTypeName: '流量语音包',
+        },
+        {
+          activityId: 'ACT_20230802', productId: 'PROD_002',
+          price: '30', discount_price: '19.90',
+          Cmn_flow: '30', voice: '0', direct_flow: '0',
+          business_type: '流量包', gift_cmn_flow: '5',
+          product_desc: '30GB通用流量月包，赠5GB',
+          marketingProductFlag: '1', marketingActivityFlag: '0',
+          productName: '30GB流量畅享包',
+          activityTypeCode: 'TYPE_02', activityTypeName: '流量包',
+        },
+      ],
+      userinfo_json: [
+        {
+          timeType: '0', over_cmn_flow: '1', over_voice: '20',
+          user_consume: '145', over_flow_fee: '7.5', over_voice_fee: '4.05',
+        },
+      ],
+    },
+  },
+}
+
+// 通用（标准）接口直传默认入参样例（参考广东多产品话术模式）：extra_info 本体，
+// 调用方按原字段名把画像 / 当前套餐 / 推荐产品数组直传，逐条产品各生成一段话术。
+const STANDARD_SAMPLE = {
+  portrait_style: {
+    communication_style: '直接爽快',
+    business_conte: '关注性价比，近期有升档意向',
+  },
+  current_package: {
+    package_name: '139元全家享套餐（2022）',
+    actual_price: '139元',
+    broadband: '300M',
+    voice_minutes: '400分钟',
+    equity: '无',
+  },
+  recommended_packages: [
+    {
+      offerId: '2026060810324218501011930',
+      offerName: '【广州】【纯裸升】升169套餐-2606',
+      recommend_package_name: '【广州】【纯裸升】升169套餐-2606',
+      recommend_original_price: '169元',
+      recommend_actual_price: '169元',
+      recommend_discount_amount: '0元',
+      recommend_base_flow: '40GB/月',
+      recommend_bonus_flow: '0GB/月',
+      recommend_total_flow: 40,
+      recommend_voice_minutes: '500分钟/月',
+      recommend_preferential_period: '0个月',
+      recommend_equity: '无',
+      recommend_broadband: '有',
+      rank: 1,
+    },
+    {
+      offerId: '2026060810324218501011931',
+      offerName: '【广州】流量扩容包-20G',
+      recommend_package_name: '【广州】流量扩容包-20G',
+      recommend_actual_price: '20元',
+      recommend_base_flow: '20GB/月',
+      recommend_preferential_period: '12个月',
+      rank: 2,
+    },
+  ],
+}
+
+// 参数对象说明：给运营解释每份默认入参里各顶层对象的用途（配合「字段说明」按钮展示）
+const MA_SAMPLE_DESC = [
+  { field: 'params.systemId', desc: '调用方系统标识（网关元数据，不进话术）' },
+  { field: 'params.optType', desc: '处理类型：0=营销话术（本期只处理 0）' },
+  { field: 'inputs.servNumber', desc: '客户号码，用于回调寻址' },
+  { field: 'inputs.provinceCode', desc: '省份编码，决定路由到哪个省份的技能包' },
+  { field: 'inputs.callId / sequenceNo', desc: '会话 / 流水号，回调写缓存的寻址键（不进话术）' },
+  { field: 'userinfo', desc: '当前套餐与用户资料，按原名原层级透传（含 userExtra 嵌套）' },
+  { field: 'products[]', desc: '候选产品数组：activityTypeName 选技能包、marketingProductFlag/marketingActivityFlag 控制是否生成、productId/business_type/productName 选模板' },
+  { field: 'userinfo_json', desc: '用量 / 账单明细数组（当月、上月等），作为话术上下文' },
+]
+const STANDARD_SAMPLE_DESC = [
+  { field: 'portrait_style', desc: '用户画像 / 沟通风格，用于话术语气与切入点' },
+  { field: 'current_package', desc: '客户当前套餐信息（名称、资费、宽带、语音、权益等）' },
+  { field: 'recommended_packages', desc: '推荐产品数组：逐条产品各生成一段话术，字段名可自定义（如广东用 recommended_packages133）' },
+  { field: 'recommended_packages[].offerId / offerName', desc: '产品编码 / 名称：offerId 用于命中话术模板与对齐结果' },
+  { field: 'recommended_packages[].rank', desc: '推荐排序，回调结果按它排序' },
+]
+
+// 「字段说明」面板展开状态；说明内容随当前接口规范切换
+const showSampleDesc = ref(false)
+const sampleFieldDesc = computed(() =>
+  isMarketingAssistant.value ? MA_SAMPLE_DESC : STANDARD_SAMPLE_DESC
+)
+
+/** 一键把规范示例报文写入样例框（透传字段随之刷新，未勾选过会默认全选）*/
+function fillMarketingAssistantSample() {
+  ifcEditForm.mock_response = JSON.stringify(MARKETING_ASSISTANT_SAMPLE, null, 2)
+  ElMessage.success('已填充营销助手统一接口示例报文')
+}
+
+/** 一键把通用（标准）接口默认入参写入样例框（参考广东多产品话术模式）*/
+function fillStandardSample() {
+  ifcEditForm.mock_response = JSON.stringify(STANDARD_SAMPLE, null, 2)
+  ElMessage.success('已填充通用接口默认入参样例（参考广东多产品模式）')
+}
+
 function _shortPreview(v) {
   let s
   if (v === null || v === undefined) s = ''
@@ -2389,6 +2701,7 @@ function openIfcCreate() {
     field_transform: '{}', mock_mode: false, mock_response: '{}',
     // 需求：透传模式作为第一选择（默认），接口查询模式为第二选择
     source_type: 'direct',
+    request_variant: 'standard',
     headers_pairs: [{ k: 'Content-Type', v: 'application/json' }],
   })
   ifcAutoMapAnalysis.value = ''
@@ -2713,8 +3026,10 @@ async function openIfcEdit(item) {
       mock_mode:        cfg.mock_mode || false,
       mock_response:    JSON.stringify(cfg.mock_response    || {}, null, 2),
       source_type:      cfg.source_type === 'direct' ? 'direct' : 'api',
-      direct_mode:      cfg.direct_mode === 'passthrough' ? 'passthrough' : 'mapping',
+      // 智能映射(mapping)已下线：存量 mapping 节点在编辑器里按透传呈现，保存后自动落为 passthrough
+      direct_mode:      'passthrough',
       passthrough_fields: Array.isArray(cfg.passthrough_fields) ? [...cfg.passthrough_fields] : [],
+      request_variant:  cfg.request_variant === 'marketing_assistant' ? 'marketing_assistant' : 'standard',
       headers_pairs:    headersObjToPairs(cfg.headers),
     })
   } catch { /* 允许打开空表单 */ }
@@ -2732,6 +3047,7 @@ async function openIfcEdit(item) {
     source_type:      ifcEditForm.source_type,
     direct_mode:      ifcEditForm.direct_mode,
     passthrough_fields: [...ifcEditForm.passthrough_fields],
+    request_variant:  ifcEditForm.request_variant,
     headers:          JSON.stringify(headersPairsToObj(ifcEditForm.headers_pairs)),
   }
   rebuildIfcEditPreview()
@@ -2815,7 +3131,8 @@ async function saveIfcEdit() {
       snap.enabled === ifcEditForm.enabled &&
       snap.mock_mode === ifcEditForm.mock_mode &&
       (snap.source_type || 'api') === ifcEditForm.source_type &&
-      (snap.direct_mode || 'mapping') === ifcEditForm.direct_mode &&
+      (snap.direct_mode || 'passthrough') === ifcEditForm.direct_mode &&
+      (snap.request_variant || 'standard') === ifcEditForm.request_variant &&
       JSON.stringify(snap.passthrough_fields || []) === JSON.stringify(ifcEditForm.passthrough_fields || []) &&
       (snap.headers || '{}') === JSON.stringify(headersPairsToObj(ifcEditForm.headers_pairs)) &&
       _jsonEqual(snap.request_template, ifcEditForm.request_template) &&
@@ -2852,8 +3169,10 @@ async function saveIfcEdit() {
   // 接口查询模式：写入请求头（直传模式不发 HTTP，headers 不参与，交由后端合并保留原值）
   if (!isDirect) body.headers = headersPairsToObj(ifcEditForm.headers_pairs)
   if (isDirect) {
-    body.direct_mode = ifcEditForm.direct_mode
-    body.passthrough_fields = isPass ? [...ifcEditForm.passthrough_fields] : []
+    // 直传统一为透传（智能映射已下线）：显式落 passthrough，存量 mapping 节点保存后即完成迁移
+    body.direct_mode = 'passthrough'
+    body.passthrough_fields = [...ifcEditForm.passthrough_fields]
+    body.request_variant = ifcEditForm.request_variant
   }
   ifcSaving.value = true
   try {
@@ -3156,6 +3475,7 @@ function openLocalIfcCreate() {
     // 需求：透传模式作为第一选择（默认），接口查询模式为第二选择
     source_type: 'direct',
     direct_mode: 'passthrough', passthrough_fields: [],
+    request_variant: 'standard',
     headers_pairs: [{ k: 'Content-Type', v: 'application/json' }],
   })
   ifcEditOriginalSnapshot.value = null
@@ -3181,8 +3501,9 @@ function openLocalIfcEdit(row) {
     mock_mode:        !!row.mock_mode,
     mock_response:    JSON.stringify(row.mock_response    || {}, null, 2),
     source_type:      row.source_type === 'direct' ? 'direct' : 'api',
-    direct_mode:      row.direct_mode === 'passthrough' ? 'passthrough' : 'mapping',
+    direct_mode:      'passthrough',   // 智能映射已下线：存量按透传呈现，保存后落为 passthrough
     passthrough_fields: Array.isArray(row.passthrough_fields) ? [...row.passthrough_fields] : [],
+    request_variant:  row.request_variant === 'marketing_assistant' ? 'marketing_assistant' : 'standard',
     headers_pairs:    headersObjToPairs(row.headers),
   })
   ifcEditOriginalSnapshot.value = {
@@ -3210,7 +3531,7 @@ function saveLocalIfcEdit(req, ext, tr, mock) {
     return
   }
   const isDirect = ifcEditForm.source_type === 'direct'
-  const isPass = isDirect && ifcEditForm.direct_mode === 'passthrough'
+  const isPass = isDirect   // 直传统一为透传（智能映射已下线）
   const saved = {
     _key:                 name,
     _comment:             ifcEditForm.description,
@@ -3233,8 +3554,9 @@ function saveLocalIfcEdit(req, ext, tr, mock) {
     _extra:               old?._extra || {},
   }
   if (isDirect) {
-    saved.direct_mode = ifcEditForm.direct_mode
-    if (isPass) saved.passthrough_fields = [...ifcEditForm.passthrough_fields]
+    saved.direct_mode = 'passthrough'
+    saved.request_variant = ifcEditForm.request_variant
+    saved.passthrough_fields = [...ifcEditForm.passthrough_fields]
   }
   if (ifcEditIsNew.value) {
     apiNodeList.value.push(saved)
@@ -3752,7 +4074,7 @@ async function doImportCsv() {
 }
 
 // ── 默认话术要求（context 工程版，与 TemplateEditDialog 保持一致）──────────────
-const DEFAULT_SCRIPT_REQ = '结合【上下文数据】中的当前套餐、历史用量与用户标签，先点出最突出的用户痛点，再用推荐套餐对应字段的真实值说明如何解决；只讲有数据支撑的卖点，口语化、可直接对客播报，150字以内，结尾自然引导办理。'
+const DEFAULT_SCRIPT_REQ = '以用户专属客户经理的口吻，用自然、口语化、像真人一对一沟通的语气说话，杜绝生硬模板腔与官话套话（如"尊敬的客户""钜惠来袭"）。话术骨架以【话术模板】为准：模板已给出句子顺序与结构时就照模板走，只做占位符填充和语句通顺化，不要另起一套结构、不要增删模板里没有的卖点；模板没写明结构时，再按「亲切开场 → 结合【上下文数据】中的当前套餐、历史用量与用户标签点出 1 个最突出的痛点 → 用推荐套餐对应字段的真实值（月费/流量/语音等）说清如何解决、并做前后对比放大获得感 → 一句自然的办理引导」组织。各句衔接顺滑不生硬；只讲有数据支撑的卖点，无数据的点不提、不夸大；有真实的专属/限时权益可点明（无则不编）。控制在 150 字以内，只保留一个明确的行动引导，结尾干脆不啰嗦。'
 
 // ── 智能映射状态 ────────────────────────────────────────
 const smartMapOpen    = ref([])
@@ -4027,6 +4349,7 @@ const availableApisForTpl = computed(() => {
           produced_slot_details: details,
           passthrough: pt.passthrough,
           passthrough_fields: pt.fields,
+          request_variant: cfg.request_variant === 'marketing_assistant' ? 'marketing_assistant' : 'standard',
         }
       }
       return {
@@ -4056,6 +4379,7 @@ const availableApisForTpl = computed(() => {
       produced_slot_details: details,
       passthrough: pt.passthrough,
       passthrough_fields: pt.fields,
+      request_variant: n.request_variant === 'marketing_assistant' ? 'marketing_assistant' : 'standard',
     }
   })
 })
@@ -4900,6 +5224,8 @@ const strategy = reactive({
 // 直传模式取 extra_info.recommended_packages[] 的字段，接口查询模式取推荐结果映射后的字段。
 const templateMatch = reactive({
   product_id_from: '',
+  // 业务类型：关联字段没命中模板时的粗粒度兜底候选（营销助手统一接口的 business_type）
+  business_type_from: '',
   stage_from: '',
   scene_from: '',
   // 产品名兜底匹配：关联字段取值匹配不到模板时，再用产品名（offerName 等）模糊匹配关键词模板。
@@ -4942,7 +5268,12 @@ function _simulateSlotValue(cfg, slotKey) {
     const body = _normalizeDirectSample(mock)
     const hit = body[slotKey]
     if (hit !== undefined) return hit
-    if (slotKey === 'recommended_packages') return body.final_recommendations
+    if (slotKey === 'recommended_packages') {
+      // 营销助手统一接口的产品数组按原名叫 products（后端也只把值喂进标准域、不改键名），
+      // 这里同口径回退，好让模板匹配候选下拉能列出 productId / business_type / productName
+      if (body.final_recommendations !== undefined) return body.final_recommendations
+      return cfg.request_variant === 'marketing_assistant' ? body.products : undefined
+    }
     // 子路径透传（portrait_style.communication_style）：槽位名是叶子名，回溯到嵌套取值
     for (const f of (cfg.passthrough_fields || [])) {
       if (typeof f === 'string' && f.includes('.') && f.split('.').pop() === slotKey) {
@@ -5017,6 +5348,39 @@ const matchFieldCandidates = computed(() => {
   return [...seen.values()].sort((a, b) => b.score - a.score)
 })
 
+/** 话术模板「产品 ID」栏的候选值：从各接口节点的产品样例抽出三个匹配维度的实际值，
+ *  供 TemplateEditDialog 点击填入（手打 PROD_xxx 极易出错，且填错就只能命中兜底模板）。
+ *  维度顺序与后端候选链一致：产品 ID → 业务类型 → 产品名称。 */
+const TPL_PID_DIMS = [
+  { keys: ['productId', 'offerId', 'product_id'], role: '产品ID', tip: '产品 ID：模板匹配的首选维度' },
+  { keys: ['business_type', 'businessType'], role: '业务类型', tip: '业务类型：产品 ID 没命中模板时用它匹配，一类产品共用一条话术' },
+  { keys: ['productName', 'offerName'], role: '产品名称', tip: '产品名称：支持关键词模糊匹配（模板可写「流量 / 套餐 / 升」等片段）' },
+]
+const templateProductIdCandidates = computed(() => {
+  const nodes = apiNodeList.value.length
+    ? apiNodeList.value.map(n => [n._key, n])
+    : Object.entries(ifcDetailsCache)
+  const out = []
+  const seen = new Set()
+  for (const [, cfg] of nodes) {
+    if (!cfg || cfg.enabled === false) continue
+    const products = _simulateSlotValue(cfg, 'recommended_packages')
+    if (!Array.isArray(products)) continue
+    for (const dim of TPL_PID_DIMS) {
+      for (const p of products) {
+        if (!p || typeof p !== 'object') continue
+        const key = dim.keys.find(k => String(p[k] ?? '').trim())
+        if (!key) continue
+        const value = String(p[key]).trim()
+        if (seen.has(value)) continue
+        seen.add(value)
+        out.push({ value, role: dim.role, tip: `${dim.tip}（样例字段 ${key}）` })
+      }
+    }
+  }
+  return out.slice(0, 24)
+})
+
 /** 逗号分隔字符串 ↔ 多选数组（el-select multiple 绑定用）*/
 function _tmArrProxy(key) {
   return computed({
@@ -5025,13 +5389,39 @@ function _tmArrProxy(key) {
   })
 }
 const tmProductIdArr = _tmArrProxy('product_id_from')
+const tmBizTypeArr   = _tmArrProxy('business_type_from')
 const tmStageArr     = _tmArrProxy('stage_from')
 const tmSceneArr     = _tmArrProxy('scene_from')
+
+/** 是否存在任何「非默认」的匹配设置（用于高级设置默认展开 + 「已自定义」标记）*/
+const hasCustomMatch = computed(() => {
+  const tm = templateMatch
+  const filled = k => String(tm[k] || '').trim().length > 0
+  const fbRows = domainFallbacks.value.filter(r => r.domain && String(r.path || '').trim()).length
+  return filled('product_id_from') || filled('business_type_from')
+    || filled('stage_from') || filled('scene_from')
+    || tm.name_fallback === false || fbRows > 0
+})
+
+/** 当前生效配置的一行摘要：让用户不展开也能看清是全默认还是改了什么 */
+const matchConfigSummary = computed(() => {
+  const tm = templateMatch
+  const val = k => String(tm[k] || '').trim()
+  const parts = []
+  parts.push(`产品 ID：${val('product_id_from') || '默认(offerId/product_id…)'}`)
+  parts.push(`业务类型：${val('business_type_from') || '默认(business_type)'}`)
+  parts.push(`产品名兜底：${tm.name_fallback === false ? '关' : '开'}`)
+  if (val('stage_from')) parts.push(`环节取值：${val('stage_from')}`)
+  if (val('scene_from')) parts.push(`意图取值：${val('scene_from')}`)
+  const fbRows = domainFallbacks.value.filter(r => r.domain && String(r.path || '').trim()).length
+  parts.push(`空域兜底：${fbRows ? fbRows + ' 条' : '无'}`)
+  return parts.join('　·　')
+})
 
 /** 序列化当前 UI 中的 template_match（空则返回 null，表示删除该配置段）*/
 function buildTemplateMatchCfg() {
   const cfg = {}
-  for (const k of ['product_id_from', 'stage_from', 'scene_from']) {
+  for (const k of ['product_id_from', 'business_type_from', 'stage_from', 'scene_from']) {
     const arr = String(templateMatch[k] || '')
       .split(/[,，]/).map(s => s.trim()).filter(Boolean)
     if (arr.length) cfg[k] = arr.length > 1 ? arr : arr[0]
@@ -5166,7 +5556,7 @@ function loadFromProps(val) {
     mock_response:         v.mock_response         ?? {},
     // 直传/透传模式标识：作为一等字段保留，保证行内“直传”标签与 emitChange 透传一致
     source_type:           v.source_type === 'direct' ? 'direct' : 'api',
-    direct_mode:           v.direct_mode === 'passthrough' ? 'passthrough' : 'mapping',
+    direct_mode:           v.source_type === 'direct' ? 'passthrough' : (v.direct_mode || 'passthrough'),
     passthrough_fields:    Array.isArray(v.passthrough_fields) ? [...v.passthrough_fields] : [],
     // pass-through 未知字段
     _extra: Object.fromEntries(
@@ -5190,6 +5580,7 @@ function loadFromProps(val) {
   const tm = biz.template_match || {}
   const tmStr = v => Array.isArray(v) ? v.join(',') : String(v ?? '')
   templateMatch.product_id_from = tmStr(tm.product_id_from)
+  templateMatch.business_type_from = tmStr(tm.business_type_from)
   templateMatch.stage_from      = tmStr(tm.stage_from)
   templateMatch.scene_from      = tmStr(tm.scene_from)
   templateMatch.name_fallback   = !tm.disable_name_fallback
@@ -5268,12 +5659,12 @@ function emitChange() {
         ? { field_transform: node.field_transform } : {}),
       ...(Object.keys(node.mock_response || {}).length
         ? { mock_response: node.mock_response } : {}),
-      // 直传/透传模式标识：必须透传，否则会被当作普通接口查询节点（url 必填）导致校验失败
+      // 直传/透传模式标识：必须透传，否则会被当作普通接口查询节点（url 必填）导致校验失败。
+      // 智能映射已下线：直传统一按 passthrough 落库，并带上 passthrough_fields。
       ...(isDirect ? {
         source_type: 'direct',
-        direct_mode: node.direct_mode || 'mapping',
-        ...(node.direct_mode === 'passthrough'
-          ? { passthrough_fields: [...(node.passthrough_fields || [])] } : {}),
+        direct_mode: 'passthrough',
+        passthrough_fields: [...(node.passthrough_fields || [])],
       } : {}),
       ...node._extra,
     }
@@ -5729,6 +6120,38 @@ async function removeTemplate(idx) {
   font-size: 11px;
   color: var(--muted, #909399);
 }
+/* 当前生效配置一览行 */
+.tpl-match-summary-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 2px;
+  font-size: 12px;
+  color: var(--text, #303133);
+}
+.tpl-match-summary-cap { font-weight: 700; color: var(--text, #303133); }
+.tpl-match-summary-txt { color: var(--muted, #606266); }
+/* 高级设置折叠区 */
+.tpl-adv {
+  margin: 8px 0 2px;
+  border: 1px dashed var(--el-border-color, #dcdfe6);
+  border-radius: 6px;
+  background: var(--el-fill-color-blank, #fff);
+}
+.tpl-adv-summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-color-primary, #409eff);
+  user-select: none;
+}
+.tpl-adv-summary::-webkit-details-marker { display: none; }
+.tpl-adv-summary::before { content: '▸ '; }
+.tpl-adv[open] > .tpl-adv-summary::before { content: '▾ '; }
+.tpl-adv-body { padding: 4px 12px 12px; border-top: 1px solid var(--el-border-color-lighter, #ebeef5); }
 .tpl-match-group-title {
   margin: 12px 0 2px;
   font-size: 12px;
@@ -6600,6 +7023,9 @@ async function removeTemplate(idx) {
   background: #fff; border: 1px solid #e9ecef;
   padding: 0 5px; border-radius: 3px;
 }
+/* 营销助手统一接口说明：入参形状与响应语义都与标准接口不同，用高亮底色强调 */
+.ifc-hint-ma { background: #fffbeb; border-color: #fde68a; }
+.ifc-hint-ma code { background: #fff; border-color: #fde68a; }
 .ifc-link { color: var(--primary); cursor: pointer; }
 .ifc-link:hover { text-decoration: underline; }
 
@@ -7276,6 +7702,15 @@ async function removeTemplate(idx) {
   padding: 6px 10px; background: #fff8e1;
   border-left: 3px solid #ffd43b; border-radius: 0 4px 4px 0;
 }
+.ma-sample-desc { background: #f4f8ff; border: 1px solid #dbe7ff; }
+.ma-sample-desc .msd-title {
+  font-weight: 600; color: #334155; margin-bottom: 4px; font-size: 11px;
+}
+.ma-sample-desc .msd-row {
+  display: flex; gap: 8px; align-items: baseline; padding: 1px 0;
+}
+.ma-sample-desc .msd-field { flex: 0 0 auto; white-space: nowrap; }
+.ma-sample-desc .msd-desc { color: var(--muted); }
 .om2-fold { display: inline-block; margin-left: 6px; }
 .om2-fold > summary {
   cursor: pointer; font-size: 11px; color: var(--primary);
@@ -7338,6 +7773,11 @@ async function removeTemplate(idx) {
 .pt-sub-item.checked { border-style: solid; border-color: #4263eb; background: #eef2ff; }
 .pt-sub-item input { flex-shrink: 0; margin: 0; transform: scale(.85); }
 .pt-sub-item code { font-family: monospace; font-size: 11px; color: #1c3faa; }
+/* 营销助手控制类字段（选技能包 / 控制生成 / 选模板）：与话术素材字段区分开 */
+.pt-sub-role {
+  font-size: 10px; color: #8a6d1a; background: #fff6e0;
+  border-radius: 6px; padding: 0 4px; flex-shrink: 0;
+}
 .om2-warn {
   margin-top: 6px; font-size: 11px; color: #c92a2a;
   display: flex; flex-wrap: wrap; align-items: center; gap: 4px;

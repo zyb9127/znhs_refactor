@@ -164,6 +164,30 @@ class FlowContext:
     def add_error(self, msg: str) -> None:
         self.errors.append(msg)
 
+    def caller_supplied_package_count(self) -> int:
+        """调用方在 extra_info 里**直传**的候选产品数（接口查询模式返回 0）。
+
+        直传模式下候选产品已由上游挑定并整包传入：条数由调用方控制、可预期，故
+        RecommendStep 不按 topN 截断（广东 18 个产品只出 8 条即为截断所致），
+        ScriptStep 也不限并发。接口查询模式的候选池大小不可控，两处都保持限制。
+
+        判定**不写死键名**：调用方按自己的接口规范命名产品数组（标准接口叫
+        recommended_packages，营销助手统一接口叫 products），DataStep 只把值喂进
+        标准域、不改键名，故这里按「标准域产品列表与某个入参数组同源」判定 ——
+        按值比对而非按名猜测，入参里恰好有个同名列表也不会被误判成直传。
+        """
+        extra = self.extra_info or {}
+        packages = extra.get("recommended_packages")
+        if isinstance(packages, list) and packages:
+            return len(packages)
+        recs = self.recommended_packages or []
+        if not recs:
+            return 0
+        for val in extra.values():
+            if isinstance(val, list) and val == recs:
+                return len(recs)
+        return 0
+
     def _build_recommend_results(self) -> List[Dict[str, Any]]:
         """构建 recommend_results 列表。
 

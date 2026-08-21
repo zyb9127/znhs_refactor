@@ -6,8 +6,16 @@
   "province": "shandong",
   "scenario_id": "套餐推荐",
   "entry_script": "scripts/main_flow.py",
-  "config_files": ["api_nodes.json", "biz_config.json"],
-  "required_plugins": ["plugins.package_diff", "plugins.unit_converter"],
+  "config_files": [
+    "api_nodes.json",
+    "biz_config.json"
+  ],
+  "required_plugins": [
+    "plugins.package_diff",
+    "plugins.unit_converter"
+  ],
   "author": "shandong-team",
-  "openclaw_compatible": true
+  "openclaw_compatible": true,
+  "status": "published",
+  "published_at": "2026-08-11 12:36"
 }

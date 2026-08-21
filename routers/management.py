@@ -24,10 +24,11 @@ from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from utils import marketing_assistant
 from utils.auth_utils import check_province_write, get_operator, get_user_province
 from utils.placeholder import dig_subfield
 from utils.skill_runtime import skill_registry
-from utils.var_infer import infer_linked_vars, infer_placeholder_vars, _KEY_ALIAS
+from utils.var_infer import infer_linked_vars, infer_placeholder_vars
 
 router = APIRouter(tags=["运营管理"])
 
@@ -38,16 +39,24 @@ _SAVE_FAIL_MSG = "配置保存失败：外部存储不可用（本次更改未�
 def _normalize_direct_extra_info(sample: Any) -> Dict[str, Any]:
     """把直传节点的 mock_response / 粘贴样例归一到 **extra_info 本体**。
 
-    生产/网关常见三种粘贴形态，配置期都要能识别（运行时由
+    生产/网关常见四种粘贴形态，配置期都要能识别（运行时由
     routers.realtime._unwrap_params_body 已解包，这里是配置期的对应处理）：
       1. 裸 extra_info：``{"uniProdGrade":"58", "recommended_packages":[...]}``
       2. 整请求体：     ``{"phone":..., "extra_info":{...}, "batch_contexts":[...]}``
       3. 网关包裹：     ``{"params": {...同 2...}}``
+      4. 营销助手统一接口：``{"params": {"systemId","optType","inputs":{...}}}``
+         → 由 utils.marketing_assistant 剥掉外壳与网关元数据，``inputs`` 下的业务
+         对象**按原名原层级**保留（products / userinfo / userinfo_json …），
+         与运行时口径完全一致
     归一后返回 extra_info 字典（取不到时返回原 dict / 空 dict），
     供调色板字段提取、样例上下文构建、测试体生成统一使用。
     """
     if not isinstance(sample, dict):
         return {}
+    # 营销助手统一接口报文：外壳与标准直传完全不同，先按其规范剥壳
+    _ma = marketing_assistant.normalize_sample(sample)
+    if _ma is not None:
+        return _ma
     cur = sample
     # ① 解最外层 params（与 realtime._unwrap_params_body 判定一致：
     #    仅当 params 为非空 dict 且顶层没有直接出现业务字段时才解包，避免误伤把
@@ -93,7 +102,10 @@ def _clean_direct_node_for_save(node: Dict[str, Any]) -> List[str]:
     sample: Dict[str, Any] = {}
     if isinstance(mock, dict) and mock:
         norm = _normalize_direct_extra_info(mock)
-        if isinstance(norm, dict) and norm != mock:
+        # 营销助手统一接口：mock 就是对端真实下发的报文形状，是该节点的样例真源
+        # （测试页要按它造 /marketing/preload 请求体），只在读取时归一，不回写覆盖。
+        is_ma = marketing_assistant.is_marketing_assistant_payload(mock)
+        if isinstance(norm, dict) and norm != mock and not is_ma:
             node["mock_response"] = norm
             notes.append("mock_response 已归一为 extra_info 本体（原为整请求体 / params 包裹写法）")
         sample = norm if isinstance(norm, dict) else {}
@@ -610,32 +622,9 @@ async def get_context_vars(province: str, intent: str):
                 if not isinstance(_el, dict):
                     continue
                 for _lf, _lv in _el.items():
-                    if not isinstance(_lf, str) or _lf.startswith("_"):
-                        continue
-                    if _lf in _seen_lf or isinstance(_lv, list) or _lf in _PKG_SKIP:
-                        continue
-                    if isinstance(_lv, dict):
-                        # 嵌套字典字段（如 diff）：product_allow 可能勾了它本身
-                        # （recommended_packages.diff）或其子键
-                        # （recommended_packages.diff.diff_actual_price），
-                        # 两种都应展开子字段为多级子路径占位符
-                        _nested_allow = (
-                            _lf in product_allow
-                            or any(k in product_allow for k in _lv if isinstance(k, str))
-                        )
-                        if not _nested_allow:
-                            continue
-                        _seen_lf.add(_lf)
-                        for _nf, _nv in _lv.items():
-                            if (not isinstance(_nf, str) or _nf.startswith("_")
-                                    or isinstance(_nv, (dict, list))
-                                    or _nf in _PKG_SKIP):
-                                continue
-                            _token = f"recommended_package[{_lf}][{_nf}]"
-                            _path = f"{_lf}.{_nf}"
-                            _subs.append({"token": _token, "label": _nf, "path": _path, "sample": _nv})
-                        continue
-                    if _lf not in product_allow:
+                    if (not isinstance(_lf, str) or _lf.startswith("_")
+                            or _lf in _seen_lf or isinstance(_lv, (dict, list))
+                            or _lf in _PKG_SKIP or _lf not in product_allow):
                         continue
                     _seen_lf.add(_lf)
                     _subs.append({"token": _lf, "label": _lf, "path": _lf, "sample": _lv})
@@ -755,7 +744,7 @@ def _merge_auto_domain_vars(province: str, intent: str, linked_vars) -> List[str
 
 
 def _fill_placeholder_vars(content: Any, linked_vars: Any) -> tuple:
-    """保存即补齐：按当前模板内容重新计算占位符变量，同时清理已不再引用的变量。
+    """保存即补齐：把模板里真实写出的占位符所属数据域并入 linked_vars（只增不减）。
 
     子字段占位符 ``{usage[consumption][近6月平均月消费]}`` 只写了根名 ``usage`` 的子键，
     历史推断（infer_linked_vars 的 ``\\{(\\w+)\\}`` 精确层）匹配不到，模板若又没手动勾选
@@ -766,19 +755,9 @@ def _fill_placeholder_vars(content: Any, linked_vars: Any) -> tuple:
         (补齐后的 linked_vars, 新增的变量列表)
     """
     merged = list(linked_vars or [])
-    current = set(infer_placeholder_vars(str(content or "")))
-    # 占位符体系能产出的所有变量值（_KEY_ALIAS 的值集合）
-    # 用于区分"占位符来源"与"API域变量来源"：后者不应被清理
-    placeholder_values = set(_KEY_ALIAS.values())
-    # 保留：非占位符来源的变量（API域变量等）+ 当前模板仍在引用的占位符变量
-    kept = [v for v in merged if v not in placeholder_values or v in current]
-    removed = [v for v in merged if v in placeholder_values and v not in current]
-    if removed:
-        logger.info(f"[_fill_placeholder_vars] 清理已不再引用的占位符变量: {removed}")
-    # 补充新增的占位符变量
-    added = [v for v in current if v not in kept]
-    kept.extend(added)
-    return kept, added
+    added = [v for v in infer_placeholder_vars(str(content or "")) if v not in merged]
+    merged.extend(added)
+    return merged, added
 
 
 @router.put("/api/skills/{province}/{intent}/api_nodes")
@@ -991,6 +970,7 @@ async def gen_test_payload(province: str, intent: str):
     extra_data: Dict[str, Any] = {}
     notes: List[str] = []
     types: set = set()
+    is_ma = False   # 是否存在「营销助手统一接口」直传节点
 
     for name, cfg in (api_nodes or {}).items():
         if not isinstance(cfg, dict) or str(name).startswith("_") or not cfg.get("enabled", True):
@@ -998,10 +978,20 @@ async def gen_test_payload(province: str, intent: str):
         st = cfg.get("source_type", "api")
         if st == "direct":
             types.add("direct")
+            if cfg.get(marketing_assistant.REQUEST_VARIANT_KEY) == \
+                    marketing_assistant.VARIANT_MARKETING_ASSISTANT:
+                is_ma = True
             mock = _normalize_direct_extra_info(cfg.get("mock_response"))
             if isinstance(mock, dict) and mock:
                 extra_info = _tc_deep_merge(extra_info, mock)
                 notes.append(f"直传节点「{name}」：extra_info 取自配置样例 mock_response")
+                if cfg.get(marketing_assistant.REQUEST_VARIANT_KEY) == \
+                        marketing_assistant.VARIANT_MARKETING_ASSISTANT:
+                    notes.append(
+                        f"直传节点「{name}」是营销助手统一接口：此处按归一后的 extra_info 生成"
+                        "标准请求体，便于在本页同步看到话术；现网入口是 POST /znhs/marketing/preload"
+                        "（入参为灵运前置原始报文，只回 ack，话术异步回调网关缓存）"
+                    )
             else:
                 for f in (cfg.get("passthrough_fields") or []):
                     if not isinstance(f, str) or f.startswith("_"):
@@ -1044,6 +1034,36 @@ async def gen_test_payload(province: str, intent: str):
     if not bcs:
         bcs = [{"product_id": "", "stage": "", "scence": ""}]
 
+    skill_type = "mixed" if len(types) > 1 else (next(iter(types)) if types else "none")
+
+    # 营销助手统一接口：生成《灵运平台交叉营销接口规范》原始报文形状（params.inputs.*），
+    # 走同步 MA 测试端点，才能真实复现活动路由/营销标志过滤/推荐+切入+挽留归并的效果。
+    if is_ma:
+        now = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        inputs: Dict[str, Any] = {
+            "sequenceNo": "SEQ" + now,
+            "servNumber": "13800138000",
+            "provinceCode": _numeric_province_code(province),
+            "callId": "test_ma_" + now,
+        }
+        # extra_info 即归一后的 inputs 业务对象本体（products 原名、userinfo 原嵌套）
+        inputs.update(extra_info)
+        payload = {"params": {"systemId": "skill-test", "optType": "0", "inputs": inputs}}
+        notes.append(
+            "营销助手统一接口：已生成灵运前置原始报文（params.inputs.*），点「执行推荐」将同步跑"
+            "本技能包的营销助手链路（营销标志过滤 → 推荐/切入/挽留环节归并），返回回调 value 供预览；"
+            "现网入口是异步的 POST /znhs/marketing/preload。"
+        )
+        return {
+            "code": 200,
+            "data": {
+                "payload": payload,
+                "skill_type": skill_type,
+                "request_variant": marketing_assistant.VARIANT_MARKETING_ASSISTANT,
+                "notes": notes,
+            },
+        }
+
     payload = {
         "callId": "test_" + datetime.datetime.now().strftime("%Y%m%d%H%M%S"),
         "intent": intent,
@@ -1054,10 +1074,75 @@ async def gen_test_payload(province: str, intent: str):
         "extra_info": extra_info,
         "batch_contexts": bcs,
     }
-    skill_type = "mixed" if len(types) > 1 else (next(iter(types)) if types else "none")
     if skill_type == "none":
         notes.append("该技能未配置接口节点：extra_data/extra_info 均为空，将仅按 batch_contexts 匹配话术模板")
-    return {"code": 200, "data": {"payload": payload, "skill_type": skill_type, "notes": notes}}
+    return {
+        "code": 200,
+        "data": {
+            "payload": payload,
+            "skill_type": skill_type,
+            "request_variant": marketing_assistant.VARIANT_STANDARD,
+            "notes": notes,
+        },
+    }
+
+
+def _numeric_province_code(province: str) -> str:
+    """系统 province code → 一个数字省码（营销助手报文 provinceCode 用），取不到就原样返回。"""
+    try:
+        from utils.province_code import province_code_map
+        for raw, code in province_code_map().items():
+            if code == province and str(raw).isdigit():
+                return str(raw)
+    except Exception:
+        pass
+    return province
+
+
+@router.post("/api/skills/{province}/{intent}/test_marketing_assistant")
+async def test_marketing_assistant(province: str, intent: str, body: Dict[str, Any]):
+    """同步测试「营销助手统一接口」直传模式效果（配置测试页用）。
+
+    入参：《灵运平台交叉营销接口规范》原始报文（``{"params":{"systemId","optType","inputs":{...}}}``）；
+          可在报文顶层附 ``"callback": false`` 关闭真实回调（默认 true，会真的写网关 Redis）。
+    出参：``data.value`` 为回调网关的 value（一个产品一项，含 words / aiPitchMarketingDesc /
+          aiRetentionMarketingDesc），``data.callback`` 为真实回调结果（是否成功 + 网关响应），
+          另附 recommend_results / llm_prompts / 被营销标志挡掉的产品，供页面展示。
+    技能包范围固定为路径上的 province/intent（不按 activityTypeName 跨技能包路由）。
+    """
+    pkg = skill_registry.get(province, intent)
+    if pkg is None:
+        raise HTTPException(404, f"技能包不存在: {province}/{intent}")
+
+    req = marketing_assistant.parse(body)
+    if req is None:
+        raise HTTPException(400, "入参不是营销助手统一接口报文（缺 params.inputs），请点「智能填充测试参数」生成")
+    if not req.products:
+        raise HTTPException(400, "报文 params.inputs.products 为空，无可生成话术的产品")
+
+    from routers.cross_sell import run_skill_generation_sync
+    trace_id = "skilltest-ma-" + datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    try:
+        out = await run_skill_generation_sync(req, province, intent, trace_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    # 真实回调网关（测试页要体现是否回调成功 + 网关响应）。默认开启，可在报文里传 callback:false 关闭。
+    do_callback = bool(body.get("callback", True)) if isinstance(body, dict) else True
+    if do_callback:
+        from services.cross_sell_callback import push_cache_detailed, is_enabled
+        from utils.marketing_assistant import IDENTIFIER_SCRIPT
+        if not is_enabled():
+            out["callback"] = {
+                "attempted": False, "ok": False,
+                "skipped_reason": "营销助手统一接口已关闭（cross_sell.enabled=false / ZNHS_CROSS_SELL_ENABLED=0）",
+            }
+        else:
+            out["callback"] = await push_cache_detailed(
+                touch_number=req.touch_id, phone=req.phone,
+                value=out.get("value") or {}, identifier=IDENTIFIER_SCRIPT, trace_id=trace_id,
+            )
+    return {"code": 200, "data": out}
 
 
 def _json_dumps_safe(obj: Any) -> str:
@@ -1534,6 +1619,9 @@ def _build_sample_ctx_from_skill(province: str, intent: str) -> Optional[Dict[st
     ds = DataStep(province)
     merged: Dict[str, Any] = {}
     extra_info_sample: Dict[str, Any] = {}
+    # 直传节点声明的产品列表字段名（营销助手统一接口 = products）：产品数组按原名留在
+    # extra_info 里，找产品样例时要连原名一起找，否则调色板取不到产品字段。
+    product_list_fields: List[str] = []
 
     for name, cfg in api_nodes.items():
         if not isinstance(cfg, dict) or str(name).startswith("_") or not cfg.get("enabled", True):
@@ -1548,6 +1636,9 @@ def _build_sample_ctx_from_skill(province: str, intent: str) -> Optional[Dict[st
             if cfg.get("source_type") == "direct":
                 eff_mock = _normalize_direct_extra_info(mock)
                 extra_info_sample.update(eff_mock)
+                _plf = marketing_assistant.resolve_product_list_field(cfg)
+                if _plf and _plf not in product_list_fields:
+                    product_list_fields.append(_plf)
             if cfg.get("response_extract") or cfg.get("field_transform"):
                 extracted = ds._extract_fields(eff_mock, cfg)
                 resources = ds._transform_fields(extracted, cfg, eff_mock)
@@ -1569,13 +1660,15 @@ def _build_sample_ctx_from_skill(province: str, intent: str) -> Optional[Dict[st
         # 映射，故不在 merged 中。直传节点的 mock 可能是整个请求体（产品数组嵌在 extra_info
         # 下一层），也可能就是 extra_info 本身，两种形态都找一遍；否则调色板看不到产品字段。
         # 兼容多种声明形态：新版多产品数组 recommended_packages、旧版单产品
-        # final_recommendations（可为单个字典），以及 mock 为整请求体时嵌套的 extra_info。
+        # final_recommendations（可为单个字典）、节点声明的原名产品数组（营销助手
+        # 统一接口的 products），以及 mock 为整请求体时嵌套的 extra_info。
         _nested = extra_info_sample.get("extra_info")
         _srcs = [extra_info_sample]
         if isinstance(_nested, dict):
             _srcs.append(_nested)
+        _cand_names = ["recommended_packages", "final_recommendations", *product_list_fields]
         for _src in _srcs:
-            for _name in ("recommended_packages", "final_recommendations"):
+            for _name in _cand_names:
                 _cand = _src.get(_name)
                 if isinstance(_cand, dict) and _cand:
                     _cand = [_cand]
@@ -2018,6 +2111,12 @@ async def list_interfaces(
                 "method": cfg.get("method", "POST"),
                 "enabled": is_enabled,
                 "source_type": cfg.get("source_type", "api"),
+                "direct_mode": cfg.get("direct_mode", ""),
+                # 接口规范：standard 标准接口 / marketing_assistant 营销助手统一接口
+                "request_variant": cfg.get(
+                    marketing_assistant.REQUEST_VARIANT_KEY,
+                    marketing_assistant.VARIANT_STANDARD,
+                ),
                 "mock_mode": cfg.get("mock_mode", False),
                 "created_by": cfg.get("created_by", "系统"),
                 "created_at": cfg.get("created_at", "—"),

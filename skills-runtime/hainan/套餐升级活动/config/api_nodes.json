@@ -1,14 +1,17 @@
 {
   "cc": {
-    "_comment": "比赛演示·山东套餐推荐直传节点（本地演示，与生产无关）",
+    "_comment": "本地测试·海南营销助手统一接口（直传透传）。request_variant=marketing_assistant 是营销助手模式开关；只对本节点生效，标准接口模式不受影响。",
     "url": "",
     "method": "POST",
     "enabled": true,
     "source_type": "direct",
+    "direct_mode": "passthrough",
+    "request_variant": "marketing_assistant",
     "request_template": {},
     "response_extract": {},
     "field_transform": {},
     "mock_mode": false,
+    "_mock_note": "直传样例=归一后的 inputs 本体（products 原名、userinfo 原嵌套）。营销助手模式下 products 的值会喂进标准域 recommended_packages 逐产品出话术，键名对外仍是 products。",
     "mock_response": {
       "params": {
         "systemId": "NGRC",
@@ -85,7 +88,6 @@
         }
       }
     },
-    "direct_mode": "passthrough",
     "passthrough_fields": [
       "userinfo",
       "userinfo.currentPackageProductId",
@@ -124,10 +126,9 @@
       "userinfo_json.over_flow_fee",
       "userinfo_json.over_voice_fee"
     ],
-    "created_by": "demo",
-    "created_at": "2026-08-04 09:00:00",
+    "created_by": "local-test",
+    "created_at": "2026-08-11 15:00:00",
     "updated_by": "admin",
-    "updated_at": "2026-08-11 12:34:38",
-    "request_variant": "marketing_assistant"
+    "updated_at": "2026-08-12 13:54:35"
   }
 }

@@ -1,0 +1,99 @@
+{
+  "script_templates_v2": [
+    {
+      "province": "hainan",
+      "intent": "套餐升级活动",
+      "template_name": "套餐升级活动",
+      "template_content": "您好{custName}，根据您近期的使用情况，为您推荐{recommend_package_name}，现在连续{recommend_preferential_period}每月只要{recommend_actual_price}（原价{recommend_original_price}），可享套内{recommend_base_flow}国内流量、{recommend_voice_minutes}国内通话，另每月再送{recommend_bonus_flow}，相当于每月共{recommend_total_flow}GB流量，现在就给您办理好吗？",
+      "product_id": "套餐升级",
+      "scene": "开口话术",
+      "stage": "推荐环节",
+      "linked_vars": [
+        "current_package",
+        "usage",
+        "tags",
+        "user_profile",
+        "recommend_package_name",
+        "recommend_actual_price",
+        "recommend_original_price",
+        "recommend_discount_amount",
+        "recommend_preferential_period",
+        "recommend_base_flow",
+        "recommend_bonus_flow",
+        "recommend_total_flow",
+        "recommend_voice_minutes",
+        "recommend_equity"
+      ],
+      "script_requirement": "以用户专属客户经理的口吻，用自然、口语化、像真人一对一沟通的语气说话，杜绝生硬模板腔与官话套话。结合【上下文数据】中的当前套餐、历史用量与用户标签点出最突出的痛点，再用以 recommend_ 开头的产品字段真实值说清如何解决、并做前后对比放大获得感；数字缺失或为 0 的表述整句跳过，不编造不夸大；控制在 130 字以内，结尾给一个明确自然的办理引导。",
+      "prompt_template": "",
+      "linked_apis": [
+        "cc"
+      ],
+      "status": "online",
+      "created_by": "local-test",
+      "template_id": "tpl_hainan_upgrade_recommend",
+      "created_at": "2026-08-11 15:00:00",
+      "updated_by": "local-test"
+    },
+    {
+      "province": "hainan",
+      "intent": "套餐升级活动",
+      "template_name": "套餐升级-切入环节",
+      "template_content": "{custName}您好，看到您近期流量和通话都用得比较多，我们刚好有个{recommend_package_name}挺适合您，简单跟您介绍一下。",
+      "product_id": "套餐升级",
+      "scene": "开口话术",
+      "stage": "切入环节",
+      "linked_vars": [
+        "current_package",
+        "usage",
+        "tags",
+        "user_profile",
+        "recommend_package_name"
+      ],
+      "script_requirement": "像真人坐席自然开口、别生硬；一句话结合用户近期用量/标签切入、点出关注点，自然过渡到要介绍的产品；口语化、50 字以内，不喊口号不夸大。",
+      "prompt_template": "",
+      "linked_apis": [
+        "cc"
+      ],
+      "status": "online",
+      "created_by": "local-test",
+      "template_id": "tpl_hainan_upgrade_pitch",
+      "created_at": "2026-08-11 15:00:00",
+      "updated_by": "local-test"
+    },
+    {
+      "province": "hainan",
+      "intent": "套餐升级活动",
+      "template_name": "套餐升级-挽留环节",
+      "template_content": "这个{recommend_package_name}的优惠名额不多了，现在办理还能享{recommend_preferential_period}的优惠价每月{recommend_actual_price}，要不先帮您登记办理上，避免错过？",
+      "product_id": "套餐升级",
+      "scene": "开口话术",
+      "stage": "挽留环节",
+      "linked_vars": [
+        "recommend_package_name",
+        "recommend_actual_price",
+        "recommend_preferential_period"
+      ],
+      "script_requirement": "客户犹豫时用于挽留：语气亲切不施压，用真实的优惠期/名额有限营造合理紧迫感（无则不编不夸大），给一个低门槛的行动引导（如先登记）；口语化、60 字以内。",
+      "prompt_template": "",
+      "linked_apis": [
+        "cc"
+      ],
+      "status": "online",
+      "created_by": "local-test",
+      "template_id": "tpl_hainan_upgrade_retention",
+      "created_at": "2026-08-11 15:00:00",
+      "updated_by": "local-test"
+    }
+  ],
+  "template_match": {
+    "product_id_from": "productId",
+    "business_type_from": "business_type"
+  },
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 10,
+    "max_script_length": 150,
+    "max_parallel_scripts": 5
+  }
+}

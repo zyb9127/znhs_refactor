@@ -35,6 +35,16 @@ from plugins.unit_converter import UnitConverterRegistry
 from services.api_client import api_client
 from services.cache_service import cache_service
 from utils.field_naming import match_config_keys
+from utils.marketing_assistant import (
+    MARKETING_FLAG_FIELDS,
+    PRODUCT_LIST_FIELD,
+    REQUEST_VARIANT_KEY,
+    looks_like_marketing_products,
+    product_label,
+    resolve_product_list_field,
+    select_marketable_products,
+    split_marketable,
+)
 from utils.observability import record_stage
 from utils.placeholder import FIXED_PARAM_MAP, dig_subfield
 
@@ -307,15 +317,29 @@ class DataStep:
     def _salvage_recommendations(raw_responses: Dict[str, Any]) -> list:
         """从原始响应中按常见路径兜底提取推荐产品列表（映射缺失时的自愈）。
 
-        探测路径（按优先级）：bean.recommend_results / recommend_results / bean.recommendResults /
-        recommendResults / bean.recommendList / recommendList。命中即返回该列表并打 WARNING，
-        提示运营修正该节点的 response_extract（recommended_packages → bean.recommend_results）。
-        未命中返回 []（保持原行为）。
+        探测路径（按优先级）：营销助手 products（仅当带灵运独有字段，见
+        :func:`looks_like_marketing_products`）→ bean.recommend_results / recommend_results /
+        bean.recommendResults / recommendResults / bean.recommendList / recommendList。
+        命中即返回该列表并打 WARNING，提示运营修正该节点的 response_extract
+        （recommended_packages → bean.recommend_results）。未命中返回 []（保持原行为）。
         """
         probe_keys = ("recommend_results", "recommendResults", "recommendList")
         for api_name, raw in raw_responses.items():
             if not isinstance(raw, dict):
                 continue
+            # 营销助手直传节点没走「直接透传」子模式、且映射里漏了 recommended_packages 时，
+            # 按报文独有字段认出 products 并套营销标志规则（判据见 looks_like_marketing_products）
+            if looks_like_marketing_products(raw.get(PRODUCT_LIST_FIELD)):
+                keep, skip = split_marketable(raw.get(PRODUCT_LIST_FIELD))
+                if keep:
+                    logger.warning(
+                        f"[DataStep] ⚠️ 兜底自愈：节点[{api_name}] 报文 "
+                        f"{PRODUCT_LIST_FIELD!r} 是营销助手产品列表（{len(keep)} 条"
+                        + (f"，营销标志挡掉 {len(skip)} 条" if skip else "")
+                        + f"），但映射后 recommended_packages 为空，已自动采用。"
+                        f"请把该直传节点改为「直接透传字段」+「营销助手统一接口」"
+                    )
+                    return keep
             bean = raw.get("bean") if isinstance(raw.get("bean"), dict) else {}
             for pk in probe_keys:
                 hits = bean.get(pk) if isinstance(bean.get(pk), list) else raw.get(pk)
@@ -442,6 +466,47 @@ class DataStep:
                     k: v for k, v in raw.items()
                     if k in _NODE_TO_CTX_FIELD and v not in (None, "", [], {})
                 }
+                # 产品列表按调用方原字段名直传（营销助手统一接口叫 products）：
+                # 只把**值**喂进标准域 recommended_packages（多产品逐条生成、模板按产品
+                # 字段匹配都依赖它），键名对外仍是原名 —— 调色板/话术模板里引用的还是
+                # {products}，不会多出一个同义占位符。
+                _pl_field = resolve_product_list_field(api_cfg)
+                # 兜底自愈：节点漏配「营销助手统一接口」时 _pl_field 为空，产品列表进不了
+                # 标准域 → 话术会用「空产品」匹配模板（填了产品 ID 的模板一律落空），且结果
+                # 不回显 product_id。报文里 products 带灵运独有字段时按 products 兜底并告警，
+                # 判据见 looks_like_marketing_products（标准接口省份不会误触发）。
+                _salvaged_ma = False
+                if not _pl_field and looks_like_marketing_products(raw.get(PRODUCT_LIST_FIELD)):
+                    _pl_field = PRODUCT_LIST_FIELD
+                    _salvaged_ma = True
+                    logger.warning(
+                        f"[DataStep] ⚠️ 兜底自愈：直传节点 {api_name} 未配"
+                        f"「营销助手统一接口」（{REQUEST_VARIANT_KEY}="
+                        f"{api_cfg.get(REQUEST_VARIANT_KEY)!r}），但报文 "
+                        f"{PRODUCT_LIST_FIELD!r} 带营销助手独有字段，已按该字段喂入标准域"
+                        f"并套用营销标志规则。请尽快把该节点的「接口规范」改为营销助手统一接口："
+                        f"配置页的样例解包、调色板产品字段、活动名称路由仍依赖该标记"
+                    )
+                if _pl_field and not resources.get("recommended_packages"):
+                    # 自愈路径已确认是营销助手报文，直接套营销标志规则，
+                    # 与「节点配置正确」时的行为保持一致（不因漏配而放过 flag≠1 的产品）
+                    _items, _skipped = (
+                        split_marketable(raw.get(_pl_field))
+                        if _salvaged_ma
+                        else select_marketable_products(raw.get(_pl_field), api_cfg)
+                    )
+                    if _skipped:
+                        logger.info(
+                            f"[DataStep] 直传节点 {api_name}: 营销标志过滤掉 {len(_skipped)} 个产品 "
+                            f"{[product_label(p) for p in _skipped]}"
+                            f"（{'/'.join(MARKETING_FLAG_FIELDS)} 未同时为 1，不生成话术）"
+                        )
+                    if _items:
+                        resources["recommended_packages"] = _items
+                        logger.info(
+                            f"[DataStep] 直传节点 {api_name}: 产品列表字段 {_pl_field!r} "
+                            f"({len(_items)} 条) 已喂入标准域 recommended_packages（键名不变）"
+                        )
                 # 选定要暴露的透传字段：配置了 passthrough_fields 用之，否则全部顶层字段；
                 # 排除标准域（走 resources 通道）与下划线开头的内部键、空值。
                 # 支持「子路径」写法（如 portrait_style.communication_style）：只暴露该子字段，

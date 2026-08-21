@@ -37,6 +37,16 @@ from engine.prompt_builder import (
     preview_prompt,
     resource_context_prompt_vars,
 )
+# oracle 引用规则文案常量而非冻结副本：本对照测试守的是**拼装逻辑**
+# （分段顺序、规则编号顺延、上下文行注入、槽位填充），而规则正文会随
+# 调优持续演进（防串填、模板为主体框架、字数约束…）。若把正文抄成字面量，
+# 每次调 Prompt 文案都会假失败一片，掩盖真正的拼装回归。
+from prompt.script_generation import (
+    SCRIPT_GEN_RULES,
+    SCRIPT_LENGTH_RULE,
+    SCRIPT_OUTPUT_SUFFIX,
+    SCRIPT_PERSONA_RULE,
+)
 
 # 依赖 ScriptStep 的格式化工具与 FlowContext/PackageDiff；
 # script_step 导入失败（如环境缺配置）时跳过全部对照测试并注明。
@@ -327,28 +337,7 @@ class _OraclePromptStep(ScriptStep):  # type: ignore[misc]
             if template_text:
                 lines.append("【话术模板】")
                 lines.append(template_text)
-            lines.append(
-                "【生成规则】\n"
-                "1. 仅依据【上下文数据】中的事实填充话术模板，不得编造数据中不存在的"
-                "数字、套餐名、优惠、功能或权益。\n"
-                "2. 若某项信息缺失、为空或为 0（即【上下文数据】无对应 {占位符} 行），"
-                "则跳过该占位符所在表述，既不提及、也不得用其他字段的值代替"
-                "（例如语音为 0 则不谈语音；优惠月数为 0 则表述为“连续包月”而非“连续 0 个月”）；"
-                "严禁把占位符原文（如 {current_package}）留在输出中。\n"
-                "3. 占位符一一对应：【上下文数据】每行已用 {占位符} 标注槽位，"
-                "请将【话术模板】中出现的同名 {占位符} 替换为该行冒号后的事实值"
-                "（含 {域[子键]} 子字段占位符，须整串同名精确对应，不得拆开或改名）；"
-                "有对应行则必须填入该行的值，不得留空或改用其他行。"
-                "严禁串填：{current_package}/{current_package[…]} 只用当前套餐行，"
-                "{pkg_brief}/{pkg_name}/{recommended_package} 只用推荐产品行，"
-                "不得用推荐套餐名/资费冒充当前套餐，也不得用套餐内包含量"
-                "（套餐流量/语音额度/月费）冒充历史使用量（月均流量/主叫时长/月均消费），反之亦然；"
-                "若该行事实包含多个指标（如历史用量、用户标签），不得原样罗列、也不得因内容多而整体略过该槽位，"
-                "应提炼其中最能支撑推荐理由的 1-3 个要点，口语化融入话术"
-                "（如“您月均流量已达37GB、接近饱和”）。\n"
-                "4. 保留话术模板的语义与结构，输出贴合用户痛点、可直接对客播报的完整话术，"
-                "最终结果不得残留任何 {} 占位符或字段名。"
-            )
+            lines.append(SCRIPT_GEN_RULES)
             # 个性化润色规则（镜像 engine.prompt_builder._has_persona_context）
             _persona_vars = {"tags", "user_tags", "user_profile"}
             _persona_hints = ("style", "persona", "portrait", "性格", "画像", "风格", "偏好")
@@ -356,17 +345,19 @@ class _OraclePromptStep(ScriptStep):  # type: ignore[misc]
                 any(h in str(k).lower() for h in _persona_hints)
                 for k in (passthrough_ctx or {})
             )
+            # 字数规则固定为第 5 条，排在个性化润色/话术要求之前
             rule_no = 5
+            lines.append(
+                f"{rule_no}. "
+                + SCRIPT_LENGTH_RULE.replace("{max_length}", str(self.max_length))
+            )
+            rule_no += 1
             if _has_persona:
-                lines.append(
-                    f"{rule_no}. 个性化润色：结合【上下文数据】中的用户标签/画像/性格信息调整称呼、语气与卖点顺序"
-                    "（如价格敏感型客户强调优惠与性价比、流量大户强调流量升级、性格沉稳者用平实可信的措辞），"
-                    "标签与画像仅用于选择表达风格和卖点侧重，不得把标签名或画像字段名原样写进话术。"
-                )
+                lines.append(f"{rule_no}. {SCRIPT_PERSONA_RULE}")
                 rule_no += 1
             if script_requirement:
                 lines.append(f"{rule_no}. 话术要求：{script_requirement}")
-            lines.append("请直接输出话术文本，不需要任何前缀标签：\n话术：")
+            lines.append(SCRIPT_OUTPUT_SUFFIX)
             return "\n".join(lines)
 
         # ── 旧格式：user_prompt_tpl（向后兼容） ──────────────────────
@@ -647,8 +638,8 @@ class TestNewFormatLinkedVars(EquivalenceBase):
         self.assertIn("推荐套餐语音(分钟) {pkg_voice}：1000", out)
 
     def test_persona_rule_injection_and_numbering(self) -> None:
-        """含用户标签/画像上下文 → 追加「个性化润色」规则且话术要求编号顺延为 6；
-        无标签/画像 → 不追加、编号保持 5。零配置透传兜底同场景验证。"""
+        """规则 5 恒为字数规则；含用户标签/画像上下文时追加「个性化润色」为第 6 条、
+        话术要求顺延为第 7 条；无标签/画像则不追加、话术要求为第 6 条。"""
         pkg = dict(_SAMPLE_PKG)
         # ① 有 tags：追加润色规则
         out = self.assert_same_prompt(
@@ -659,8 +650,9 @@ class TestNewFormatLinkedVars(EquivalenceBase):
             script_requirement="150字以内",
             field_aliases=_FIELD_ALIASES,
         )
-        self.assertIn("5. 个性化润色", out)
-        self.assertIn("6. 话术要求：150字以内", out)
+        self.assertIn("5. 字数控制", out)
+        self.assertIn("6. 个性化润色", out)
+        self.assertIn("7. 话术要求：150字以内", out)
         # ② 无标签/画像：不追加
         ctx2 = make_ctx(tags={}, user_profile={}, extra_info={}, extra_context={})
         out2 = self.assert_same_prompt(
@@ -672,9 +664,50 @@ class TestNewFormatLinkedVars(EquivalenceBase):
             field_aliases=_FIELD_ALIASES,
         )
         self.assertNotIn("个性化润色", out2)
-        self.assertIn("5. 话术要求：简洁", out2)
+        self.assertIn("5. 字数控制", out2)
+        self.assertIn("6. 话术要求：简洁", out2)
         # ③ 多指标提炼规则文案存在
         self.assertIn("提炼其中最能支撑推荐理由的 1-3 个要点", out)
+
+    def test_template_is_the_backbone_rule(self) -> None:
+        """规则 4 必须明确「以话术模板为主体框架」：不得改写行文、不得增删模板没有的卖点。"""
+        out = self.assert_same_prompt(
+            ctx=make_ctx(),
+            pkg=_SAMPLE_PKG,
+            template_text=self.TEMPLATE_TEXT,
+            linked_vars=["cur_brief", "pkg_brief"],
+            field_aliases=_FIELD_ALIASES,
+        )
+        self.assertIn("4. 以【话术模板】为话术主体框架", out)
+        self.assertIn("沿用它的句子顺序", out)
+        self.assertIn("不得改写成自己的行文", out)
+
+    def test_length_rule_uses_max_length_and_defers_to_requirement(self) -> None:
+        """字数规则按 max_length 实时渲染，并显式让位于运营写的「话术要求」。"""
+        out = self.assert_same_prompt(
+            ctx=make_ctx(),
+            pkg=_SAMPLE_PKG,
+            template_text=self.TEMPLATE_TEXT,
+            linked_vars=["pkg_brief"],
+            field_aliases=_FIELD_ALIASES,
+            max_length=200,
+        )
+        self.assertIn("整段话术控制在 200 字以内", out)
+        self.assertIn("以【话术要求】为准", out)
+        self.assertNotIn("{max_length}", out)
+
+    def test_default_max_length_is_150(self) -> None:
+        """不传 max_length 时框架默认 150 字（与 ScriptStep.max_length 默认值一致）。"""
+        out = build_prompt(
+            user_prompt_tpl="",
+            template_text=self.TEMPLATE_TEXT,
+            ctx=make_ctx(),
+            pkg=_SAMPLE_PKG,
+            diff=PackageDiff(make_ctx().current_package, _SAMPLE_PKG),
+            linked_vars=["pkg_brief"],
+            field_aliases=_FIELD_ALIASES,
+        )
+        self.assertIn("整段话术控制在 150 字以内", out)
 
     def test_subfield_path_placeholders(self) -> None:
         """子字段路径占位符 {域[子键]} / {域[子键1][子键2]} → 从原始域字典按路径精确取值注入，

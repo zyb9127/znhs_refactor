@@ -1,0 +1,57 @@
+{
+  "params": {
+    "systemId": "NGRC",
+    "optType": "0,1,2",
+    "inputs": {
+      "sequenceNo": "91579d34-1ea8-4635-90d7-76700281a64e",
+      "servNumber": "13800138000",
+      "provinceCode": "371",
+      "callId": "CALL_20230810_0001",
+      "staffId": "A10086",
+      "staffNo": "10086",
+      "touchNumber": "TOUCH_20230810_0001",
+      "userinfo": {
+        "currentPackageProductId": "PKG_123456",
+        "currentPackageProductName": "5G畅享融合套餐129元档",
+        "currPrice": "129",
+        "currDomesticTraffic": "30", // 国内流量 (约定单位: GB)
+        "currDescribe": "含30GB通用流量",
+        "currDirectedTraffic": "10", // 定向流量 (约定单位: GB)
+        "currDomesticVoice": "500", // 国内语音 (约定单位: 分钟)
+        "userExtra": {
+          "last3mFlowSaturation": "10", // 前三月流量饱和度
+          "last3mVoiceSaturation": "10" // 前三月语音饱和度
+        }
+      },
+      "products": [
+        {
+          "activityId": "ACT_20230801",
+          "productId": "PROD_001",
+          "price": "59", // 商品原价 (约定单位: 元)
+          "discount_price": "39.58", // 折扣价格 (约定单位: 元)
+          "Cmn_flow": "20", // 国内通用流量 (约定单位: GB)
+          "voice": "200", // 国内语音通话免费分钟 (约定单位: 分钟)
+          "direct_flow": "30", // 国内定向流量 (约定单位: GB)
+          "business_type": "流量包",
+          "gift_cmn_flow": "0", // 赠送国内通用流量 (约定单位: GB，无赠送填0)
+          "product_desc": "高性价比5G套餐，含大流量和语音",
+          "marketingProductFlag": "1",
+          "marketingActivityFlag": "1",
+          "productName": "5G特惠月租卡",
+          "activityTypeCode": "TYPE_01",
+          "activityTypeName": "流量语音包"
+        }
+      ],
+      "userinfo_json": [
+        {
+          "timeType": "0", // 消费阶段: 0-当月、1-上月、2-上上月、3-上上上月
+          "over_cmn_flow": "1", // 当月国内通用流量超套量 (约定单位: GB)
+          "over_voice": "20", // 当月语音超套量 (约定单位: 分钟)
+          "user_consume": "145.", // 当月用户消费 (约定单位: 元)
+          "over_flow_fee": "7.5", // 当月流量超套费用 (约定单位: 元)
+          "over_voice_fee": "4.05" // 当月语音超套费用 (约定单位: 元)
+        }
+      ]
+    }
+  }
+} 

@@ -453,10 +453,14 @@
             <div class="tc-fullbody-head">
               <label class="tc-label" style="margin:0;">
                 完整请求体（JSON · 全部入参）
-                <span class="tc-fullbody-tag" v-if="testSkillType">{{ { direct:'直传模式', api:'接口查询模式', mixed:'混合模式', none:'无接口' }[testSkillType] || '' }}</span>
+                <span class="tc-fullbody-tag" v-if="isMaTest" style="background:#7c3aed;">营销助手模式</span>
+                <span class="tc-fullbody-tag" v-else-if="testSkillType">{{ { direct:'直传模式', api:'接口查询模式', mixed:'混合模式', none:'无接口' }[testSkillType] || '' }}</span>
               </label>
             </div>
-            <div class="tc-autofill-hint" style="margin-top:0;">
+            <div class="tc-autofill-hint" style="margin-top:0;" v-if="isMaTest">
+              营销助手统一接口：这是《灵运交叉营销接口规范》原始报文（params.inputs.*）。「执行推荐」将同步跑本技能包的营销助手链路（营销标志过滤 → 推荐/切入/挽留环节归并），返回下游取到的回调 value。现网入口是异步的 POST /znhs/marketing/preload。
+            </div>
+            <div class="tc-autofill-hint" style="margin-top:0;" v-else>
               这就是将 POST 给 /marketing/recommend 的完整入参，可直接编辑后执行；province / intent 会自动锁定为当前配置。
             </div>
             <textarea class="tc-input" v-model="testForm.fullBody"
@@ -466,7 +470,7 @@
             <hr class="tc-divider">
 
             <button class="tc-btn tc-btn-primary tc-btn-block" :disabled="testLoading" @click="runSkillTest">
-              {{ testLoading ? '⏳ 推荐中...' : '▶ 执行推荐' }}
+              {{ testLoading ? '⏳ 执行中...' : (isMaTest ? '▶ 执行营销助手测试' : '▶ 执行推荐') }}
             </button>
             <button class="tc-btn tc-btn-secondary tc-btn-block" style="margin-top:8px;" @click="clearTestResult">
               清空结果
@@ -909,6 +913,8 @@ const selectedCaseIdx = ref(-1)  // -1 表示"新用例"
 const caseName        = ref('')
 const savingCase      = ref(false)
 const testSkillType   = ref('')  // direct | api | mixed | none
+const testRequestVariant = ref('')  // '' | standard | marketing_assistant
+const isMaTest = computed(() => testRequestVariant.value === 'marketing_assistant')
 
 async function openTest(row) {
   current.value = row
@@ -919,6 +925,7 @@ async function openTest(row) {
   testStatusText.value  = '准备就绪，点击「执行推荐」开始测试'
   testForm.value.fullBody = ''
   testSkillType.value = ''
+  testRequestVariant.value = ''
   testCases.value = []
   selectedCaseIdx.value = -1
   caseName.value = ''
@@ -945,7 +952,14 @@ function loadCase(idx) {
   const c = testCases.value[idx]
   caseName.value = c.name || ''
   const p = c.payload && typeof c.payload === 'object' ? c.payload : {}
+  // 用例可能是营销助手原始报文（params.inputs.*），据此恢复测试模式
+  if (looksLikeMaPayload(p)) testRequestVariant.value = 'marketing_assistant'
   testForm.value.fullBody = JSON.stringify(p, null, 2)
+}
+
+function looksLikeMaPayload(obj) {
+  return !!(obj && typeof obj === 'object' && obj.params && typeof obj.params === 'object'
+    && obj.params.inputs && typeof obj.params.inputs === 'object')
 }
 
 // 保存当前用例（以完整请求体为准）
@@ -957,9 +971,11 @@ async function saveCase() {
   if (!raw) { $msg.warn('完整请求体为空，请先生成或填写'); return }
   let payload
   try { payload = JSON.parse(raw) } catch { $msg.err('完整请求体 JSON 格式错误，无法保存'); return }
-  // 强制省份/意图与当前配置一致
-  payload.province = current.value.province
-  payload.intent = current.value.intent
+  // 强制省份/意图与当前配置一致（营销助手原始报文除外：其省份由 params.inputs.provinceCode 承载）
+  if (!looksLikeMaPayload(payload)) {
+    payload.province = current.value.province
+    payload.intent = current.value.intent
+  }
   const now = new Date().toISOString()
   const list = [...testCases.value]
   const existIdx = list.findIndex(c => c.name === name)
@@ -1046,9 +1062,12 @@ async function autofillTestParams(opts = {}) {
       return
     }
     testSkillType.value = data.skill_type || ''
+    testRequestVariant.value = data.request_variant || ''
     testForm.value.fullBody = JSON.stringify(payload, null, 2)
     if (!silent) {
-      const typeLabel = { direct: '直传模式', api: '接口查询模式', mixed: '混合模式', none: '无接口' }[data.skill_type] || ''
+      const typeLabel = isMaTest.value
+        ? '营销助手模式'
+        : ({ direct: '直传模式', api: '接口查询模式', mixed: '混合模式', none: '无接口' }[data.skill_type] || '')
       const noteTxt = (data.notes && data.notes.length) ? `：${data.notes.join('；')}` : ''
       $msg.ok(`已按${typeLabel}生成完整测试参数${noteTxt}。请核对后点「执行推荐」`)
     }
@@ -1317,6 +1336,13 @@ async function runSkillTest() {
   try { body = JSON.parse(raw) }
   catch { $msg.err('完整请求体 JSON 格式错误，请检查后重试'); return }
   if (!body || typeof body !== 'object') { $msg.err('完整请求体需为 JSON 对象'); return }
+
+  // 营销助手统一接口：走同步 MA 测试端点，复现活动/标志过滤 + 推荐/切入/挽留归并
+  if (isMaTest.value || looksLikeMaPayload(body)) {
+    testRequestVariant.value = 'marketing_assistant'
+    await runMarketingAssistantTest(body); return
+  }
+
   // 省份/意图强制与当前配置一致
   body.province = current.value.province
   body.intent = current.value.intent
@@ -1361,6 +1387,259 @@ async function runSkillTest() {
   } finally {
     testLoading.value = false
   }
+}
+
+// ── 营销助手统一接口：同步测试（原始报文 params.inputs.* → 回调 value）──────
+async function runMarketingAssistantTest(body) {
+  const inputs = body?.params?.inputs
+  if (!inputs || typeof inputs !== 'object') {
+    $msg.err('营销助手报文缺少 params.inputs，请点「🪄 智能填充测试参数」重新生成'); return
+  }
+  if (!Array.isArray(inputs.products) || !inputs.products.length) {
+    $msg.err('params.inputs.products 为空，无可生成话术的产品'); return
+  }
+  const { province, intent } = current.value
+  testLoading.value = true
+  testStatusClass.value = 'status-loading'
+  testStatusIcon.value  = '🔄'
+  testStatusText.value  = '执行中，正在跑营销助手链路...'
+  testResultCards.value = []
+  const t0 = Date.now()
+  try {
+    const res = await apiFetch(
+      `/api/skills/${encodeURIComponent(province)}/${encodeURIComponent(intent)}/test_marketing_assistant`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+    )
+    const json = await readJsonOrThrow(res)
+    const elapsed = Date.now() - t0
+    if (json.code === 200) {
+      const d = json.data || {}
+      const items = Array.isArray(d.value?.result) ? d.value.result : []
+      const blocked = d.blocked_products || []
+      const cb = d.callback
+      let cbSuffix = ''
+      if (cb) {
+        if (!cb.attempted) cbSuffix = '，回调未发起'
+        else if (cb.ok)    cbSuffix = '，回调网关成功'
+        else               cbSuffix = '，回调网关失败'
+      }
+      const cbFailed = cb && cb.attempted && !cb.ok
+      testStatusClass.value = cbFailed ? 'status-warn' : 'status-ok'
+      testStatusIcon.value  = cbFailed ? '⚠️' : '✅'
+      testStatusText.value  = `营销助手测试完成，耗时 ${elapsed}ms，生成 ${items.length} 个产品`
+        + (blocked.length ? `，${blocked.length} 个被营销标志过滤` : '')
+        + cbSuffix
+      uiLog.info('SkillTest', `${province}/${intent} 营销助手测试：${elapsed}ms，生成 ${items.length} 项${cbSuffix}`)
+      renderMaResult(d)
+    } else {
+      testStatusClass.value = 'status-err'
+      testStatusIcon.value  = '❌'
+      testStatusText.value  = `失败：${json.message || '未知错误'}`
+      testResultCards.value = [{
+        title: '错误详情', badgeClass: 'badge-blue', open: true,
+        content: `<pre style="background:#fef2f2;color:var(--danger)">${escHtml(JSON.stringify(json, null, 2))}</pre>`,
+      }]
+    }
+  } catch (e) {
+    testStatusClass.value = 'status-err'
+    testStatusIcon.value  = '❌'
+    testStatusText.value  = `请求异常：${e.message}`
+    uiLog.error('SkillTest', `${province}/${intent} 营销助手请求异常`, e.message)
+  } finally {
+    testLoading.value = false
+  }
+}
+
+function renderMaResult(d) {
+  const value = d.value || {}
+  const items = Array.isArray(value.result) ? value.result : []
+  const blocked = d.blocked_products || []
+  const llmPrompts = d.llm_prompts || []
+  const cards = []
+
+  // 📡 回调网关结果：是否回调成功 + 网关响应（测试页真实写网关 Redis）
+  const cb = d.callback
+  if (cb) {
+    const ok = !!cb.ok, attempted = !!cb.attempted
+    const badge = ok ? 'badge-green' : (attempted ? 'badge-red' : 'badge-orange')
+    const title = `📡 回调网关结果 · ${ok ? '成功' : (attempted ? '失败' : '未发起')}`
+    let statusHtml
+    if (!attempted) {
+      statusHtml = `<span style="color:var(--warning,#b45309);font-weight:600">未发起回调</span>`
+        + `<div style="color:var(--muted);margin-top:2px">${escHtml(cb.skipped_reason || '—')}</div>`
+    } else if (ok) {
+      statusHtml = `<span style="color:var(--success,#16a34a);font-weight:600">✅ 回调成功</span>`
+    } else {
+      statusHtml = `<span style="color:var(--danger,#dc2626);font-weight:600">❌ 回调失败</span>`
+        + `<div style="color:var(--danger,#dc2626);margin-top:2px">${escHtml(cb.error || cb.rtn_msg || '—')}</div>`
+    }
+    const rows = [
+      ['回调状态', statusHtml],
+      ['网关地址', escHtml(String(cb.url || '—'))],
+      ['Redis key', `<code>${escHtml(String(cb.key || '—'))}</code>`],
+      ['identifier', escHtml(String(cb.identifier || '—'))],
+      ['HTTP 状态', escHtml(String(cb.http_status ?? '—'))],
+      ['网关 rtnCode', escHtml(String(cb.rtn_code ?? '' ) || '—')],
+      ['网关 rtnMsg', escHtml(String(cb.rtn_msg ?? '') || '—')],
+      ['回调产品数', escHtml(String(cb.result_count ?? items.length))],
+      ['过期(分钟)', escHtml(String(cb.expire_minutes ?? '—'))],
+      ['报文字节', escHtml(String(cb.bytes ?? '—'))],
+      ['耗时', `${escHtml(String(cb.cost_ms ?? 0))}ms`],
+      ['尝试次数', escHtml(String(cb.attempts ?? 0))],
+    ]
+    const cbHtml = `<table style="width:100%;border-collapse:collapse;font-size:13px">`
+      + rows.map(([k, v]) =>
+          `<tr><td style="padding:4px 8px;color:var(--muted);white-space:nowrap;vertical-align:top;width:96px">${k}</td>`
+          + `<td style="padding:4px 8px;word-break:break-all">${v}</td></tr>`).join('')
+      + `</table>`
+    cards.push({ title, badgeClass: badge, open: true, content: cbHtml })
+  }
+
+  // 🔎 环节识别诊断：切入/挽留为空时，一眼看出是没配环节 / 环节名不匹配 / 模板缺失
+  const sd = d.stage_diagnostics
+  if (sd) {
+    const avail = Array.isArray(sd.available_stages) ? sd.available_stages.filter(s => String(s).trim()) : []
+    const roleRow = (label, field, info) => {
+      const hit = String(info?.hit || '').trim()
+      const cands = Array.isArray(info?.candidates) ? info.candidates.join(' / ') : ''
+      const body = hit
+        ? `<span style="color:var(--success,#16a34a);font-weight:600">命中环节「${escHtml(hit)}」→ 生成</span>`
+        : `<span style="color:var(--danger,#dc2626)">未命中 → ${escHtml(field)} 留空</span>`
+          + `<span style="color:var(--muted)">（候选：${escHtml(cands) || '—'}）</span>`
+      return `<tr><td style="padding:4px 8px;color:var(--muted);white-space:nowrap;vertical-align:top">${label}</td>`
+        + `<td style="padding:4px 8px">${body}</td></tr>`
+    }
+    const availHtml = avail.length
+      ? avail.map(s => `<code style="margin-right:6px">${escHtml(s)}</code>`).join('')
+      : `<span style="color:var(--danger,#dc2626)">（该技能包没有任何话术模板环节——请确认模板已保存到当前省份/场景分类）</span>`
+    const sdHtml = `<div style="margin-bottom:8px"><b style="color:var(--muted)">模板里存在的环节：</b>${availHtml}</div>`
+      + `<table style="width:100%;border-collapse:collapse;font-size:13px">`
+      + roleRow('推荐 words：', 'words', sd.recommend)
+      + roleRow('切入 aiPitchMarketingDesc：', 'aiPitchMarketingDesc', sd.pitch)
+      + roleRow('挽留 aiRetentionMarketingDesc：', 'aiRetentionMarketingDesc', sd.retention)
+      + `</table>`
+      + `<div style="color:var(--muted);margin-top:8px;line-height:1.6">提示：测试读取的是「已保存并热重载」的技能包配置（非编辑器未保存草稿）。切入/挽留要生成，需模板「环节」列精确等于候选名之一，且已保存到当前省份/场景分类。</div>`
+    const allHit = ['recommend', 'pitch', 'retention'].every(k => String(sd[k]?.hit || '').trim())
+    cards.push({
+      title: `🔎 环节识别诊断${allHit ? '' : '（部分环节未命中）'}`,
+      badgeClass: allHit ? 'badge-green' : 'badge-orange', open: !allHit, content: sdHtml,
+    })
+  }
+
+  // 🧩 产品与模板命中诊断：推荐产品数为 0 是「模板全不命中 + 切入/挽留丢失」的头号原因
+  const pd = d.product_diagnostics
+  if (pd) {
+    const recCount = Number(pd.recommendation_count || 0)
+    const scripts = Array.isArray(pd.scripts) ? pd.scripts : []
+    const missCount = scripts.filter(s => !s?.template_matched).length
+    const noPid = scripts.filter(s => !String(s?.product_id || '').trim()).length
+    const line = (label, body) =>
+      `<tr><td style="padding:4px 8px;color:var(--muted);white-space:nowrap;vertical-align:top">${label}</td>`
+      + `<td style="padding:4px 8px">${body}</td></tr>`
+    const ok = (t) => `<span style="color:var(--success,#16a34a);font-weight:600">${escHtml(t)}</span>`
+    const bad = (t) => `<span style="color:var(--danger,#dc2626);font-weight:600">${escHtml(t)}</span>`
+    let pdHtml = `<table style="width:100%;border-collapse:collapse;font-size:13px">`
+      + line('入参产品数：', escHtml(String(pd.input_products ?? 0))
+          + `<span style="color:var(--muted)">（通过营销标志：${escHtml(String(pd.marketable_products ?? 0))}）</span>`)
+      + line('喂入标准域 recommended_packages：',
+          recCount > 0 ? ok(`${recCount} 个产品`) : bad('0 个 —— 话术将用「空产品」匹配模板'))
+      + line('模板命中：', missCount === 0
+          ? ok(`${scripts.length} 条话术全部命中模板`)
+          : bad(`${missCount}/${scripts.length} 条未命中模板（走兜底 Prompt，提示词里「话术模板」段为空）`))
+      + line('话术回显 product_id：', noPid === 0
+          ? ok('全部回显')
+          : bad(`${noPid}/${scripts.length} 条为空 —— 回调只能按位次兜底对齐`))
+      + `</table>`
+    if (scripts.length) {
+      pdHtml += `<table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px">`
+        + `<tr style="color:var(--muted)"><td style="padding:4px 8px">环节</td>`
+        + `<td style="padding:4px 8px">匹配用 product_id</td><td style="padding:4px 8px">模板</td></tr>`
+        + scripts.map(s => `<tr><td style="padding:4px 8px">${escHtml(String(s.stage || '（无环节）'))}</td>`
+          + `<td style="padding:4px 8px"><code>${escHtml(String(s.product_id || '（空）'))}</code></td>`
+          + `<td style="padding:4px 8px">${s.template_matched ? ok('命中') : bad('未命中')}</td></tr>`).join('')
+        + `</table>`
+    }
+    // 直传节点体检：把「三个必要条件」逐项点名，运营照着改即可。
+    // 只要有一项不合格就一直显示 —— 数据面有兜底自愈（产品数可能已经不为 0），
+    // 但「接口规范」没勾选时线上按活动名称路由技能包仍会失败，不能让页面看着是好的。
+    const nodes = Array.isArray(pd.direct_nodes) ? pd.direct_nodes : []
+    const nodesOk = nodes.length > 0
+      && nodes.every(n => n.direct_mode_ok && n.variant_ok && n.products_field_ok)
+    if (recCount === 0 || !nodesOk) {
+      if (recCount === 0) {
+        pdHtml += `<div style="color:var(--danger,#dc2626);margin-top:8px;line-height:1.6">`
+          + `产品列表没进标准域时，模板匹配只会命中「产品 ID 列为空」的通用模板，填了具体产品 ID 的模板一律落空。</div>`
+      }
+      if (!nodes.length) {
+        pdHtml += `<div style="color:var(--danger,#dc2626);margin-top:6px;line-height:1.6">`
+          + `该技能包<b>没有启用任何直传节点</b>。请到「接口配置」新增一个数据来源为<b>透传模式</b>的节点。</div>`
+      } else {
+        pdHtml += nodes.map(n => {
+          const mark = (okFlag, okText, badText) => okFlag
+            ? `<span style="color:var(--success,#16a34a)">✓ ${escHtml(okText)}</span>`
+            : `<span style="color:var(--danger,#dc2626);font-weight:600">✗ ${escHtml(badText)}</span>`
+          return `<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--border,#e5e7eb);border-radius:6px">`
+            + `<div style="font-weight:600;margin-bottom:4px">直传节点 <code>${escHtml(String(n.name || ''))}</code></div>`
+            + `<div style="line-height:1.9">`
+            + `映射方式：${mark(n.direct_mode_ok, '直接透传字段',
+                `当前 ${n.direct_mode || '未设置'} —— 需改为「直接透传字段」`)}<br>`
+            + `接口规范：${mark(n.variant_ok, `营销助手统一接口${n.product_list_field ? `（产品列表字段 ${n.product_list_field}）` : ''}`,
+                `当前 ${n.request_variant || '未设置'} —— 需改为「营销助手统一接口」`)}<br>`
+            + `透传字段含 products：${mark(n.products_field_ok, '已包含', '未勾选 products')}`
+            + `</div></div>`
+        }).join('')
+        if (!nodes.every(n => n.variant_ok)) {
+          pdHtml += `<div style="color:var(--danger,#dc2626);margin-top:8px;line-height:1.6">`
+            + `注意：「接口规范」未选营销助手统一接口时，线上按 <code>activityTypeName</code> 路由技能包会失败`
+            + `（只能靠全局兜底意图 <code>cross_sell.default_intent</code>），务必改正 —— 测试页固定用当前技能包，测不出这个问题。</div>`
+        }
+      }
+    }
+    const pdOk = recCount > 0 && missCount === 0 && noPid === 0 && nodesOk
+    cards.push({
+      title: `🧩 产品与模板命中诊断${pdOk ? '' : '（有异常）'}`,
+      badgeClass: pdOk ? 'badge-green' : 'badge-red', open: !pdOk, content: pdHtml,
+    })
+  }
+
+  // 回调 result：一个产品一项，含 words / aiPitchMarketingDesc / aiRetentionMarketingDesc
+  const valueHtml = items.length
+    ? items.map((v, i) => {
+        const row = (label, txt) => {
+          const t = String(txt ?? '').trim()
+          const body = t
+            ? `<div style="white-space:pre-wrap;line-height:1.6">${escHtml(t)}</div>`
+            : `<span style="color:var(--muted)">（无模板，未生成）</span>`
+          return `<div style="margin:6px 0"><b style="color:var(--muted)">${label}</b>${body}</div>`
+        }
+        return `<div class="tc-step-card" style="margin-bottom:10px;padding:10px 12px;border:1px solid var(--border,#e5e7eb);border-radius:8px">
+          <div style="font-weight:600;margin-bottom:6px">#${i + 1} productId=${escHtml(String(v.productId ?? ''))}｜activityType=${escHtml(String(v.activityType ?? ''))}｜rank=${escHtml(String(v.rank ?? ''))}</div>
+          ${row('话术 words（推荐）：', v.words)}
+          ${row('aiPitchMarketingDesc（切入）：', v.aiPitchMarketingDesc)}
+          ${row('aiRetentionMarketingDesc（挽留）：', v.aiRetentionMarketingDesc)}
+        </div>`
+      }).join('')
+    : '<p style="color:var(--muted)">无可回调产品（可能全部被营销标志过滤或无匹配模板）</p>'
+  cards.push({ title: `📞 回调网关 result · ${items.length} 个产品`, badgeClass: 'badge-green', open: true, content: valueHtml })
+
+  if (blocked.length) {
+    cards.push({
+      title: `🚫 被营销标志过滤的产品 · ${blocked.length} 个`,
+      badgeClass: 'badge-red', open: true,
+      content: `<ul style="margin:0;padding-left:18px">${blocked.map(b => `<li>${escHtml(String(b))}</li>`).join('')}</ul>`,
+    })
+  }
+  if (llmPrompts.length) {
+    cards.push({
+      title: `🧠 发给大模型的最终提示词 · ${llmPrompts.length} 条`,
+      badgeClass: 'badge-purple', open: false, content: renderLlmPrompts(llmPrompts),
+    })
+  }
+  cards.push({
+    title: '🧾 回调网关完整 value（JSON）', badgeClass: 'badge-blue', open: false,
+    content: `<pre style="white-space:pre-wrap">${escHtml(JSON.stringify(value, null, 2))}</pre>`,
+  })
+  testResultCards.value = cards
 }
 
 // ── 发布（热重载 + 状态=published，高危操作二次确认 + 防重锁）──
@@ -1725,6 +2004,7 @@ onMounted(async () => {
 .status-idle    { background: #f1f5f9; color: var(--muted); }
 .status-loading { background: #eff6ff; color: var(--primary); }
 .status-ok      { background: #f0fdf4; color: var(--success, #15803d); }
+.status-warn    { background: #fffbeb; color: #b45309; }
 .status-err     { background: #fef2f2; color: var(--danger, #c92a2a); }
 .tc-result-pane { display: flex; flex-direction: column; gap: 16px; }
 .tc-step-card { border: 1px solid var(--border); border-radius: var(--radius, 10px); overflow: hidden; }
@@ -1739,6 +2019,7 @@ onMounted(async () => {
 .badge-green  { background: #dcfce7; color: #15803d; }
 .badge-purple { background: #f3e8ff; color: #7e22ce; }
 .badge-red    { background: #fee2e2; color: #b91c1c; }
+.badge-orange { background: #ffedd5; color: #c2410c; }
 .tc-step-body { padding: 14px 16px; display: none; }
 .tc-step-body.open { display: block; }
 .test-empty { font-size: 13px; color: var(--muted); padding: 12px; }

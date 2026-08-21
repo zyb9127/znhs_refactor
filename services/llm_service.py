@@ -181,7 +181,6 @@ class LLMService:
 
         # 关闭思考模式：不同模型厂商参数不同
         # - Qwen3/DashScope: chat_template_kwargs.enable_thinking=false
-        # - Qwen3/九天MOMA(vLLM): enable_thinking=false（顶层 OpenAI 兼容参数）
         # - DeepSeek: reasoning_effort="none" 或 thinking={"type":"disabled"}（部分版本支持）
         url_str = str(self.llm_config.get("url", ""))
         model_str = str(self.llm_config.get("model", "") or self.llm_config.get("model_id", ""))
@@ -190,10 +189,7 @@ class LLMService:
             # 取 low 以最小化思考链 token 占用（none 会 400）
             data["reasoning_effort"] = "low"
         else:
-            # Qwen3 / DashScope 系列：同时发顶层和 chat_template_kwargs 两层参数
-            # - 九天MOMA / vLLM 等 OpenAI 兼容平台读顶层 enable_thinking
-            # - DashScope 原生平台读 chat_template_kwargs.enable_thinking
-            data["enable_thinking"] = False
+            # Qwen3 / DashScope 系列
             data["chat_template_kwargs"] = {"enable_thinking": False}
 
         last_error = None
@@ -313,7 +309,8 @@ class LLMService:
     def _clean_llm_output(raw: str) -> str:
         """清洗模型输出，只保留正式话术正文。
 
-        - 去除 <think>...</think> 思考块（开启思考模式时 Qwen3 会输出）
+        由于已通过 /no_think 前缀 + enable_thinking=False 双重关闭 Qwen3 思考模式，
+        正常情况下不会出现 <think> 块或推理段落，此处仅做轻量正文清洗：
         - 去除残留 Markdown 格式符号
         - 去除「话术：」前缀
         - 不含中文视为异常，返回空
@@ -323,9 +320,6 @@ class LLMService:
         text = raw.strip()
         if not text:
             return ""
-
-        # 去 <think>...</think> 思考块（开启思考模式时可能出现）
-        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
         # 去 Markdown 格式符号（加粗/标题）
         text = re.sub(r"\*{1,2}([^*]+)\*{1,2}", r"\1", text)
@@ -399,7 +393,6 @@ class LLMService:
             "max_tokens": max_tokens,
             "tools": tools,
             "tool_choice": "auto",
-            "enable_thinking": False,
             "chat_template_kwargs": {"enable_thinking": False},
         }
         client = await self._get_client()

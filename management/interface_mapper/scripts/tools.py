@@ -1765,7 +1765,7 @@ def _render_biz_config(
                 "stage":             intent,
                 "template_content":  f"您好！根据您的套餐使用情况，为您推荐{{{{pkg_brief}}}}套餐，{'{diff_str}'}，更多实惠等您体验。",
                 "linked_vars":       ["cur_brief", "pkg_brief", "diff_str", "usage_line"],
-                "script_requirement": f"直接输出话术文本，不需要前缀，口语化；{intent}推荐话术贴合用户痛点，字数100字以内。",
+                "script_requirement": f"以用户专属客户经理的口吻自然、口语化沟通，别用官话套话；结合历史用量/标签点出最突出的痛点，再用推荐套餐真实字段值说清如何解决、做前后对比放大获得感；只讲有数据支撑的卖点，不编造不夸大；{intent}推荐话术贴合用户痛点，100字以内，结尾一句自然的办理引导。",
                 "status":            "online",
                 "created_by":        "interface_mapper_agent",
             }

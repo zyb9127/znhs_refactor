@@ -28,9 +28,6 @@ logs/
 # 系统文件
 .DS_Store
 
-# 敏感配置（含 JWT token / 内网地址 / API key）
-config/agents_config.json
-
 # 前端构建产物
 package-lock.json
 

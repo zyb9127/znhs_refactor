@@ -1,0 +1,54 @@
+{
+  "_comment": "全局共性配置 — LLM 网关 + 全局限流（不含省份/意图个性化，个性化配置见 skills-runtime/{province}/{intent}/config/）",
+
+  "llm_gateway": {
+    "_comment": "大模型统一出口配置，所有省份共用；省份如需覆盖，在 biz_config.json 中配置 llm_override",
+    "url": "https://jiutian.10086.cn/kunlun/ingress/api/h3t-dfac2f/1c0f62413b034569abceba7c8fe3fe12/ai-67c9c4d91c254defbe0b77a7a15b6ac2/service-bc58d7f5576e455b873121fdf573f0d4/v1/chat/completions",
+    "host": "qwen3-14b.jsydy.cmos",
+    "model_id": "qwen32b",
+    "appcode": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJiYTg3MGU0NTQwYjI0ZmM1YTE1YTNmNGQ0YjllY2Y4YyIsImlzcyI6ImFwaS1hdXRoLWtleSIsImV4cCI6NDkwNDQxNTMzN30.D_LT96VN7AYbrEw6EIwskO_5-uH87aViD9U34p8sYdP-mtHYWfaxuB0M9QM6on50cw-HCPxQ1zprYmEyC8yNt8MAj2lihdm48SevRJIWVydgtScaRjNDDBhXb4Hfievoty_1Xsj7IdtbzGojazcAKqrszbRXnU6ddDXBhflDGZ0AdSWmHPwPuUqTVew5WmNB2nmQtcUg0TXHpdkp9E-iFcE_RtUqoK1x1-gASX1K26tm16LFdR76MS_lkXLqhGn8R_gJCmm0qyB1O9mJkhpXprQWcuBcLX5DE7W3e-CjphY7DxKMU6z0Zskq_agPX8fywFYetNjmNt87JDXwGJFNbQ",
+    "timeout": 200,
+    "max_retries": 3,
+    "max_concurrency": 8,
+    "temperature": 0.7,
+    "max_tokens": 4096
+  },
+  "dashscope": {
+    "_comment": "接口映射Agent专用（接口智能解析）。基础配置=development（直连 DeepSeek 公网，本地有外网即可）；gray/production/production_noauth 通过 env_overrides 切到内网代理(qwen-plus)，与原项目 znhs_xy_old 一致，避免内网无法解析公网域名导致的 name resolution 报错。",
+    "_comment_dev": "开发模式(development)直连 DeepSeek 公网 API，无需内网 VPN",
+    "url": "https://api.deepseek.com/v1/chat/completions",
+    "host": "qwen3-14b.jsydy.coms",
+    "api_key": "sk-a14aba74e5eb48d484d379d8afc27ed7",
+    "model": "deepseek-v4-flash",
+    "timeout": 120,
+    "max_retries": 3,
+    "max_concurrency": 8,
+    "temperature": 0.0,
+    "max_tokens": 8192,
+    "appcode": "sk-a14aba74e5eb48d484d379d8afc27ed7",
+    "env_overrides": {
+      "_comment": "按运行环境覆盖 dashscope 配置（get_dashscope_config 会按 get_environment() 合并）。gray/production/production_noauth 走内网代理 IP 直连(qwen-plus)，host 路由由 llm_service 处理，不发 model 字段。",
+      "gray": {
+        "url": "http://172.26.216.231:8001/v1/chat/completions",
+        "host": "qwen3-14b.jsydy.coms",
+        "api_key": "sk-d2c2cf7a204043ef95c567a851d258e9",
+        "model": "qwen-plus",
+        "appcode": "sk-d2c2cf7a204043ef95c567a851d258e9"
+      },
+      "production": {
+        "url": "http://172.26.216.231:8001/v1/chat/completions",
+        "host": "qwen3-14b.jsydy.coms",
+        "api_key": "sk-d2c2cf7a204043ef95c567a851d258e9",
+        "model": "qwen-plus",
+        "appcode": "sk-d2c2cf7a204043ef95c567a851d258e9"
+      },
+      "production_noauth": {
+        "url": "http://172.26.216.231:8001/v1/chat/completions",
+        "host": "qwen3-14b.jsydy.coms",
+        "api_key": "sk-d2c2cf7a204043ef95c567a851d258e9",
+        "model": "qwen-plus",
+        "appcode": "sk-d2c2cf7a204043ef95c567a851d258e9"
+      }
+    }
+  }
+}

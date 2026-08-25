@@ -1,0 +1,81 @@
+{
+  "cases": [
+    {
+      "name": "12",
+      "payload": {
+        "params": {
+          "systemId": "skill-test",
+          "optType": "0",
+          "inputs": {
+            "sequenceNo": "SEQ20260824152237",
+            "servNumber": "13800138000",
+            "provinceCode": "898",
+            "callId": "test_ma_20260824152237",
+            "userinfo": {
+              "currentPackageProductId": "PKG_123456",
+              "currentPackageProductName": "5G畅享融合套餐129元档",
+              "currPrice": "129",
+              "currDomesticTraffic": "30",
+              "currDescribe": "含30GB通用流量",
+              "currDirectedTraffic": "10",
+              "currDomesticVoice": "500",
+              "currBroadband": "500M",
+              "is_sub_card": "0",
+              "userExtra": {
+                "last3mFlowSaturation": "10",
+                "last3mVoiceSaturation": "10"
+              }
+            },
+            "products": [
+              {
+                "activityId": "ACT_20230801",
+                "productId": "套餐升级",
+                "price": "59",
+                "discount_price": "39.58",
+                "Cmn_flow": "20",
+                "voice": "200",
+                "direct_flow": "30",
+                "business_type": "流量包",
+                "gift_cmn_flow": "0",
+                "product_desc": "高性价比5G套餐，含大流量和语音",
+                "marketingProductFlag": "1",
+                "marketingActivityFlag": "1",
+                "productName": "5G特惠月租卡",
+                "activityTypeCode": "TYPE_01",
+                "activityTypeName": "流量语音包"
+              },
+              {
+                "activityId": "ACT_20230802",
+                "productId": "PROD_002",
+                "price": "30",
+                "discount_price": "19.90",
+                "Cmn_flow": "30",
+                "voice": "0",
+                "direct_flow": "0",
+                "business_type": "流量包",
+                "gift_cmn_flow": "5",
+                "product_desc": "30GB通用流量月包，赠5GB",
+                "marketingProductFlag": "1",
+                "marketingActivityFlag": "0",
+                "productName": "30GB流量畅享包",
+                "activityTypeCode": "TYPE_02",
+                "activityTypeName": "流量包"
+              }
+            ],
+            "userinfo_json": [
+              {
+                "timeType": "0",
+                "over_cmn_flow": "1",
+                "over_voice": "20",
+                "user_consume": "145",
+                "over_flow_fee": "7.5",
+                "over_voice_fee": "4.05"
+              }
+            ]
+          }
+        }
+      },
+      "updated_at": "2026-08-24T07:57:11.069Z"
+    }
+  ]
+}

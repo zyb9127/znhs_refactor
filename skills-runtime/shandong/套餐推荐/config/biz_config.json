@@ -292,12 +292,12 @@
     {
       "province": "shandong",
       "intent": "套餐推荐",
-      "template_name": "营销推荐环节 | 推荐意图",
+      "template_name": "套餐推荐",
       "scene": "推荐意图",
       "stage": "营销推荐环节",
       "product_id": "20240902586449",
-      "template_content": "我看您现在是[uniProdGrade]元套餐，前期有[uniProdGrade-discountExpenses]元打折优惠，[privEndMonth] 时间到期后恢复原价[uniProdGrade]元，这样太不划算了，现在套餐焕新了可以给您优化一下，套餐档次不变，升级到[flow+giftFlow]GB国内流量，其中套餐内[flow]GB，扩容流量[giftFlow]GB，通话分钟数不变。这样流量比您之前多了[flow+giftFlow-tf]G，跟副卡可以共享的流量也有[shareFlow]G了，而且每月还可以多享受1项权益呢（点选权益后跟读权益话术），用一年下来就又能节省不少钱，特别合适，现在直接申请下个账期就可以直接用了。",
-      "prompt_template": "你是移动套餐营销推荐坐席。\n请基于以下用户信息和话术模板生成个性化套餐营销推荐话术：\n\n话术模板：{template_content}\n\n直接输出话术文本，不需要前缀，口语化；营销推荐话术贴合用户痛点，字数{max_length}字以内。",
+      "template_content": "我看您现在是[uniProdGrade]元套餐，前期有[uniProdGrade-discountExpenses]元打折优惠，[privEndMonth] 时间到期后恢复原价[uniProdGrade]元，这样太不划算了，现在套餐焕新了可以给您优化一下，套餐档次不变，升级到[flow+giftFlow]GB国内流量，其中套餐内[flow]GB，扩容流量[giftFlow]GB，通话分钟数不变。这样流量比您之前多了[flow+giftFlow-tf]G，跟副卡可以共享的流量也有[shareFlow]G了，而且每月还可以多享受1项权益呢（点选权益后跟读权益话术），用一年下来就又能节省不少钱，特别合适，现在直接申请下个账期就可以直接用了123。",
+      "prompt_template": "",
       "linked_apis": [],
       "status": "online",
       "created_by": "import",
@@ -530,6 +530,28 @@
       "created_by": "import",
       "created_at": "2026-04-28 15:05:55",
       "template_id": "tpl_shandong_1777359956214_2116c4"
+    },
+    {
+      "province": "shandong",
+      "intent": "套餐推荐",
+      "template_name": "套餐推荐",
+      "template_content": "{currentPackageProductId}，{over_cmn_flow}",
+      "product_id": "123",
+      "scene": "",
+      "stage": "",
+      "linked_vars": [
+        "pkg_brief",
+        "diff_str"
+      ],
+      "script_requirement": "以用户专属客户经理的口吻，用自然、口语化、像真人一对一沟通的语气说话，杜绝生硬模板腔与官话套话（如\"尊敬的客户\"\"钜惠来袭\"）。话术骨架以【话术模板】为准：模板已给出句子顺序与结构时就照模板走，只做占位符填充和语句通顺化，不要另起一套结构、不要增删模板里没有的卖点；模板没写明结构时，再按「亲切开场 → 结合【上下文数据】中的当前套餐、历史用量与用户标签点出 1 个最突出的痛点 → 用推荐套餐对应字段的真实值（月费/流量/语音等）说清如何解决、并做前后对比放大获得感 → 一句自然的办理引导」组织。各句衔接顺滑不生硬；只讲有数据支撑的卖点，无数据的点不提、不夸大；有真实的专属/限时权益可点明（无则不编）。控制在 150 字以内，只保留一个明确的行动引导，结尾干脆不啰嗦。",
+      "prompt_template": "",
+      "linked_apis": [
+        "cc"
+      ],
+      "status": "online",
+      "created_by": "import",
+      "created_at": "2026-08-24 16:12:27",
+      "template_id": "tpl_shandong_1787559147301_cb2045"
     }
   ],
   "script_templates": {

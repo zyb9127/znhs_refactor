@@ -270,7 +270,7 @@ class ScriptStep:
             return await llm_service.generate(
                 prompt,
                 temperature=0.3,
-                max_tokens=300,
+                max_tokens=4080,
                 stage=stage,
                 provider="script_step",
                 province=ctx.province,
@@ -279,7 +279,7 @@ class ScriptStep:
             return await llm_service.generate(
                 prompt,
                 temperature=0.3,
-                max_tokens=300,
+                max_tokens=4080,
                 stage=stage,
                 provider="script_step",
                 province=ctx.province,

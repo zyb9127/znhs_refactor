@@ -23,8 +23,8 @@
     {
       "province": "hainan",
       "intent": "套餐升级活动",
-      "template_name": "套餐升级-切入环节",
-      "template_content": "{custName}您好，看到您近期流量和通话都用得比较多，我们刚好有个{recommend_package_name}挺适合您，简单跟您介绍一下。",
+      "template_name": "套餐升级活动",
+      "template_content": "{user_consume}您好，看到您近期流量和通话都用得比较多，我们刚好有个{productName}挺适合您，简单跟您介绍一下。",
       "product_id": "套餐升级",
       "scene": "开口话术",
       "stage": "切入环节",

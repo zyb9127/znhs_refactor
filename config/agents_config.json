@@ -14,12 +14,12 @@
     "max_tokens": 4096
   },
   "dashscope": {
-    "_comment": "接口映射Agent专用（接口智能解析）。基础配置=development（直连 DeepSeek 公网，本地有外网即可）；gray/production/production_noauth 通过 env_overrides 切到内网代理(qwen-plus)，与原项目 znhs_xy_old 一致，避免内网无法解析公网域名导致的 name resolution 报错。",
-    "_comment_dev": "开发模式(development)直连 DeepSeek 公网 API，无需内网 VPN",
-    "url": "https://api.deepseek.com/v1/chat/completions",
-    "host": "qwen3-14b.jsydy.coms",
-    "api_key": "sk-a14aba74e5eb48d484d379d8afc27ed7",
-    "model": "deepseek-v4-flash",
+    "_comment": "接口映射Agent / 话术生成共用的 LLM 配置。development 使用 Fireworks；gray/production/production_noauth 继续通过 env_overrides 使用内网代理。",
+    "_comment_dev": "开发模式(development)使用 Fireworks API",
+    "url": "https://api.fireworks.ai/inference/v1/chat/completions",
+    "host": "",
+    "api_key": "fw_Ntkgf9TbYRgaKFTrRsfg9W",
+    "model": "accounts/fireworks/models/deepseek-v4-flash-0731",
     "timeout": 120,
     "max_retries": 3,
     "max_concurrency": 8,

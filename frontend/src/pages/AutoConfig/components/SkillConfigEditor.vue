@@ -253,10 +253,10 @@
             </button>
             <!-- 直传模式：样例已并入第③步，隐藏冗余的第②步；接口模式保留（承载「开启模拟」开关）-->
             <template v-if="!isDirectMode">
-              <span class="ifc-step-line"></span>
-              <button type="button" class="ifc-step" :class="{cur:ifcEditTab==='mock', done:isIfcStepDone('mock')}" @click="ifcEditTab='mock'">
-                <span class="ifc-step-no">②</span> {{ ifcStepMockLabel }}
-              </button>
+            <span class="ifc-step-line"></span>
+            <button type="button" class="ifc-step" :class="{cur:ifcEditTab==='mock', done:isIfcStepDone('mock')}" @click="ifcEditTab='mock'">
+              <span class="ifc-step-no">②</span> {{ ifcStepMockLabel }}
+            </button>
             </template>
             <span class="ifc-step-line"></span>
             <button type="button" class="ifc-step" :class="{cur:ifcEditTab==='outparam', done:isIfcStepDone('outparam')}" @click="ifcEditTab='outparam'">
@@ -416,7 +416,7 @@
               <span class="om-hint-arrow">→</span>
               <span class="om-hint-step">第 3 步</span>
               点「保存」。话术模板里用 <code>&#123;字段名&#125;</code> 引用。
-            </div>
+        </div>
 
             <!-- 三段式：① 输入 ② 提取 ③ 转换 -->
             <div class="om2">
@@ -533,6 +533,249 @@
                 <div v-else class="ifc-analysis-empty">
                   <span class="iae-icon">🔍</span>
                   在上方 ① 粘贴 <code>extra_info</code> JSON 样例后，这里会列出可勾选的顶层字段。
+                </div>
+              </section>
+
+              <!-- ③ 派生字段（isPassthrough）：在透传字段之上再算一层。
+                   解决两类透传取不到的诉求：① 数组按条件选元素（账期数组按 timeType 取当月）；
+                   ② 需要比较后才能定话术走向（两费之和分档选场景）。
+                   界面按「先算后判」分两组呈现：字段计算（array_find/sum，产出数据值）与
+                   逻辑判断（bucket，产出结论）—— 运营不必先理解三个算子名才知道该配哪个。
+                   与 field_transform 同范式：表格优先 + 高级 JSON 兜底，JSON 串是唯一数据源；
+                   表格实在表达不了的写法整条保原样，避免编辑一次就丢配置。 -->
+              <section v-if="isPassthrough" class="om2-sec">
+                <header class="om2-sec-head">
+                  <span class="om2-no">③</span>
+                  <span class="om2-title">派生字段 <code>derived_fields</code></span>
+                  <span class="om2-aux om2-aux-text">
+                    {{ dfRows.length
+                        ? `字段计算 ${dfCalcRows.length} 条 · 逻辑判断 ${dfJudgeRows.length} 条`
+                        : '未配置（可选）' }}
+                  </span>
+                </header>
+                <div class="om2-tip">
+                  透传字段只能按原样取值：<b>数组取不到</b>（如账期数组 <code>userinfo_json</code> 只会整包
+                  JSON 塞进上下文），也<b>不会做比较运算</b>。派生字段补这一层，按<b>先算后判</b>分两组配：
+                  <br />
+                  <b>① 字段计算</b> —— 从报文里<b>取值、算数</b>，产出一个<b>数据值</b>（按账期从数组里选出当月那条、
+                  把两笔超套费用相加）。
+                  <br />
+                  <b>② 逻辑判断</b> —— 拿算好的值<b>比条件</b>，产出一个<b>结论</b>（该走哪个场景、要不要追加坐席提示）。
+                  <br />
+                  两类结果都和普通透传字段一样，用 <code>{派生名}</code> 引用；「数组选元素」取回的是整个元素，
+                  还能用 <code>{派生名[子键]}</code> 精确填槽。
+                  <el-tooltip placement="top">
+                    <template #content>
+                      <div style="max-width:420px;line-height:1.8;">
+                        <b>① 字段计算</b>（产出数据值）<br />
+                        · <b>数组选元素</b>：按条件从数组里选出第一个匹配元素<br />
+                        　例：<code>userinfo_json</code> 中 <code>timeType=0</code> → 当月账期<br />
+                        · <b>求和</b>：多个路径相加（带单位的串也能算，如 "3元"）<br /><br />
+                        <b>② 逻辑判断</b>（产出结论）<br />
+                        · <b>比大小</b>：拿「判断依据」跟阈值比，如 合计 &lt; 1 → 场景一<br />
+                        · <b>多字段条件</b>：几个字段同时满足才算命中，如
+                        　费用≠0 且 超额量=0 → 追加坐席提示<br />
+                        · <b>兜底</b>：前面都没命中时取的值，放最后<br /><br />
+                        <b>取不到值时不臆造</b>：求和的路径全为空则整条不产出；「比大小」取不到判断依据也不产出，
+                        不会退到兜底 —— 否则「没数据」会被当成「真的是 0」，可能推错产品。
+                      </div>
+                    </template>
+                    <span class="df-help">怎么配？</span>
+                  </el-tooltip>
+                </div>
+
+                <div class="ft-mode-switch">
+                  <el-radio-group v-model="dfVisualMode" size="small">
+                    <el-radio-button :value="true">表格配置</el-radio-button>
+                    <el-radio-button :value="false">高级 JSON</el-radio-button>
+                  </el-radio-group>
+                  <span class="ft-mode-hint">
+                    {{ dfVisualMode ? '保存的仍是标准 derived_fields 结构' : '直接编辑 JSON，切回表格自动同步' }}
+                  </span>
+                </div>
+
+                <template v-if="dfVisualMode">
+                  <!-- ① 字段计算：array_find / sum —— 产出数据值 -->
+                  <div class="df-group">
+                    <div class="df-group-head">
+                      <span class="df-group-badge df-badge-calc">① 字段计算</span>
+                      <span class="df-group-desc">取值 / 算数，产出一个<b>数据值</b>，可直接填进话术</span>
+                    </div>
+                    <div v-if="dfCalcRows.length" class="df-table">
+                      <div v-for="row in dfCalcRows" :key="row.uid" class="df-item">
+                        <div class="df-item-head">
+                          <el-input v-model="row.name" size="small" class="df-name"
+                            placeholder="字段名，如 当月资源" @input="commitDfRows" />
+                          <el-select v-model="row.type" size="small" class="df-type"
+                            @change="onDfTypeChange(row)">
+                            <el-option label="数组选元素" value="array_find" />
+                            <el-option label="求和" value="sum" />
+                          </el-select>
+                          <el-button link type="danger" size="small" @click="removeDfRow(row)">删除</el-button>
+                        </div>
+
+                        <template v-if="row.type === 'array_find'">
+                          <div class="df-line">
+                            <span class="df-label">从哪个数组</span>
+                            <el-select v-model="row.from" size="small" filterable allow-create
+                              default-first-option placeholder="数组字段名，如 userinfo_json"
+                              @change="commitDfRows">
+                              <el-option v-for="p in dfPathCandidates" :key="p" :label="p" :value="p" />
+                            </el-select>
+                          </div>
+                          <div class="df-line df-line-top">
+                            <span class="df-label">选取条件</span>
+                            <div class="df-where-list">
+                              <div v-for="(w, j) in row.wheres" :key="j" class="df-where-row">
+                                <el-input v-model="w.k" size="small" placeholder="字段名，如 timeType"
+                                  @input="commitDfRows" />
+                                <span class="df-eq">=</span>
+                                <el-input v-model="w.v" size="small" placeholder="值，如 0"
+                                  @input="commitDfRows" />
+                                <el-button link type="danger" size="small"
+                                  @click="row.wheres.splice(j, 1); commitDfRows()">删除</el-button>
+                              </div>
+                              <el-button size="small" plain
+                                @click="row.wheres.push({ k: '', v: '' })">+ 添加条件</el-button>
+                              <div class="df-sub-hint">
+                                多个条件需全部满足；命中第一个匹配元素。留空则取数组第一条。
+                              </div>
+                            </div>
+                          </div>
+                        </template>
+
+                        <template v-else>
+                          <div class="df-line">
+                            <span class="df-label">相加的路径</span>
+                            <el-select v-model="row.sumFrom" size="small" multiple filterable allow-create
+                              default-first-option placeholder="如 当月资源.over_flow_fee"
+                              @change="commitDfRows">
+                              <el-option v-for="p in dfPathCandidates" :key="p" :label="p" :value="p" />
+                            </el-select>
+                          </div>
+                          <div class="df-sub-hint df-sub-indent">
+                            可引用上面已定义的字段计算（如 <code>当月资源.over_flow_fee</code>）。
+                            全部路径都取不到值时整条不产出，<b>不会当成 0</b>。
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                    <div v-else class="ft-empty">
+                      还没有字段计算。按账期从数组里选出当月那条、把两笔超套费用相加，都在这里配。
+                    </div>
+                    <el-button size="small" plain class="ft-add"
+                      @click="addDfRow('calc')">+ 添加字段计算</el-button>
+                  </div>
+
+                  <!-- ② 逻辑判断：bucket —— 产出结论（类型固定，无需再选算子）-->
+                  <div class="df-group">
+                    <div class="df-group-head">
+                      <span class="df-group-badge df-badge-judge">② 逻辑判断</span>
+                      <span class="df-group-desc">按条件产出<b>结论</b>，在字段计算<b>之后</b>执行</span>
+                    </div>
+                    <div v-if="dfJudgeRows.length" class="df-table">
+                      <div v-for="row in dfJudgeRows" :key="row.uid" class="df-item">
+                        <div class="df-item-head">
+                          <el-input v-model="row.name" size="small" class="df-name"
+                            placeholder="结论字段名，如 推荐场景" @input="commitDfRows" />
+                          <el-tag v-if="row.advanced" size="small" type="warning">高级规则</el-tag>
+                          <el-button link type="danger" size="small" @click="removeDfRow(row)">删除</el-button>
+                        </div>
+
+                        <!-- 表格实在表达不了的写法：只提示，原样保留不动 -->
+                        <div v-if="row.advanced" class="df-advanced-note">
+                          这条的写法表格放不下（同一字段带多个比较条件等），已<b>原样保留</b>。
+                          需要修改请切到「高级 JSON」。
+                        </div>
+
+                        <template v-else>
+                          <!-- 判断依据只服务「比大小」规则；纯多字段条件的判断不需要它 -->
+                          <div v-if="dfNeedsFrom(row)" class="df-line">
+                            <span class="df-label">判断依据</span>
+                            <el-select v-model="row.from" size="small" filterable allow-create
+                              default-first-option placeholder="拿哪个值来比大小，如 超套费用合计"
+                              @change="commitDfRows">
+                              <el-option v-for="p in dfPathCandidates" :key="p" :label="p" :value="p" />
+                            </el-select>
+                          </div>
+                          <div class="df-line df-line-top">
+                            <span class="df-label">判断规则</span>
+                            <div class="df-where-list">
+                              <div v-for="(r, j) in row.rules" :key="j" class="df-rule-block">
+                                <div class="df-rule-top">
+                                  <el-select v-model="r.mode" size="small" class="df-mode"
+                                    @change="onDfRuleModeChange(r)">
+                                    <el-option label="比大小" value="threshold" />
+                                    <el-option label="多字段条件" value="when" />
+                                    <el-option label="兜底" value="fallback" />
+                                  </el-select>
+
+                                  <template v-if="r.mode === 'threshold'">
+                                    <el-select v-model="r.op" size="small" class="df-op"
+                                      @change="commitDfRows">
+                                      <el-option v-for="o in DF_CMP_OPTIONS" :key="o.value"
+                                        :label="o.label" :value="o.value" />
+                                    </el-select>
+                                    <el-input v-model="r.operand" size="small" class="df-operand"
+                                      placeholder="阈值" @input="commitDfRows" />
+                                  </template>
+                                  <span v-else-if="r.mode === 'when'" class="df-dash">下列条件全部满足</span>
+                                  <span v-else class="df-dash">前面都没命中时</span>
+
+                                  <span class="df-arrow">→</span>
+                                  <el-input v-model="r.value" size="small" class="df-val"
+                                    placeholder="结论，如 场景一" @input="commitDfRows" />
+                                  <el-button link type="danger" size="small"
+                                    @click="row.rules.splice(j, 1); commitDfRows()">删除</el-button>
+                                </div>
+
+                                <div v-if="r.mode === 'when'" class="df-cond-list">
+                                  <div v-for="(c, k) in r.conds" :key="k" class="df-cond-row">
+                                    <el-select v-model="c.path" size="small" filterable allow-create
+                                      default-first-option placeholder="字段路径，如 当月资源.over_flow_fee"
+                                      @change="commitDfRows">
+                                      <el-option v-for="p in dfPathCandidates" :key="p"
+                                        :label="p" :value="p" />
+                                    </el-select>
+                                    <el-select v-model="c.op" size="small" class="df-op"
+                                      @change="commitDfRows">
+                                      <el-option v-for="o in DF_CMP_OPTIONS" :key="o.value"
+                                        :label="o.label" :value="o.value" />
+                                    </el-select>
+                                    <el-input v-model="c.operand" size="small" class="df-operand"
+                                      placeholder="值" @input="commitDfRows" />
+                                    <el-button link type="danger" size="small"
+                                      @click="r.conds.splice(k, 1); commitDfRows()">删除</el-button>
+                                  </div>
+                                  <el-button size="small" plain
+                                    @click="r.conds.push({ path: '', op: 'ne', operand: '' }); commitDfRows()">
+                                    + 添加条件（且）
+                                  </el-button>
+                                </div>
+                              </div>
+                              <el-button size="small" plain @click="addDfRule(row)">+ 添加判断规则</el-button>
+                              <div class="df-sub-hint">
+                                自上而下取<b>第一个命中</b>的规则，兜底放最后。
+                                兜底的结论留空表示<b>不产出该字段</b>。
+                              </div>
+                            </div>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                    <div v-else class="ft-empty">
+                      还没有逻辑判断。按金额分档选话术场景、按「有费用但没超量」追加坐席提示，都在这里配。
+                    </div>
+                    <el-button size="small" plain class="ft-add"
+                      @click="addDfRow('judge')">+ 添加逻辑判断</el-button>
+                  </div>
+                </template>
+
+                <el-input v-else v-model="ifcEditForm.derived_fields" type="textarea"
+                  :autosize="{ minRows: 5, maxRows: 16 }" spellcheck="false" class="code-textarea" />
+
+                <div v-if="dfNameWarnings.length" class="om2-warn">
+                  ⚠ {{ dfNameWarnings.join('；') }}
                 </div>
               </section>
 
@@ -1183,7 +1426,7 @@
                 :disabled="matchSettingsSaving"
                 @click="saveMatchSettings"
               >保存设置</el-button>
-            </div>
+        </div>
 
             <!-- 默认规则说明：开箱即用，一般无需配置 -->
             <div class="tpl-match-priority">
@@ -1196,8 +1439,8 @@
               <div class="tpl-match-priority-foot">
                 命中模板后，若某个话术槽位没数据，会自动从入参回填。
                 <b>只有当默认字段取不到、或要自定义时，才需要展开下面的「高级设置」。</b>
-              </div>
-            </div>
+          </div>
+        </div>
 
             <!-- 当前生效配置一览：一眼看出是全默认还是已自定义 -->
             <div class="tpl-match-summary-line">
@@ -1205,7 +1448,7 @@
               <el-tag v-if="hasCustomMatch" size="small" type="warning">已自定义</el-tag>
               <el-tag v-else size="small" type="success">全部默认</el-tag>
               <span class="tpl-match-summary-txt">{{ matchConfigSummary }}</span>
-            </div>
+        </div>
 
             <!-- 高级设置：自定义取值字段与兜底，默认折叠，未配置时不影响默认行为 -->
             <details class="tpl-adv" :open="hasCustomMatch">
@@ -1249,7 +1492,7 @@
                     </el-option>
                   </el-select>
                   <span class="tpl-match-hint">产品里没这个字段会自动跳过，留空即可</span>
-                </div>
+              </div>
                 <div class="tpl-match-row">
                   <span class="tpl-match-label"><span class="tpl-match-step">3</span>产品名兜底</span>
                   <el-switch
@@ -1259,7 +1502,7 @@
                   <span class="tpl-match-hint">
                     默认开启。产品 ID 是纯数字、模板却按「流量 / 套餐 / 升」等关键词配置时，靠它兜底命中
                   </span>
-                </div>
+              </div>
 
                 <el-divider style="margin:12px 0 6px;" />
                 <div class="tpl-match-group-title">改「环节 / 意图」从哪里取（入参已传则忽略）</div>
@@ -1280,7 +1523,7 @@
                     </el-option>
                   </el-select>
                   <span class="tpl-match-hint">入参已传「环节」则忽略</span>
-                </div>
+                  </div>
                 <div class="tpl-match-row">
                   <span class="tpl-match-label">意图取值字段</span>
                   <el-select
@@ -1298,7 +1541,7 @@
                     </el-option>
                   </el-select>
                   <span class="tpl-match-hint">入参已传「意图」则忽略</span>
-                </div>
+                  </div>
 
                 <el-divider style="margin:12px 0 6px;" />
                 <div class="tpl-match-group-title">话术槽位没数据时，从入参回填（空域兜底）</div>
@@ -1325,18 +1568,29 @@
                         size="small" link type="danger"
                         @click="domainFallbacks.splice(i, 1); onMatchSettingsChange()"
                       >删除</el-button>
-                    </div>
+                </div>
                     <el-button
                       size="small" plain
                       @click="domainFallbacks.push({ domain: 'current_package', path: '' })"
                     >+ 添加兜底</el-button>
                     <div class="tpl-match-hint" style="margin-top:4px;">
                       仅当接口映射后标准域仍为空时生效（如：当前套餐 ← currentMainOffer）；接口有数据则不覆盖
-                    </div>
-                  </div>
-                </div>
               </div>
-            </details>
+                  </div>
+            </div>
+
+                <!-- 空槽位口径（biz_config.slot_fallback）不在本页面暴露：默认「照实填充」对所有
+                     省份都是正确行为，唯一的另一选项 drop 是技能包级的工程回退杆，运营在这里改一条
+                     模板会连带改掉该省所有模板的行为；而运营真正需要的「这句没数据时别说」是模板级
+                     诉求，已由该模板自己的「话术要求」承载。需要整省回退时改走 PUT biz_config。
+                     下方 slotFallbackRaw 负责把已落库的配置原样带回保存体，避免被静默擦掉。 -->
+                <div v-if="slotFallbackIsDrop" class="tpl-match-hint" style="margin:8px 0 0;">
+                  ⚠ 本技能包已配置<b>空槽位「删掉整句」</b>（旧口径）：槽位取不到值、或值为
+                  0（0元 / 0分钟 / 0GB）时，包含它的那句话会被整句删除。
+                  平台默认口径为「照实填充」，如需切回请联系管理员调整技能包配置
+              </div>
+            </div>
+          </details>
           </div>
         </details>
 
@@ -1347,11 +1601,11 @@
             话术模板（{{ templateList.length }} 组<template v-if="templateTotalCount !== templateList.length"> · 共 {{ templateTotalCount }} 条</template>）
           </span>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <!-- 筛选：产品 ID / 场景分类名称 / 环节（省份由当前技能包固定，无需筛选）-->
+            <!-- 筛选：话术匹配 ID / 场景分类名称 / 环节（省份由当前技能包固定，无需筛选）-->
             <el-select
               v-model="tplFilterProductId"
               size="small"
-              placeholder="产品 ID"
+              placeholder="话术匹配 ID"
               clearable
               filterable
               style="width:180px;"
@@ -1360,7 +1614,7 @@
             >
               <el-option v-for="p in tplProductIdOptions" :key="p" :label="p" :value="p" />
             </el-select>
-            <el-input
+                <el-input
               v-model="tplFilterName"
               size="small"
               placeholder="场景分类名称"
@@ -1429,7 +1683,7 @@
           </el-table-column>
           <el-table-column prop="stage" label="环节" width="100" show-overflow-tooltip />
           <el-table-column prop="scene" label="意图" min-width="100" show-overflow-tooltip />
-          <el-table-column label="产品 ID" min-width="200">
+          <el-table-column label="话术匹配 ID" min-width="200">
             <template #default="{ row }">
               <template v-if="rowProductIds(row).length">
                 <div style="display:flex;flex-wrap:wrap;gap:2px;align-items:center;"
@@ -1543,7 +1797,7 @@
                 <span class="csv-col-tag">场景分类名称</span>
                 <span class="csv-col-tag">环节</span>
                 <span class="csv-col-tag">意图</span>
-                <span class="csv-col-tag">产品ID</span>
+                <span class="csv-col-tag">话术匹配ID</span>
                 <span class="csv-col-tag req">话术内容 *</span>
                 <span class="csv-col-tag">关联变量</span>
                 <span class="csv-col-tag">状态</span>
@@ -1570,7 +1824,7 @@
                 action="#"
                 :auto-upload="false"
                 :show-file-list="false"
-                accept=".csv,.txt"
+            accept=".csv,.txt"
                 :on-change="onCsvUploadChange"
               >
                 <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
@@ -1584,7 +1838,7 @@
                 <div class="csv-file-meta">
                   <div class="csv-file-name" :title="csvFile.name">{{ csvFile.name }}</div>
                   <div class="csv-file-size">{{ _fmtFileSize(csvFile.size) }}</div>
-                </div>
+          </div>
                 <el-button link type="danger" :disabled="csvImporting" @click="clearCsvFile">
                   <el-icon><Delete /></el-icon>&nbsp;移除
                 </el-button>
@@ -1744,6 +1998,8 @@ const ifcEditForm    = reactive({
   // （灵运前置交叉营销报文入参 + 话术生成后回调网关缓存，不直接返回结果）
   request_variant: 'standard',
   headers_pairs: [],    // 接口查询模式请求头（键值对，保存时转 headers 对象）
+  // 派生字段（透传子模式）：JSON 串为唯一数据源，表格只是它的可视编辑器
+  derived_fields: '{}',
 })
 
 // ── 请求头（接口查询模式）键值对 ↔ 对象互转 ────────────────────
@@ -2092,6 +2348,290 @@ watch([passthroughSampleFields, isPassthrough], () => {
     ifcEditForm.passthrough_fields = [...allPassthroughKeys.value]
   }
 }, { immediate: true })
+
+// ── 派生字段 derived_fields 表格化编辑（与高级 JSON 等价，数据格式不变）──────
+// ifcEditForm.derived_fields（JSON 串）是唯一数据源，dfRows 只是它的可视投影：
+// 任何表格表达不了的写法（多字段 when 条件）整条原样保留在 row.raw，
+// 否则运营点开一次弹窗就会把这类配置擦掉。
+const dfVisualMode = ref(true)
+const dfRows = ref([])
+const DF_TYPES = ['array_find', 'sum', 'bucket']
+const DF_OPS = ['lt', 'lte', 'gt', 'gte', 'eq', 'ne']
+// 比较运算符（不含「兜底」——兜底是规则的一种模式，不是运算符，混在一起会让人以为要选运算符）
+const DF_CMP_OPTIONS = [
+  { value: 'lt',  label: '小于' },
+  { value: 'lte', label: '小于等于' },
+  { value: 'gt',  label: '大于' },
+  { value: 'gte', label: '大于等于' },
+  { value: 'eq',  label: '等于' },
+  { value: 'ne',  label: '不等于' },
+]
+// 行的 v-for key：分组渲染后列表下标会变，用稳定 uid 才不会让输入框错位
+let _dfUid = 0
+// 「字段计算」= 取值/算数（产出数据值）；「逻辑判断」= bucket（产出结论）。
+// 分组只是呈现方式，落库仍是同一个 derived_fields 对象。
+const dfCalcRows  = computed(() => dfRows.value.filter(r => r.type !== 'bucket'))
+const dfJudgeRows = computed(() => dfRows.value.filter(r => r.type === 'bucket'))
+// 7 大标准域：派生名撞上会被后端跳过（标准域只走 resources 通道），保存前就提示
+const DF_RESERVED_NAMES = [
+  'current_package', 'recommended_packages', 'usage', 'tags',
+  'user_info', 'user_profile', 'domain_ext',
+]
+
+/**
+ * from/路径候选：样例里的顶层与子字段 + 前面已定义的派生名（派生可层层引用）。
+ *
+ * array_find 产出的是样例数组中的一个对象。以前这里只加入了派生名本身，
+ * 所以「当月资源.over_flow_fee」虽然是后端支持的合法路径，却不会出现在
+ * sum 的下拉候选里，只能依赖 allow-create 手输。这里根据 array_find 的来源
+ * 数组，把对象子字段映射到派生名下，供后续 sum/bucket 直接选择。
+ */
+const dfPathCandidates = computed(() => {
+  const out = []
+  for (const f of passthroughSampleFields.value) {
+    out.push(f.key)
+    for (const c of (f.children || [])) out.push(c.key)
+  }
+  for (const r of dfRows.value) {
+    const n = (r.name || '').trim()
+    if (!n) continue
+    if (!out.includes(n)) out.push(n)
+
+    // array_find 的结果是一个数组元素对象。复用样例解析出的来源数组子字段，
+    // 生成「派生名.子字段」候选，例如：当月资源.over_flow_fee。
+    if (r.type === 'array_find') {
+      const source = String(r.from || '').trim()
+      const sourceField = passthroughSampleFields.value.find(f => f.key === source)
+      for (const c of (sourceField?.children || [])) {
+        const prefix = `${source}.`
+        const childPath = c.key.startsWith(prefix) ? c.key.slice(prefix.length) : c.key
+        const derivedPath = `${n}.${childPath}`
+        if (childPath && !out.includes(derivedPath)) out.push(derivedPath)
+      }
+    }
+  }
+  return out
+})
+
+const dfNameWarnings = computed(() => {
+  const warns = []
+  const seen = new Set()
+  for (const r of dfRows.value) {
+    const n = (r.name || '').trim()
+    if (!n) continue
+    if (DF_RESERVED_NAMES.includes(n)) warns.push(`「${n}」与标准域同名，运行时会被跳过，请改名`)
+    if (seen.has(n)) warns.push(`「${n}」重复定义，只有最后一条生效`)
+    seen.add(n)
+  }
+  return warns
+})
+
+/** 阈值/取值：纯数字串落成数字，其余保持字符串（后端两种都能比，落数字更直观）*/
+function _dfOperand(v) {
+  const s = String(v ?? '').trim()
+  if (s === '') return ''
+  return /^-?\d+(\.\d+)?$/.test(s) ? Number(s) : s
+}
+
+/** when 条件 → 表格行；表达不了的写法返回 null（调用方整条转高级保原样）。
+ *  支持 `{"路径": {"ne": 0}}` 与裸值简写 `{"路径": "场景一"}`（后端等价于 eq）。 */
+function _dfParseWhenConds(when) {
+  const conds = []
+  for (const [path, cond] of Object.entries(when || {})) {
+    if (cond !== null && typeof cond === 'object') {
+      if (Array.isArray(cond)) return null
+      const keys = Object.keys(cond)
+      const ops = keys.filter(k => DF_OPS.includes(k))
+      // 一个路径挂多个运算符（如 {ne:0,gt:5}）表格放不下，整条转高级
+      if (ops.length !== 1 || keys.length !== ops.length) return null
+      const v = cond[ops[0]]
+      if (v !== null && typeof v === 'object') return null
+      conds.push({ path, op: ops[0], operand: v == null ? '' : String(v) })
+    } else {
+      conds.push({ path, op: 'eq', operand: cond == null ? '' : String(cond) })
+    }
+  }
+  return conds
+}
+
+function parseDfToRows() {
+  let obj = {}
+  try { obj = JSON.parse(ifcEditForm.derived_fields || '{}') } catch { dfRows.value = []; return }
+  const rows = []
+  for (const [name, spec] of Object.entries(obj || {})) {
+    if (!name || name.startsWith('_') || !spec || typeof spec !== 'object' || Array.isArray(spec)) continue
+    const type = String(spec.type || '').toLowerCase()
+    const row = {
+      uid: ++_dfUid,
+      name,
+      type: DF_TYPES.includes(type) ? type : 'array_find',
+      from: Array.isArray(spec.from) ? '' : String(spec.from ?? ''),
+      sumFrom: Array.isArray(spec.from)
+        ? spec.from.map(String)
+        : (type === 'sum' && spec.from ? [String(spec.from)] : []),
+      wheres: Object.entries(spec.where || {}).map(([k, v]) => ({ k, v: v == null ? '' : String(v) })),
+      rules: [],
+      advanced: false,
+      raw: null,
+    }
+    if (row.type === 'bucket') {
+      const rs = Array.isArray(spec.rules) ? spec.rules : []
+      let unsupported = false
+      for (const r of rs) {
+        if (!r || typeof r !== 'object' || Array.isArray(r)) { unsupported = true; break }
+        const when = r.when
+        const value = r.value == null ? '' : String(r.value)
+        if (when && typeof when === 'object' && Object.keys(when).length) {
+          const conds = _dfParseWhenConds(when)
+          if (!conds || !conds.length) { unsupported = true; break }
+          row.rules.push({ mode: 'when', op: 'lt', operand: '', conds, value })
+          continue
+        }
+        const op = DF_OPS.find(o => r[o] !== undefined)
+        row.rules.push(op
+          ? { mode: 'threshold', op, operand: String(r[op]), conds: [], value }
+          : { mode: 'fallback', op: '', operand: '', conds: [], value })
+      }
+      if (unsupported) { row.advanced = true; row.raw = spec; row.rules = [] }
+    }
+    if (row.type === 'array_find' && !row.wheres.length) row.wheres = [{ k: '', v: '' }]
+    rows.push(row)
+  }
+  dfRows.value = rows
+}
+
+function commitDfRows() {
+  const out = {}
+  // 按「字段计算 → 逻辑判断」落库：后端按声明顺序求值，判断依赖计算结果，
+  // 这个顺序即界面上下顺序，保证所见即所得（组内相对顺序原样保留）。
+  for (const row of [...dfCalcRows.value, ...dfJudgeRows.value]) {
+    const name = (row.name || '').trim()
+    if (!name) continue
+    if (row.advanced && row.raw) { out[name] = row.raw; continue }
+    if (row.type === 'array_find') {
+      const where = {}
+      for (const w of (row.wheres || [])) {
+        const k = (w.k || '').trim()
+        if (k) where[k] = String(w.v ?? '')
+      }
+      out[name] = {
+        type: 'array_find',
+        from: (row.from || '').trim(),
+        ...(Object.keys(where).length ? { where } : {}),
+      }
+    } else if (row.type === 'sum') {
+      out[name] = {
+        type: 'sum',
+        from: (row.sumFrom || []).map(s => String(s).trim()).filter(Boolean),
+      }
+    } else {
+      const from = (row.from || '').trim()
+      out[name] = {
+        type: 'bucket',
+        // 纯「多字段条件」的判断没有单一判断依据，不写空 from，配置更干净
+        ...(from ? { from } : {}),
+        rules: (row.rules || []).map(r => {
+          const value = String(r.value ?? '')
+          if (r.mode === 'when') {
+            const when = {}
+            for (const c of (r.conds || [])) {
+              const p = (c.path || '').trim()
+              if (p) when[p] = { [c.op || 'eq']: _dfOperand(c.operand) }
+            }
+            return { ...(Object.keys(when).length ? { when } : {}), value }
+          }
+          if (r.mode === 'fallback') return { value }
+          return { [r.op || 'lt']: _dfOperand(r.operand), value }
+        }),
+      }
+    }
+  }
+  ifcEditForm.derived_fields = JSON.stringify(out, null, 2)
+}
+
+/** 该判断里是否有「比大小」规则 —— 只有这类才需要单一「判断依据」 */
+function dfNeedsFrom(row) {
+  return (row.rules || []).some(r => r.mode === 'threshold')
+}
+
+function addDfRow(kind) {
+  const row = {
+    uid: ++_dfUid, name: '', from: '', sumFrom: [],
+    wheres: [], rules: [], advanced: false, raw: null,
+  }
+  if (kind === 'judge') {
+    row.type = 'bucket'
+    row.rules = [
+      { mode: 'threshold', op: 'lt', operand: '', conds: [], value: '' },
+      { mode: 'fallback', op: '', operand: '', conds: [], value: '' },
+    ]
+    dfRows.value.push(row)
+  } else {
+    row.type = 'array_find'
+    row.wheres = [{ k: '', v: '' }]
+    // 插到最后一条字段计算之后：界面分组顺序与数组顺序保持一致
+    const lastCalc = dfRows.value.reduce((acc, r, i) => (r.type !== 'bucket' ? i : acc), -1)
+    dfRows.value.splice(lastCalc + 1, 0, row)
+  }
+}
+function removeDfRow(row) {
+  const i = dfRows.value.indexOf(row)
+  if (i >= 0) dfRows.value.splice(i, 1)
+  commitDfRows()
+}
+function addDfRule(row) {
+  row.rules.push({ mode: 'threshold', op: 'lt', operand: '', conds: [], value: '' })
+  commitDfRows()
+}
+/** 切换规则模式时补上该模式必需的子结构，避免切过去是空白一片 */
+function onDfRuleModeChange(r) {
+  if (r.mode === 'when' && !(r.conds || []).length) r.conds = [{ path: '', op: 'ne', operand: '' }]
+  commitDfRows()
+}
+/** 字段计算内换算子（数组选元素 ↔ 求和）时补齐子结构 */
+function onDfTypeChange(row) {
+  if (row.type === 'array_find' && !row.wheres.length) row.wheres = [{ k: '', v: '' }]
+  commitDfRows()
+}
+// 高级 JSON → 表格：切回表格模式时同步（与 field_transform 的 ftVisualMode 同行为）
+watch(dfVisualMode, (v) => { if (v) parseDfToRows() })
+
+/** 保存前校验派生字段：只挡「一定跑不出结果」的写法，返回错误文案或 ''。
+ *  存量/高级写法（多字段 when）不在这里挡 —— 后端单条异常只告警不影响其余字段。 */
+function validateDerivedFields(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return '必须是 JSON 对象'
+  for (const [name, spec] of Object.entries(obj)) {
+    if (name.startsWith('_')) continue
+    if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return `「${name}」的规则必须是对象`
+    const type = String(spec.type || '')
+    if (!DF_TYPES.includes(type)) {
+      return `「${name}」的类型 ${type || '(空)'} 不支持，只能是数组选元素/求和/阈值分档`
+    }
+    if (DF_RESERVED_NAMES.includes(name)) return `「${name}」与标准域同名，运行时会被跳过，请改名`
+    if (type === 'sum') {
+      const paths = Array.isArray(spec.from) ? spec.from : [spec.from]
+      if (!paths.filter(p => String(p ?? '').trim()).length) return `「${name}」求和至少要填一个路径`
+    } else if (type === 'array_find' && !String(spec.from ?? '').trim()) {
+      return `「${name}」要填从哪个数组取`
+    }
+    if (type === 'bucket') {
+      const rules = Array.isArray(spec.rules) ? spec.rules : []
+      if (!rules.length) return `「${name}」至少要配一条判断规则`
+      // 判断依据只服务「比大小」规则；纯多字段条件（when）的判断没有单一依据，不能强制要求
+      const hasThreshold = rules.some(r => r && typeof r === 'object'
+        && !r.when && DF_OPS.some(o => r[o] !== undefined))
+      if (hasThreshold && !String(spec.from ?? '').trim()) {
+        return `「${name}」有「比大小」的规则，要填判断依据`
+      }
+      // 兜底（无条件）之后的规则永远取不到，属于配置错误而不是风格问题
+      const deadIdx = rules.findIndex((r, i) => i < rules.length - 1
+        && r && typeof r === 'object'
+        && !r.when && !DF_OPS.some(o => r[o] !== undefined))
+      if (deadIdx >= 0) return `「${name}」第 ${deadIdx + 1} 条规则是兜底，后面的规则永远取不到，请把兜底放最后`
+    }
+  }
+  return ''
+}
 
 // 出参映射样例与「模拟数据/响应样例」共用 ifcEditForm.mock_response（单一来源）
 const ifcAutoMapLoading  = ref(false)
@@ -2703,7 +3243,9 @@ function openIfcCreate() {
     source_type: 'direct',
     request_variant: 'standard',
     headers_pairs: [{ k: 'Content-Type', v: 'application/json' }],
+    derived_fields: '{}',
   })
+  dfRows.value = []
   ifcAutoMapAnalysis.value = ''
   ifcEditVisible.value = true
 }
@@ -3031,8 +3573,10 @@ async function openIfcEdit(item) {
       passthrough_fields: Array.isArray(cfg.passthrough_fields) ? [...cfg.passthrough_fields] : [],
       request_variant:  cfg.request_variant === 'marketing_assistant' ? 'marketing_assistant' : 'standard',
       headers_pairs:    headersObjToPairs(cfg.headers),
+      derived_fields:   JSON.stringify(cfg.derived_fields || {}, null, 2),
     })
   } catch { /* 允许打开空表单 */ }
+  parseDfToRows()
   // 缓存原始快照（用于保存时判断是否有修改）
   ifcEditOriginalSnapshot.value = {
     description:      ifcEditForm.description,
@@ -3049,6 +3593,7 @@ async function openIfcEdit(item) {
     passthrough_fields: [...ifcEditForm.passthrough_fields],
     request_variant:  ifcEditForm.request_variant,
     headers:          JSON.stringify(headersPairsToObj(ifcEditForm.headers_pairs)),
+    derived_fields:   ifcEditForm.derived_fields,
   }
   rebuildIfcEditPreview()
   ifcEditVisible.value = true
@@ -3115,11 +3660,14 @@ async function saveIfcEdit() {
     ElMessage.error(isDirectMode.value ? '节点名称必填' : '接口名称必填')
     return
   }
-  let req = {}, ext = {}, tr = {}, mock = {}
+  let req = {}, ext = {}, tr = {}, mock = {}, df = {}
   try { req  = JSON.parse(ifcEditForm.request_template || '{}') } catch { ElMessage.error('请求模板 JSON 格式错误'); return }
   try { ext  = JSON.parse(ifcEditForm.response_extract || '{}') } catch { ElMessage.error('response_extract JSON 格式错误'); return }
   try { tr   = JSON.parse(ifcEditForm.field_transform  || '{}') } catch { ElMessage.error('field_transform JSON 格式错误'); return }
   try { mock = JSON.parse(ifcEditForm.mock_response    || '{}') } catch { ElMessage.error('mock_response JSON 格式错误'); return }
+  try { df   = JSON.parse(ifcEditForm.derived_fields   || '{}') } catch { ElMessage.error('派生字段 JSON 格式错误'); return }
+  const dfErr = validateDerivedFields(df)
+  if (dfErr) { ElMessage.error(`派生字段配置有误：${dfErr}`); return }
 
   // 编辑模式下：判断是否有修改，无修改则跳过 PUT
   const snap = ifcEditOriginalSnapshot.value
@@ -3138,7 +3686,8 @@ async function saveIfcEdit() {
       _jsonEqual(snap.request_template, ifcEditForm.request_template) &&
       _jsonEqual(snap.response_extract, ifcEditForm.response_extract) &&
       _jsonEqual(snap.field_transform,  ifcEditForm.field_transform) &&
-      _jsonEqual(snap.mock_response,    ifcEditForm.mock_response)
+      _jsonEqual(snap.mock_response,    ifcEditForm.mock_response) &&
+      _jsonEqual(snap.derived_fields || '{}', ifcEditForm.derived_fields)
     if (unchanged) {
       ifcEditVisible.value = false
       ElMessage.info('未检测到修改，已关闭')
@@ -3148,7 +3697,7 @@ async function saveIfcEdit() {
 
   // 模式 B（无 province/intent，Import 创建页）→ 保存到本地 api_nodes
   if (!props.province || !props.intent) {
-    saveLocalIfcEdit(req, ext, tr, mock)
+    saveLocalIfcEdit(req, ext, tr, mock, df)
     return
   }
 
@@ -3173,6 +3722,8 @@ async function saveIfcEdit() {
     body.direct_mode = 'passthrough'
     body.passthrough_fields = [...ifcEditForm.passthrough_fields]
     body.request_variant = ifcEditForm.request_variant
+    // 后端按节点 merge（body 里没有的键保留原值），所以清空要显式传 {} 才生效
+    body.derived_fields = df
   }
   ifcSaving.value = true
   try {
@@ -3188,7 +3739,7 @@ async function saveIfcEdit() {
       if (filled.length) {
         ElMessage.success({ message: `✅ 保存成功，配置已自动修正：${filled.join('；')}`, duration: 6000 })
       } else {
-        ElMessage.success('✅ 保存成功')
+      ElMessage.success('✅ 保存成功')
       }
       if ((json.unfixed || []).length) {
         ElMessage.warning({ message: `⚠️ 以下问题需人工处理：${json.unfixed.join('；')}`, duration: 8000 })
@@ -3523,7 +4074,7 @@ function openLocalIfcEdit(row) {
 }
 
 /** 本地模式保存：写回 apiNodeList 并 emitChange（被 saveIfcEdit 调用） */
-function saveLocalIfcEdit(req, ext, tr, mock) {
+function saveLocalIfcEdit(req, ext, tr, mock, df) {
   const name = ifcEditForm.api_name.trim()
   const old  = _localIfcEditingIdx >= 0 ? apiNodeList.value[_localIfcEditingIdx] : null
   if (ifcEditIsNew.value && apiNodeList.value.some(n => n._key === name)) {
@@ -3551,13 +4102,18 @@ function saveLocalIfcEdit(req, ext, tr, mock) {
     response_extract:     reactive({ ...(isPass ? {} : ext) }),
     field_transform:      isPass ? {} : tr,
     mock_response:        mock,
-    _extra:               old?._extra || {},
+    _extra:               { ...(old?._extra || {}) },
   }
   if (isDirect) {
     saved.direct_mode = 'passthrough'
     saved.request_variant = ifcEditForm.request_variant
     saved.passthrough_fields = [...ifcEditForm.passthrough_fields]
+    saved.derived_fields = df && Object.keys(df).length ? df : {}
   }
+  // request_variant / derived_fields 是一等字段，若旧节点把它们留在 _extra 里，
+  // emitChange 末尾展开 _extra 会用旧值盖掉这次的编辑结果，故先摘掉。
+  delete saved._extra.request_variant
+  delete saved._extra.derived_fields
   if (ifcEditIsNew.value) {
     apiNodeList.value.push(saved)
     apiPage.value = Math.ceil(apiNodeList.value.length / API_PAGE_SIZE)
@@ -3689,7 +4245,7 @@ async function loadTplItems() {
     // eslint-disable-next-line no-constant-condition
     while (true) {
       const res  = await apiFetch(`${base}&page=${page}&page_size=${PAGE}`)
-      const json = await res.json()
+    const json = await res.json()
       const data = json.data || {}
       const batch = Array.isArray(data.items) ? data.items : (Array.isArray(data) ? data : [])
       items = items.concat(batch)
@@ -3803,8 +4359,8 @@ async function handleTemplateSave(formData) {
             .filter(Boolean)
 
       const res = await apiFetch('/api/templates/bulk', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           province: props.province,
           intent: props.intent,
@@ -3814,7 +4370,7 @@ async function handleTemplateSave(formData) {
           auto_domain_vars: true,
         }),
       })
-      const json = await res.json()
+        const json = await res.json()
       if (json.code === 200) {
         const okCount = json.data?.imported ?? templates.length
         tplDialogVisible.value = false
@@ -3887,7 +4443,7 @@ function openImportCsv() {
 
 // 优化六：下载导入用 CSV 模板（含表头，列顺序与解析一致），带 BOM 防止 Excel 中文乱码
 function downloadCsvTemplate() {
-  const header = '场景分类名称,环节,意图,产品ID,话术内容,关联变量(可留空),状态(online/offline)'
+  const header = '场景分类名称,环节,意图,话术匹配ID,话术内容,关联变量(可留空),状态(online/offline)'
   const sample1 = '套餐推荐话术_5G升档,推荐环节,套餐升级,prod001,"您好，根据您的用量{usage}，推荐办理{pkg_brief}。",,online'
   const sample2 = '套餐推荐话术_兜底,推荐环节,套餐升级,,"您好，为您推荐更合适的套餐{pkg_brief}。",,online'
   const csv = '\uFEFF' + header + '\n' + sample1 + '\n' + sample2 + '\n'
@@ -3954,7 +4510,7 @@ function parseCsv(text) {
 }
 
 // 表头识别：首行含「表头专属」关键词即视为表头（兼容新旧命名，且不会误判正文行）
-const _CSV_HEADER_MARKERS = ['名称', '状态', '关联', '产品id', 'online', 'offline', 'status', '话术内容']
+const _CSV_HEADER_MARKERS = ['名称', '状态', '关联', '产品id', '话术匹配', 'online', 'offline', 'status', '话术内容']
 function _looksLikeHeader(cells) {
   const joined = (cells || []).join('').toLowerCase()
   return _CSV_HEADER_MARKERS.some(k => joined.includes(k.toLowerCase()))
@@ -3970,7 +4526,7 @@ async function doImportCsv() {
     if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1)   // 去除残留 BOM
     const rows = parseCsv(text).filter(r => r.some(c => (c || '').trim() !== ''))
     if (!rows.length) { importMsg.value = 'CSV 文件为空'; importOk.value = false; return }
-    // 列顺序：场景分类名称, 环节, 意图, 产品ID, 话术内容, 关联变量(可留空), 状态
+    // 列顺序：场景分类名称, 环节, 意图, 话术匹配ID, 话术内容, 关联变量(可留空), 状态
     const dataRows = _looksLikeHeader(rows[0]) ? rows.slice(1) : rows
 
     // 解析为标准记录（话术内容必填）
@@ -5233,6 +5789,14 @@ const templateMatch = reactive({
   name_fallback: true,
 })
 
+// 空槽位口径（biz_config.slot_fallback）：本页面不提供编辑入口（理由见模板处注释），
+// 但必须原样读回再写出 —— 否则运营保存一次话术模板，就会把某省已配的 drop 回退设置
+// 连带擦掉。这里只做透明搬运，不解析结构，后端 normalize_slot_fallback 负责兜住脏值。
+const slotFallbackRaw = ref(null)
+
+// 仅用于提示运营「本省是旧口径」：drop 会连句删，不告知的话运营会看不懂话术为何缺句
+const slotFallbackIsDrop = computed(() => slotFallbackRaw.value?.mode === 'drop')
+
 // ── 模板匹配候选字段：从接口出参映射结果（mock 样例模拟）提取可选字段 ──
 
 /** 轻量模拟某接口节点单个标准域的映射结果值（response_extract → field_transform 整域规则）。
@@ -5415,6 +5979,8 @@ const matchConfigSummary = computed(() => {
   if (val('scene_from')) parts.push(`意图取值：${val('scene_from')}`)
   const fbRows = domainFallbacks.value.filter(r => r.domain && String(r.path || '').trim()).length
   parts.push(`空域兜底：${fbRows ? fbRows + ' 条' : '无'}`)
+  // 默认口径不进摘要（本页已不可编辑，说它只是噪音）；仅旧口径要点出来，否则运营看不懂话术为何缺句
+  if (slotFallbackIsDrop.value) parts.push('空槽位：删掉整句（旧口径）')
   return parts.join('　·　')
 })
 
@@ -5467,6 +6033,7 @@ const [saveMatchSettings, matchSettingsSaving] = useLock(async () => {
     const biz = { ...(bizJson.data || {}) }
     if (tmCfg) biz.template_match = tmCfg
     else delete biz.template_match
+    // slot_fallback 本页面不编辑，原样沿用服务端这份，不要写也不要删
     // 策略面板也在本编辑器内，一并合并当前值
     biz.strategy = { ...(biz.strategy || {}), ...strategy }
 
@@ -5558,13 +6125,19 @@ function loadFromProps(val) {
     source_type:           v.source_type === 'direct' ? 'direct' : 'api',
     direct_mode:           v.source_type === 'direct' ? 'passthrough' : (v.direct_mode || 'passthrough'),
     passthrough_fields:    Array.isArray(v.passthrough_fields) ? [...v.passthrough_fields] : [],
+    // 接口规范与派生字段提为一等字段：留在 _extra 里会被 emitChange 末尾的展开
+    // 用编辑前的旧值盖掉本次修改（改了接口规范/派生字段却保存不上）
+    request_variant:       v.request_variant === 'marketing_assistant' ? 'marketing_assistant' : 'standard',
+    derived_fields:        (v.derived_fields && typeof v.derived_fields === 'object')
+                             ? { ...v.derived_fields } : {},
     // pass-through 未知字段
     _extra: Object.fromEntries(
       Object.entries(v).filter(([fk]) =>
         !['enabled','url','method','headers','timeout','max_retries','mock_mode',
           'request_body_wrapper','request_template','response_extract',
           'field_transform','mock_response','_comment','created_by','created_at',
-          'source_type','direct_mode','passthrough_fields'].includes(fk)
+          'source_type','direct_mode','passthrough_fields',
+          'request_variant','derived_fields'].includes(fk)
       )
     ),
   }))
@@ -5584,6 +6157,10 @@ function loadFromProps(val) {
   templateMatch.stage_from      = tmStr(tm.stage_from)
   templateMatch.scene_from      = tmStr(tm.scene_from)
   templateMatch.name_fallback   = !tm.disable_name_fallback
+
+  // 空槽位口径：本页面不编辑，原样接住已落库的值以便保存时带回（未配置 = 后端默认「照实填充」）
+  const sf = biz.slot_fallback
+  slotFallbackRaw.value = (sf && typeof sf === 'object' && !Array.isArray(sf)) ? { ...sf } : null
 
   // Mode A（有 province+intent，如 Skill 管理）：话术模板改由 loadTplItems 分页拉全量并
   // 「按场景分类/环节/意图/话术内容」合并归类展示（不同 product_id 收进同一分组行），
@@ -5635,6 +6212,7 @@ function emitChange() {
     prevBiz.strategy = { ...(prevBiz.strategy || {}), ...strategy }
     if (tmCfg) prevBiz.template_match = tmCfg
     else delete prevBiz.template_match
+    // slot_fallback 本页面不编辑，靠上面的展开原样带过去
 
     emit('update:modelValue', { api_nodes: prevApi, biz_config: prevBiz })
     return
@@ -5665,6 +6243,9 @@ function emitChange() {
         source_type: 'direct',
         direct_mode: 'passthrough',
         passthrough_fields: [...(node.passthrough_fields || [])],
+        request_variant: node.request_variant === 'marketing_assistant' ? 'marketing_assistant' : 'standard',
+        ...(Object.keys(node.derived_fields || {}).length
+          ? { derived_fields: node.derived_fields } : {}),
       } : {}),
       ...node._extra,
     }
@@ -5697,6 +6278,8 @@ function emitChange() {
     strategy: { ...strategy },
     field_aliases: props.modelValue?.biz_config?.field_aliases ?? {},
     ...(tmCfg ? { template_match: tmCfg } : {}),
+    // 本页面不编辑 slot_fallback，但导入的技能包可能带着它，原样保留
+    ...(slotFallbackRaw.value ? { slot_fallback: slotFallbackRaw.value } : {}),
     script_templates_v2: scriptTemplatesV2,
   }
 
@@ -7661,6 +8244,79 @@ async function removeTemplate(idx) {
   font-size: 12px; background: #eef7f0; border-radius: 4px; padding: 1px 6px; color: #4a6b57;
 }
 
+/* 派生字段 derived_fields：每条一块（算子不同、子结构也不同，不适合等宽表格行） */
+/* 两组（字段计算 / 逻辑判断）用左侧色条 + 徽标区分，让人一眼看出哪些在算数、哪些在判断 */
+.df-group { margin-bottom: 10px; }
+.df-group:last-of-type { margin-bottom: 6px; }
+.df-group-head {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;
+}
+.df-group-badge {
+  font-size: 11px; font-weight: 700; border-radius: 4px;
+  padding: 2px 8px; flex-shrink: 0;
+}
+.df-badge-calc  { background: #e7f1ff; color: #1c5fb8; }
+.df-badge-judge { background: #fdf0e6; color: #ad5f10; }
+.df-group-desc { font-size: 11px; color: var(--muted); line-height: 1.6; }
+.df-group-desc b { color: #495057; font-weight: 600; }
+.df-group .df-table { border-left-width: 3px; }
+.df-group:first-of-type .df-table { border-left-color: #a9c9f5; }
+.df-group:last-of-type .df-table { border-left-color: #f0c391; }
+.df-table {
+  border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin-bottom: 6px;
+}
+.df-item { padding: 9px 10px; border-bottom: 1px solid #f0f0f0; }
+.df-item:last-of-type { border-bottom: none; }
+.df-item-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.df-item-head .df-name { width: 190px; }
+.df-item-head .df-type { width: 130px; }
+.df-item-head .el-button { margin-left: auto; }
+.df-line { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+.df-line-top { align-items: flex-start; }
+.df-label {
+  width: 74px; flex-shrink: 0; font-size: 12px; color: var(--muted); text-align: right;
+}
+.df-line > .el-select, .df-line > .el-input { flex: 1; min-width: 0; }
+.df-where-list { flex: 1; min-width: 0; }
+.df-where-row, .df-rule-row {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 5px;
+}
+.df-where-row .el-input { flex: 1; min-width: 0; }
+.df-rule-row .df-op { width: 106px; flex-shrink: 0; }
+.df-rule-row .df-operand { width: 96px; flex-shrink: 0; }
+.df-rule-row > .el-input:last-of-type { flex: 1; min-width: 0; }
+
+/* 判断规则：一条规则一块（多字段条件要在下面挂一串条件行） */
+.df-rule-block {
+  border: 1px solid #f0f0f0; border-radius: 5px;
+  padding: 6px 7px; margin-bottom: 6px; background: #fcfcfd;
+}
+.df-rule-top { display: flex; align-items: center; gap: 6px; }
+.df-rule-top .df-mode { width: 116px; flex-shrink: 0; }
+.df-rule-top .df-op { width: 100px; flex-shrink: 0; }
+.df-rule-top .df-operand { width: 88px; flex-shrink: 0; }
+.df-rule-top .df-val { flex: 1; min-width: 0; }
+.df-cond-list {
+  margin-top: 6px; padding: 6px 7px 2px;
+  border-left: 2px solid #f0c391; background: #fffdfa; border-radius: 0 4px 4px 0;
+}
+.df-cond-row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+.df-cond-row > .el-select:first-child { flex: 1; min-width: 0; }
+.df-cond-row .df-op { width: 100px; flex-shrink: 0; }
+.df-cond-row .df-operand { width: 88px; flex-shrink: 0; }
+.df-eq, .df-arrow { font-size: 12px; color: #adb5bd; flex-shrink: 0; }
+.df-dash { flex: 1; font-size: 12px; color: #adb5bd; }
+.df-sub-hint { font-size: 12px; color: var(--muted); line-height: 1.7; margin-top: 2px; }
+.df-sub-indent { margin-left: 82px; }
+.df-advanced-note {
+  font-size: 12px; color: #8a6d3b; background: #fcf8e3;
+  border-radius: 4px; padding: 6px 8px; line-height: 1.7;
+}
+.df-help {
+  font-size: 12px; color: var(--primary, #409eff); cursor: help;
+  text-decoration: underline dotted; margin-left: 4px;
+}
+
 /* 优化5：内联验证映射结果 */
 .om2-validate { border-color: #a7e0c1; background: #fafffb; }
 .om2-validate-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
@@ -8270,7 +8926,6 @@ async function removeTemplate(idx) {
 }
 .dfm-v2-tpl-section-hd--unlinked { color: #e6a23c; border-bottom-color: #fdf3e3; }
 </style>
-
 
 
 

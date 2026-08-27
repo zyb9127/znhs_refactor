@@ -43,13 +43,9 @@
   },
   "elasticsearch": {
     "_comment": "ES 配置存储（znhs-agent 专属 index，不影响其他服务）",
-    "hosts": [
-      "http://172.19.89.131:9211",
-      "http://172.19.89.150:9211",
-      "http://172.19.89.126:9211"
-    ],
-    "username": "developer",
-    "password": "DXgK&7CY",
+    "hosts": [],
+    "username": "",
+    "password": "",
     "index_configs": "znhs-agent-skill-configs",
     "index_meta": "znhs-agent-skill-config-meta",
     "max_versions": 5
@@ -75,15 +71,8 @@
     "_comment_sync": "多实例配置同步方式：sync_mode=pubsub|poll|hybrid（默认 hybrid，Pub/Sub 低延迟 + ES 定时轮询自愈兜底）；poll_interval_seconds 为 ES 轮询间隔秒数（默认 300 即 5 分钟，仅 poll/hybrid 生效）",
     "sync_mode": "hybrid",
     "poll_interval_seconds": 300,
-    "cluster_nodes": [
-      {"host": "ha-znkf-0.ha-znkf.zjjpt-redis.svc.huaarmcore.hpc", "port": 3158},
-      {"host": "ha-znkf-1.ha-znkf.zjjpt-redis.svc.huaarmcore.hpc", "port": 3158},
-      {"host": "ha-znkf-2.ha-znkf.zjjpt-redis.svc.huaarmcore.hpc", "port": 3158},
-      {"host": "ha-znkf-3.ha-znkf.zjjpt-redis.svc.huaarmcore.hpc", "port": 3158},
-      {"host": "ha-znkf-4.ha-znkf.zjjpt-redis.svc.huaarmcore.hpc", "port": 3158},
-      {"host": "ha-znkf-5.ha-znkf.zjjpt-redis.svc.huaarmcore.hpc", "port": 3158}
-    ],
-    "password": "znkf0724",
+    "cluster_nodes": [],
+    "password": "",
     "key_prefix": "znhs:agent:cfg:",
     "cache_ttl": 7200,
     "pubsub_channel": "znhs:agent:config:changed"

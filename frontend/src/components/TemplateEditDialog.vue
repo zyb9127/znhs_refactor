@@ -61,7 +61,7 @@
       <!-- ── 多产品 ID（multiProduct 模式） ── -->
       <el-form-item v-if="multiProduct" prop="product_ids_text">
         <template #label>
-          <span class="fl">产品 ID</span>
+          <span class="fl">话术匹配 ID</span>
           <span class="fh">{{ productIdHint }}</span>
         </template>
         <el-input v-model="form.product_ids_text" type="textarea"
@@ -81,7 +81,7 @@
         <el-col :span="12">
           <el-form-item prop="product_id">
             <template #label>
-              <span class="fl">产品 ID</span>
+              <span class="fl">话术匹配 ID</span>
               <span class="fh">{{ marketingAssistantMode ? '可填产品 ID / 业务类型 / 产品名称；留空 = 兜底模板' : '留空 = 兜底模板' }}</span>
             </template>
             <el-input v-model="form.product_id" :placeholder="productIdPlaceholder" clearable />
@@ -89,9 +89,13 @@
         </el-col>
         <el-col :span="12">
           <el-form-item prop="stage">
-            <template #label><span class="fl">应用环节</span></template>
+            <template #label>
+              <span class="fl">应用环节</span>
+              <span class="fh">{{ stageHint }}</span>
+            </template>
             <el-autocomplete v-model="form.stage" :fetch-suggestions="stageSuggest"
-              placeholder="如：切入环节" style="width:100%" clearable />
+              :placeholder="marketingAssistantMode ? '如：推荐环节' : '如：切入环节'"
+              style="width:100%" clearable />
           </el-form-item>
         </el-col>
       </el-row>
@@ -102,10 +106,11 @@
           <el-form-item prop="stage">
             <template #label>
               <span class="fl">应用环节</span>
-              <span class="fh">话术所处销售环节（切入 / 推荐 / 异议处理 / 促成），用于按环节匹配话术</span>
+              <span class="fh">{{ stageHint }}</span>
             </template>
             <el-autocomplete v-model="form.stage" :fetch-suggestions="stageSuggest"
-              placeholder="如：切入环节" style="width:100%" clearable />
+              :placeholder="marketingAssistantMode ? '如：推荐环节' : '如：切入环节'"
+              style="width:100%" clearable />
           </el-form-item>
         </el-col>
         <el-col :span="12">
@@ -326,7 +331,9 @@
       <el-form-item prop="script_requirement">
         <template #label>
           <span class="fl">④ 话术要求</span>
-          <span class="fh">字数、语气与卖点组织等风格要求（防编造 / 防串填 / 占位符匹配已由系统内置生成规则保证，此处只需补充业务侧重）；可直接选用下方 context 工程标准模板</span>
+          <span class="fh">字数、语气与卖点组织等风格要求（防编造 / 防串填 / 占位符匹配已由系统内置生成规则保证，此处只需补充业务侧重）；可直接选用下方 context 工程标准模板<br>
+            槽位取不到值时系统默认<b>照实填充</b>：有值原样填、值为 0 就照实说 0、取不到值则保留原句并在槽位处填 <code>**</code>（由坐席对客时口头补充）。
+            若某句在无数据或值为 0 时<b>宁可不说</b>，在此写明即可（如「月均消费、流量无数据或为 0 时不要提这两句，直接讲推荐产品」），可按句、按段覆盖默认口径</span>
         </template>
         <div class="req-preset-bar">
           <span class="req-preset-label">标准话术要求：</span>
@@ -508,7 +515,12 @@ const SLOT_LABEL = {
   domain_ext: '扩展域(domain_ext)',
 }
 
-const STAGE_OPTIONS = ['切入环节', '推荐环节', '异议处理', '促成成交']
+// 环节候选：营销助手模式下平台只按「推荐 / 切入 / 挽留」三环节回话术（words /
+// aiPitchMarketingDesc / aiRetentionMarketingDesc，见 config.json cross_sell.*_stage 与
+// utils/marketing_assistant.py），配其它环节不会被下游取用，故只放这三个；其它接口模式
+// 保留完整销售链路并补上「挽留环节」。实际取值下拉见 stageOptions 计算属性。
+const STAGE_OPTIONS_MARKETING = ['推荐环节', '切入环节', '挽留环节']
+const STAGE_OPTIONS_FULL = ['切入环节', '推荐环节', '挽留环节', '异议处理', '促成成交']
 const SCENE_OPTIONS = ['流量超套', '套餐升级', '套餐降档', '新业务推荐']
 
 // ── 表单状态 ──────────────────────────────────────────────
@@ -739,6 +751,13 @@ const productIdHint = computed(() => marketingAssistantMode.value
   ? '按「精确优先」逐个尝试：产品 ID（productId）→ 业务类型（business_type）→ 产品名称（productName），'
     + '填哪个就按哪个维度命中；多个用逗号 / 换行分隔；留空 = 该场景分类兜底模板'
   : '该模板适用的套餐产品编码；多个用逗号 / 换行分隔；留空 = 该场景分类兜底模板（无匹配产品时使用）')
+
+// 应用环节下拉候选：营销助手模式仅「推荐 / 切入 / 挽留」三环节（下游只按这三个取话术）
+const stageOptions = computed(() =>
+  marketingAssistantMode.value ? STAGE_OPTIONS_MARKETING : STAGE_OPTIONS_FULL)
+const stageHint = computed(() => marketingAssistantMode.value
+  ? '营销助手模式仅按「推荐 / 切入 / 挽留」三环节回话术，请从下拉中选择'
+  : '话术所处销售环节（切入 / 推荐 / 挽留 / 异议处理 / 促成），用于按环节匹配话术')
 const productIdPlaceholder = computed(() => marketingAssistantMode.value
   ? '例：PROD_001（产品 ID）或 流量包（业务类型）或 30GB流量畅享包（产品名称）'
   : (props.multiProduct ? '例：prod001, prod002, prod003' : '套餐产品 ID（可留空）'))
@@ -1293,7 +1312,7 @@ function onProvinceChange() {
   form.intent = ''
 }
 
-function stageSuggest(q, cb) { cb(STAGE_OPTIONS.filter(s => !q || s.includes(q)).map(s => ({ value: s }))) }
+function stageSuggest(q, cb) { cb(stageOptions.value.filter(s => !q || s.includes(q)).map(s => ({ value: s }))) }
 function sceneSuggest(q, cb) { cb(SCENE_OPTIONS.filter(s => !q || s.includes(q)).map(s => ({ value: s }))) }
 
 /**
@@ -1311,12 +1330,19 @@ function validateBeforeSave() {
   const pidsTrim = pidsRaw.trim()
   if (pidsTrim) {
     const tokens = pidsTrim.split(/[,，\n]+/).map(s => s.trim()).filter(Boolean)
-    // 产品 ID 支持中文名称（如「扩容」「流量扩容」）；仅禁止空白与可能破坏匹配/存储的分隔符与引号括号。
+    // 话术匹配 ID 支持中文名称（如「扩容」「流量扩容」）；仅禁止空白与可能破坏匹配/存储的分隔符与引号括号。
     const bad = tokens.filter(t => !/^[A-Za-z0-9_\u4e00-\u9fa5·・()（）-]+$/.test(t))
     if (bad.length) {
-      ElMessage.warning(`产品 ID 格式不正确：${bad.join('、')}；支持中文/字母/数字/下划线/连字符，多个用逗号或换行分隔`)
+      ElMessage.warning(`话术匹配 ID 格式不正确：${bad.join('、')}；支持中文/字母/数字/下划线/连字符，多个用逗号或换行分隔`)
       return false
     }
+  }
+  // 营销助手模式：环节仅支持「推荐 / 切入 / 挽留」（下游只按这三个环节取话术）。
+  // 允许留空 —— 空环节回退到推荐话术 words（见 config.json cross_sell 说明）。
+  const stageTrim = (form.stage || '').trim()
+  if (marketingAssistantMode.value && stageTrim && !STAGE_OPTIONS_MARKETING.includes(stageTrim)) {
+    ElMessage.warning(`营销助手模式的「应用环节」只能是：${STAGE_OPTIONS_MARKETING.join(' / ')}（或留空按推荐话术处理）`)
+    return false
   }
   return true
 }

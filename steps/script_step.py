@@ -39,9 +39,12 @@ from utils.config_loader import config_loader
 from utils.observability import record_stage
 from plugins.package_diff import PackageDiff
 from engine.prompt_builder import (
+    SLOT_FALLBACK_DROP,
+    SLOT_FALLBACK_PASSTHROUGH,
     VAR_LABELS,
     append_prompt_extra_suffix,
     build_prompt,
+    normalize_slot_fallback,
     resource_context_prompt_vars,
 )
 from engine.template_selector import (
@@ -94,6 +97,26 @@ def _apply_slot_facts(text: str, slot_facts: Optional[Dict[str, str]]) -> str:
     return out
 
 
+def _fill_residual_placeholders(text: str, placeholder: str) -> str:
+    """把 LLM 未填充的残留占位符替换成占位符文本（默认口径 slot_fallback.mode=passthrough）。
+
+    与 ``_strip_residual_placeholders`` 二选一：那边删子句，这边保句子只换占位符，
+    使总部与分中心模板的槽位结构对称。作为确定性兜底存在——模型即使没听 Prompt 第 2 条
+    把句子删了，这里也只能救回它留下的占位符，故 Prompt 侧口径必须同步切换。
+    """
+    if not text or "{" not in text:
+        return text
+    tokens = _RESIDUAL_PLACEHOLDER_RE.findall(text)
+    if not tokens:
+        return text
+    out = _RESIDUAL_PLACEHOLDER_RE.sub(placeholder, text)
+    logger.info(
+        f"[ScriptStep] 空槽位保留占位符({placeholder}): {tokens}"
+        f"（slot_fallback.mode={SLOT_FALLBACK_PASSTHROUGH}，由坐席对客时口头补充）"
+    )
+    return out
+
+
 def _strip_residual_placeholders(text: str) -> str:
     """清除话术中 LLM 未填充的残留占位符（生产曾把 {current_package[curOfferDesc]} 原样播给用户）。
 
@@ -132,6 +155,8 @@ class ScriptStep:
         self.max_length    = 150          # 话术最大字符数默认值（营销话术一般 150 字内；可由 biz_config.strategy.max_script_length 覆盖）
         self.field_aliases: Dict[str, List[str]] = {}   # 由 _load_biz() 从 biz_config 注入
         self._match_cfg: Dict[str, Any] = {}             # biz_config.template_match（模板匹配取值配置）
+        # biz_config.slot_fallback（空槽位口径：删句 / 保留原句填占位符）
+        self._slot_fallback: Dict[str, Any] = normalize_slot_fallback(None)
         # 以下由 _load_biz() 每次请求解析注入
         self._templates_v2: List[Dict[str, Any]] = []
         self._fallback_prompt_tpl: str = ""
@@ -168,6 +193,10 @@ class ScriptStep:
         # 未配置时行为不变（走 field_aliases.product_id / 默认别名）。
         mc = biz_config.get("template_match")
         self._match_cfg = mc if isinstance(mc, dict) else {}
+
+        # slot_fallback：槽位取不到值时的口径。默认 passthrough（照实填槽：有值原样填、
+        # 值为 0 也照实填 0、缺失或掩码则保留原句填 **）；配 drop 可回退到「空值/零值删整句」。
+        self._slot_fallback = normalize_slot_fallback(biz_config.get("slot_fallback"))
 
         # script_templates_v2：新格式（列表），支持 product_id 精确匹配 + 兜底
         self._templates_v2 = biz_config.get("script_templates_v2", [])
@@ -359,7 +388,7 @@ class ScriptStep:
                 )
                 llm_success = False
                 raw = ""
-            text = self._post_process(raw, prep.get("slot_facts"))
+            text = self._post_process(raw, prep.get("slot_facts"), self._slot_fallback)
             if not text:
                 llm_success = False
                 text = self._fallback_text(prep["pkg"], prep["diff"])
@@ -513,7 +542,7 @@ class ScriptStep:
                             f" stage={bc_stage!r} scene={tpl_scene!r} 话术生成失败: {exc}"
                         )
                         llm_success = False
-                    text = self._post_process(raw, prep.get("slot_facts"))
+                    text = self._post_process(raw, prep.get("slot_facts"), self._slot_fallback)
                     if not text:
                         llm_success = False
                         text = self._fallback_text(prep["pkg"], prep["diff"])
@@ -609,7 +638,7 @@ class ScriptStep:
                     )
                     llm_success = False
                     raw = ""
-                text = self._post_process(raw, prep.get("slot_facts"))
+                text = self._post_process(raw, prep.get("slot_facts"), self._slot_fallback)
                 if not text:
                     llm_success = False
                     text = self._fallback_text(prep["pkg"], prep["diff"])
@@ -932,6 +961,7 @@ class ScriptStep:
             max_length=self.max_length,
             slot_facts_out=slot_facts_out,
             parts_out=parts_out,
+            slot_fallback=self._slot_fallback,
         )
 
     # ── 话术后处理 ────────────────────────────────────────────────
@@ -940,11 +970,13 @@ class ScriptStep:
     def _post_process(
         text: str,
         slot_facts: Optional[Dict[str, str]] = None,
+        slot_fallback: Optional[Dict[str, Any]] = None,
     ) -> str:
         """对 LLM 输出做最终整形（Markdown/前缀清洗已在 llm_service._clean_llm_output 完成）
 
         顺序：多段落合并 → 去首尾引号 → 确定性填槽（有映射事实则强制替换，含子域）
-        → 残留占位符清理（无事实的槽）→ 无中文兜底。
+        → 残留占位符处理（无事实的槽：默认整句清理，slot_fallback=placeholder 时改填占位符）
+        → 无中文兜底。
         """
         text = (text or "").strip()
         if not text:
@@ -955,8 +987,13 @@ class ScriptStep:
         text = text.strip().strip('"""\'')
         # 1) 有映射事实的占位符（含 {域[子键]}）确定性填入，不依赖 LLM
         text = _apply_slot_facts(text, slot_facts)
-        # 2) 仍残留的占位符（映射域运行态为空）整句清理，避免花括号露给客户
-        text = _strip_residual_placeholders(text)
+        # 2) 仍残留的占位符（映射域运行态为空）：默认保留句子、只把占位符换成 **，
+        #    保证总部与分中心模板的槽位结构对称；drop 口径才整句清理
+        sf = normalize_slot_fallback(slot_fallback)
+        if sf["mode"] == SLOT_FALLBACK_DROP:
+            text = _strip_residual_placeholders(text)
+        else:
+            text = _fill_residual_placeholders(text, sf["placeholder"])
         if text and not re.search(r"[\u4e00-\u9fff]", text):
             return ""
         return text

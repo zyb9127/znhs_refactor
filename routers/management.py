@@ -1596,6 +1596,24 @@ def _clean_preview_sample(sample: Dict[str, Any]) -> Dict[str, Any]:
     return cleaned
 
 
+def _skill_slot_fallback(province: str, intent: str) -> Optional[Dict[str, Any]]:
+    """取技能包 biz_config.slot_fallback，让 Prompt 预览的空槽位口径与运行态一致
+    （否则运营在预览里看到「删句」，线上却是填占位符）。"""
+    if not province or not intent:
+        return None
+    try:
+        pkg = skill_registry.get(province, intent)
+    except Exception:
+        return None
+    if pkg is None or not isinstance(pkg.config, dict):
+        return None
+    biz = pkg.config.get("biz_config")
+    if not isinstance(biz, dict):
+        return None
+    cfg = biz.get("slot_fallback")
+    return cfg if isinstance(cfg, dict) else None
+
+
 def _build_sample_ctx_from_skill(province: str, intent: str) -> Optional[Dict[str, Any]]:
     """用技能包 api_nodes 的 mock_response 跑一遍真实映射（response_extract / field_transform），
     产出贴合该技能实际配置的 resource_context 示例，供 Prompt 预览动态填充。
@@ -1819,6 +1837,7 @@ async def preview_template_prompt(body: Dict[str, Any]):
             province=province,
             intent=intent,
             passthrough_fields=pt_fields if isinstance(pt_fields, list) else None,
+            slot_fallback=_skill_slot_fallback(province, intent),
         )
     except Exception as e:
         raise HTTPException(500, f"Prompt 预览失败: {e}")

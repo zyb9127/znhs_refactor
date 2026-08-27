@@ -11,7 +11,7 @@
     "max_retries": 3,
     "max_concurrency": 8,
     "temperature": 0.7,
-    "max_tokens": 4096
+    "max_tokens": 4080
   },
   "dashscope": {
     "_comment": "接口映射Agent / 话术生成共用的 LLM 配置。development 使用 Fireworks；gray/production/production_noauth 继续通过 env_overrides 使用内网代理。",

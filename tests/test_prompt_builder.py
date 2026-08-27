@@ -46,6 +46,7 @@ from prompt.script_generation import (
     SCRIPT_LENGTH_RULE,
     SCRIPT_OUTPUT_SUFFIX,
     SCRIPT_PERSONA_RULE,
+    build_missing_facts_tail,
 )
 
 # 依赖 ScriptStep 的格式化工具与 FlowContext/PackageDiff；
@@ -314,10 +315,8 @@ class _OraclePromptStep(ScriptStep):  # type: ignore[misc]
                 missing_block = (
                     "【缺失事实】本次未取到以下槽位的数据（映射结果为空）："
                     + "、".join(f"{_slot_label(t)}{{{t}}}" for t in _missing)
-                    + "。上述槽位没有任何可用事实：严禁编造，严禁用其他行的值代替"
-                    "——尤其不得用当前套餐或推荐套餐的包含量（套餐流量、语音额度、月费）"
-                    "冒充用户的历史使用量（月均流量、主叫时长、月均消费）；"
-                    "请在话术中整体略过相关表述，也不得保留占位符原文。"
+                    # 结尾口径随 slot_fallback 模式变化，引用常量而非冻结副本（见文件头说明）
+                    + build_missing_facts_tail()
                 )
 
             lines = [

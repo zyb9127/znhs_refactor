@@ -1,0 +1,205 @@
+{
+  "cc": {
+    "_comment": "天津·营销助手统一接口（直传透传）·营销活动。演示派生字段：按账期取当月/上月、两费求和、按金额分档选场景、账单异常提示。",
+    "url": "",
+    "method": "POST",
+    "enabled": true,
+    "source_type": "direct",
+    "request_template": {},
+    "response_extract": {},
+    "field_transform": {},
+    "mock_mode": false,
+    "mock_response": {
+      "params": {
+        "optType": "0",
+        "systemId": "NGRC",
+        "inputs": {
+          "callId": "",
+          "staffNo": "AEY00423",
+          "provinceCode": "220",
+          "touchNumber": "1564161651112154",
+          "sequenceNo": "b2763380-e2f9-4efa-9163-e5a7c424722e",
+          "staffId": "TJ00850",
+          "servNumber": "135****6367",
+          "userinfo_json": [
+            {
+              "timeType": "0",
+              "over_flow": "3",
+              "over_flow_fee": "1.5",
+              "over_voice": "0",
+              "over_voice_fee": "2",
+              "user_consume": "58",
+              "used_flow": "",
+              "total_flow": "",
+              "total_voice": "",
+              "remain_flow": "",
+              "remain_voice": ""
+            },
+            {
+              "timeType": "1",
+              "over_flow": "0",
+              "over_flow_fee": "0.2",
+              "over_voice": "0",
+              "over_voice_fee": "0.3",
+              "user_consume": "",
+              "used_flow": "",
+              "total_flow": "",
+              "total_voice": "",
+              "remain_flow": "",
+              "remain_voice": ""
+            },
+            {
+              "timeType": "2",
+              "over_flow": "0",
+              "over_flow_fee": "",
+              "over_voice": "0",
+              "over_voice_fee": "",
+              "user_consume": "",
+              "used_flow": "",
+              "total_flow": "",
+              "total_voice": "",
+              "remain_flow": "",
+              "remain_voice": ""
+            },
+            {
+              "timeType": "3",
+              "over_flow": "0",
+              "over_flow_fee": "",
+              "over_voice": "0",
+              "over_voice_fee": "",
+              "user_consume": "",
+              "used_flow": "",
+              "total_flow": "",
+              "total_voice": "",
+              "remain_flow": "",
+              "remain_voice": ""
+            }
+          ],
+          "products": [
+            {
+              "productId": "2028009",
+              "productName": "午休流量1元包",
+              "activityId": "2090717239001427971",
+              "businessType": "自有业务",
+              "activityTypeName": "营销活动",
+              "activityTypeCode": "yxhd",
+              "price": "1",
+              "marketingProductFlag": "1",
+              "marketingActivityFlag": "1"
+            }
+          ],
+          "userinfo": {
+            "currDomesticVoice": "",
+            "currDomesticTraffic": "",
+            "currPrice": "",
+            "currentPackageProductName": "",
+            "userExtra": {
+              "last3mVoiceSaturation": "14.0",
+              "last3mFlowSaturation": "73.08"
+            }
+          }
+        }
+      }
+    },
+    "direct_mode": "passthrough",
+    "passthrough_fields": [
+      "userinfo_json",
+      "userinfo_json.timeType",
+      "userinfo_json.over_flow",
+      "userinfo_json.over_flow_fee",
+      "userinfo_json.over_voice",
+      "userinfo_json.over_voice_fee",
+      "userinfo_json.user_consume",
+      "products",
+      "products.productId",
+      "products.productName",
+      "products.activityId",
+      "products.businessType",
+      "products.activityTypeName",
+      "products.activityTypeCode",
+      "products.price",
+      "products.product_desc",
+      "products.marketingActivityFlag",
+      "products.marketingProductFlag",
+      "userinfo",
+      "userinfo.currDomesticVoice",
+      "userinfo.currDomesticTraffic",
+      "userinfo.currPrice",
+      "userinfo.currentPackageProductName",
+      "userinfo.userExtra",
+      "userinfo.userExtra.last3mVoiceSaturation",
+      "userinfo.userExtra.last3mFlowSaturation"
+    ],
+    "request_variant": "marketing_assistant",
+    "created_by": "local-test",
+    "created_at": "2026-08-24 15:00:00",
+    "derived_fields": {
+      "当月资源": {
+        "type": "array_find",
+        "from": "userinfo_json",
+        "where": {
+          "timeType": "0"
+        }
+      },
+      "上月资源": {
+        "type": "array_find",
+        "from": "userinfo_json",
+        "where": {
+          "timeType": "1"
+        }
+      },
+      "超套费用合计": {
+        "type": "sum",
+        "from": [
+          "当月资源.over_flow_fee",
+          "当月资源.over_voice_fee"
+        ]
+      },
+      "推荐场景": {
+        "type": "bucket",
+        "from": "超套费用合计",
+        "rules": [
+          {
+            "lt": 1,
+            "value": "场景一"
+          },
+          {
+            "value": "场景二"
+          }
+        ]
+      },
+      "账单解释提示": {
+        "type": "bucket",
+        "rules": [
+          {
+            "when": {
+              "当月资源.over_flow_fee": {
+                "ne": 0
+              },
+              "当月资源.over_flow": {
+                "eq": 0
+              }
+            },
+            "value": "请结合账单与资源使用情况为客户解释"
+          },
+          {
+            "when": {
+              "当月资源.over_voice_fee": {
+                "ne": 0
+              },
+              "当月资源.over_voice": {
+                "eq": 0
+              }
+            },
+            "value": "请结合账单与资源使用情况为客户解释"
+          },
+          {
+            "value": ""
+          }
+        ]
+      }
+    },
+    "updated_by": "admin",
+    "updated_at": "2026-08-24 15:48:43"
+  }
+}

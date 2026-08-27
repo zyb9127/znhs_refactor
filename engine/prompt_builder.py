@@ -34,16 +34,20 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from loguru import logger
 
 from prompt.script_generation import (
+    DEFAULT_SLOT_PLACEHOLDER,
     SCRIPT_CONTEXT_HEADER,
-    SCRIPT_GEN_RULES,
     SCRIPT_MISSING_FACTS_HEAD,
-    SCRIPT_MISSING_FACTS_TAIL,
     SCRIPT_LEGACY_USER_TEMPLATE,
     SCRIPT_LENGTH_RULE,
     SCRIPT_OUTPUT_SUFFIX,
     SCRIPT_PERSONA_RULE,
     SCRIPT_SYSTEM_HEADER,
     SCRIPT_TEMPLATE_HEADER,
+    SLOT_FALLBACK_DROP,
+    SLOT_FALLBACK_PASSTHROUGH,
+    build_gen_rules,
+    build_missing_facts_tail,
+    canon_slot_fallback_mode,
 )
 from utils.field_naming import canon_key, dict_fuzzy_get
 from utils.placeholder import dig_subfield
@@ -56,6 +60,77 @@ if TYPE_CHECKING:
 # 技能包可用 biz_config.strategy.max_script_length 覆盖。此处是「调用方没给」时的兜底，
 # 预览端点同用，避免预览与运行时字数约束不一致。
 _DEFAULT_MAX_LENGTH = 150
+
+
+# ── 空槽位兜底策略（biz_config.slot_fallback）────────────────────────
+# 模式语义与规则正文同源，常量定义在 prompt.script_generation（最底层、无依赖），此处再导出。
+SLOT_FALLBACK_PLACEHOLDER = SLOT_FALLBACK_PASSTHROUGH   # 历史别名，兼容旧引用
+
+
+def normalize_slot_fallback(cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """``biz_config.slot_fallback`` → 归一化为 ``{mode, placeholder, treat_as_empty}``。
+
+    - ``mode=passthrough``（默认）：照实透传填槽。有事实就原样填（值为 0 也照实填 0）；
+      缺失 / 值为空 / 入参是掩码时保留原句，槽位处填 ``placeholder``（默认 ``**``）。
+      总部与分中心各自人工维护模板时槽位始终对称，坐席照读不会漏项或解释错位。
+      「某句无数据时干脆不说」属个性化诉求，由该模板自己的 ``script_requirement`` 表达。
+    - ``mode=drop``：旧口径，空值/零值连句子一起删。留作按技能包回退的开关。
+    - ``treat_as_empty``：入参中视为「无事实」的掩码值。分中心常直接回传 ``**`` 表示该项没值，
+      不归一的话它会被当成有效事实注入【上下文数据】（出现「月均消费：**」这类脏事实行），
+      与「不传」走两条不同路径——正是槽位不对称的来源。默认把占位符自身当掩码，
+      使「传 ``**``」与「不传」收敛到同一条缺失槽位路径，最终都呈现为 ``**``。
+      掩码只作用于**槽位取值**，不过滤 ``extra_info`` / ``extra_context`` 整包 JSON 兜底行：
+      那是未建模信息的粗粒度转储，正文里合法出现的星号不该被当成空值抹掉。
+    """
+    cfg = cfg if isinstance(cfg, dict) else {}
+    raw_mode = str(cfg.get("mode") or "").strip().lower()
+    mode = canon_slot_fallback_mode(raw_mode)
+    if raw_mode and raw_mode != mode and raw_mode not in ("placeholder",):
+        logger.warning(
+            f"[slot_fallback] 未知 mode={raw_mode!r}，已回退 {mode}"
+            f"（可选：{SLOT_FALLBACK_PASSTHROUGH} / {SLOT_FALLBACK_DROP}）"
+        )
+    placeholder = str(cfg.get("placeholder") or DEFAULT_SLOT_PLACEHOLDER).strip()
+    if not placeholder:
+        placeholder = DEFAULT_SLOT_PLACEHOLDER
+
+    raw_masks = cfg.get("treat_as_empty")
+    if isinstance(raw_masks, str):
+        raw_masks = [s for s in re.split(r"[,，]", raw_masks)]
+    if isinstance(raw_masks, (list, tuple, set)):
+        masks = {str(m).strip() for m in raw_masks if str(m).strip() != ""}
+    elif mode == SLOT_FALLBACK_PASSTHROUGH:
+        masks = {placeholder}   # 未显式配置时，至少把占位符自身当掩码
+    else:
+        masks = set()           # drop 口径不做掩码归一，与旧行为逐字节一致
+    return {"mode": mode, "placeholder": placeholder, "treat_as_empty": masks}
+
+
+def _drop_masked_values(obj: Any, masks: set) -> Any:
+    """递归剔除「值恰好等于掩码」的条目，使掩码值与字段缺失完全等价。
+
+    只比较标量整值（``strip()`` 后相等），因此正文里含星号的描述（产品卖点、备注）不会被
+    误删——掩码语义针对的是槽位取值，不是任意文本。``masks`` 为空时原样返回，零开销。
+    """
+    if not masks:
+        return obj
+    if isinstance(obj, dict):
+        out: Dict[Any, Any] = {}
+        for k, v in obj.items():
+            if isinstance(v, (dict, list)):
+                out[k] = _drop_masked_values(v, masks)
+            elif str(v).strip() not in masks:
+                out[k] = v
+        return out
+    if isinstance(obj, list):
+        kept: List[Any] = []
+        for v in obj:
+            if isinstance(v, (dict, list)):
+                kept.append(_drop_masked_values(v, masks))
+            elif str(v).strip() not in masks:
+                kept.append(v)
+        return kept
+    return obj
 
 
 # ── 变量标签单一真源 ──────────────────────────────────────────────
@@ -431,6 +506,7 @@ def build_prompt(
     max_length: int = _DEFAULT_MAX_LENGTH,
     slot_facts_out: Optional[Dict[str, str]] = None,
     parts_out: Optional[Dict[str, str]] = None,
+    slot_fallback: Optional[Dict[str, Any]] = None,
 ) -> str:
     """组装 LLM Prompt（迁移自 ScriptStep._build_prompt，逐行等价）。
 
@@ -446,12 +522,25 @@ def build_prompt(
       供 ScriptStep 在 LLM 输出后做确定性填槽（含子域 ``{域[子键]}``）。
     - ``parts_out``：若传入 dict，则写入分段结果（context_data / template /
       script_requirement / other / full），供测试页展示最终发给大模型的提示词。
+    - ``slot_fallback``：``biz_config.slot_fallback``（见 ``normalize_slot_fallback``）。
+      ``mode=placeholder`` 时取不到值的槽位不再删句，而是保留原句填占位符，且入参里的掩码值
+      （默认 ``**``）与「不传」归一处理；缺省即历史「删句」行为。
 
     优先级：
     1. 若 linked_vars 非空或存在话术模板正文 → 新格式自动构造
     2. 否则 fallback 到旧 user_prompt_tpl（向后兼容）
     """
     step = _script_step_cls()
+    sf = normalize_slot_fallback(slot_fallback)
+    _sf_masks = sf["treat_as_empty"]
+    _sf_mode, _sf_ph = sf["mode"], sf["placeholder"]
+
+    def _unmask(val: str) -> str:
+        """掩码值 → 空串：让「传 ** 」与「不传」走同一条缺失槽位路径，避免脏事实行入上下文。"""
+        if _sf_masks and str(val).strip() in _sf_masks:
+            return ""
+        return val
+
     fa = field_aliases or {}
     rp = resource_context_prompt_vars(ctx, fa)
     pkg_brief = step._fmt_recommended_product_full(pkg, fa)
@@ -462,8 +551,12 @@ def build_prompt(
 
     # 批量模式：用条目级 extra_info（已合并全局）；单条模式：用 ctx.extra_info
     effective_extra_info = extra_info_override if extra_info_override is not None else ctx.extra_info
+    # 掩码值一律先剔除，使「传掩码」与「不传」在后续所有取值路径（字段级、子字段路径、
+    # extra_info 整包兜底行）上完全等价——只在字段级 _unmask 的话，整包 JSON 兜底行会把
+    # ** 又当成事实塞回【上下文数据】，对称性就破了。
+    effective_extra_info = _drop_masked_values(effective_extra_info, _sf_masks)
     ei_txt = step._fmt_extra_for_prompt(effective_extra_info)
-    ec_txt = step._fmt_extra_for_prompt(ctx.extra_context)
+    ec_txt = step._fmt_extra_for_prompt(_drop_masked_values(ctx.extra_context, _sf_masks))
 
     fmt_vars = dict(
         intent=ctx.intent,
@@ -544,7 +637,7 @@ def build_prompt(
                 continue   # 已下线：不再向 Prompt 注入候选条数摘要（兼容旧模板 linked_vars）
             if var_key in emitted:
                 continue   # 同义组已注入（如 cur_brief 与 current_package 同时勾选时只出一行）
-            var_val = _resolve_var(var_key)
+            var_val = _unmask(_resolve_var(var_key))
             if var_val.strip() == "":
                 continue   # 空事实不展示（防止“标签：”空槽诱导编造）
             # 行首标注该事实对应的模板占位符 {anchor}，给模型精确的字符串锚点；
@@ -562,6 +655,7 @@ def build_prompt(
         # 直传透传通道：把接口配置（direct_mode=passthrough）选定的入参字段逐条注入，
         # 不依赖模板占位符风格（{xx} 或 **（xx）均可），确保【上下文数据】完整展示透传入参。
         passthrough_ctx = getattr(ctx, "passthrough_context", None) or {}
+        passthrough_ctx = _drop_masked_values(passthrough_ctx, _sf_masks)
         if isinstance(passthrough_ctx, dict):
             # 被父级大变量整块体现的子字段：如 portrait_style 已渲染成
             # 「communication_style：…；business_conte：…」，其被提升为独立透传键的同名子字段
@@ -578,7 +672,7 @@ def build_prompt(
                 if (pk in _parent_covered
                         and not (template_text and ("{" + pk + "}") in template_text)):
                     continue
-                val = _fmt_passthrough_value(pv)
+                val = _unmask(_fmt_passthrough_value(pv))
                 if val.strip() == "":
                     continue
                 label = VAR_LABELS.get(pk, pk)
@@ -599,7 +693,7 @@ def build_prompt(
                 if token in fmt_vars:
                     if token not in _INJECTABLE_KNOWN:
                         continue   # template/max_length/intent 等非事实变量不注入
-                    val = _resolve_var(token)
+                    val = _unmask(_resolve_var(token))
                     if val.strip() == "":
                         continue
                     label = _DERIVED_PKG_VAR_LABELS.get(token) or VAR_LABELS.get(token, token)
@@ -613,6 +707,7 @@ def build_prompt(
                 else:
                     # 模板直接引用推荐产品字段名（{recommend_actual_price} 等）
                     val = _pkg_own_field(pkg, token)
+                val = _unmask(val)
                 if val.strip() == "":
                     continue
                 label = VAR_LABELS.get(token, token)
@@ -658,7 +753,9 @@ def build_prompt(
                 if _root not in _subfield_roots:
                     continue
                 _keys = re.findall(r"\[([^\[\]]+)\]", _m.group(2))
-                _sval = _fmt_passthrough_value(_subfield_walk(_subfield_roots.get(_root), _keys))
+                _sval = _unmask(
+                    _fmt_passthrough_value(_subfield_walk(_subfield_roots.get(_root), _keys))
+                )
                 if _sval.strip() == "":
                     continue   # 取不到值的子字段不入 Prompt，避免模型对空槽臆造
                 _leaf_label = _keys[-1] if _keys else _root
@@ -691,7 +788,7 @@ def build_prompt(
                     continue
                 if _allow and _pk not in _allow:
                     continue
-                _pval = _pkg_own_field(pkg, _pk)
+                _pval = _unmask(_pkg_own_field(pkg, _pk))
                 if not _pval.strip():
                     continue
                 _plabel = _DERIVED_PKG_VAR_LABELS.get(_pk) or _pk
@@ -755,7 +852,7 @@ def build_prompt(
             missing_block = (
                 SCRIPT_MISSING_FACTS_HEAD
                 + "、".join(f"{_slot_label(t)}{{{t}}}" for t in _missing_slots)
-                + SCRIPT_MISSING_FACTS_TAIL
+                + build_missing_facts_tail(_sf_mode, _sf_ph)
             )
 
         # 2) 分段拼装
@@ -770,8 +867,9 @@ def build_prompt(
         if template_text:
             lines.append(SCRIPT_TEMPLATE_HEADER)
             lines.append(template_text)
-        other_parts: List[str] = [SCRIPT_SYSTEM_HEADER, SCRIPT_GEN_RULES]
-        lines.append(SCRIPT_GEN_RULES)
+        gen_rules = build_gen_rules(_sf_mode, _sf_ph)
+        other_parts: List[str] = [SCRIPT_SYSTEM_HEADER, gen_rules]
+        lines.append(gen_rules)
         # 字数规则：紧跟固定规则 1-4，排在「话术要求」之前 —— 运营在模板里写的字数要求
         # 更具体，应当能覆盖这条框架默认值（规则正文里也显式让位）
         rule_no = 5
@@ -879,6 +977,7 @@ def preview_prompt(
     province: str = "",
     intent: str = "",
     passthrough_fields: Optional[List[str]] = None,
+    slot_fallback: Optional[Dict[str, Any]] = None,
 ) -> str:
     """用示例数据预览单条模板最终发给 LLM 的 Prompt（与运行态 build_prompt 同一条路径）。
 
@@ -891,6 +990,7 @@ def preview_prompt(
                   extra_context / field_aliases / max_length / phone）
         province: 省份（缺省取模板 province 字段）
         intent:   意图（缺省取模板 intent 字段，再缺省用示例意图）
+        slot_fallback: 技能包 biz_config.slot_fallback，使预览的空槽位口径与运行态一致
 
     Returns:
         组装好的 Prompt 文本
@@ -998,6 +1098,7 @@ def preview_prompt(
         script_requirement=tpl_script_req,
         field_aliases=data.get("field_aliases") or {},
         max_length=max_length,
+        slot_fallback=slot_fallback,
     )
 
 

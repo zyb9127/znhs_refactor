@@ -126,7 +126,14 @@ Step 实例按 `province:intent` 维度缓存（`StepBundle`），同省同意�
 
 **触发条件**：当 `/Users/zyb/Documents/python/` 下出现新的 `znhs_refactor*.zip` 压缩包时，执行以下流程。
 
-**原则**：Git 管理自定义修改，新包为唯一真实来源，直接全覆盖。
+**原则**：Git 管理自定义修改，新包覆盖项目代码和技能包，但保留本地自定义的 Agent 配置与模型输出上限。
+
+**必须保留的本地自定义项**：
+
+- `config/agents_config.json` 使用 Git 中咱们自己的版本，新包不得覆盖；
+- `llm_gateway.max_tokens` 必须为 `4080`；
+- `steps/script_step.py` 的 `_generate_llm()` 两条调用路径中的 `max_tokens` 必须为 `4080`，不能恢复成新包里的 `300`；
+- `dashscope.max_tokens` 当前保持 `8192`，除非用户另行指定。
 
 ### 替换步骤
 
@@ -141,6 +148,7 @@ unzip -o "/Users/zyb/Documents/python/znhs_refactor(最新版).zip" -d /tmp/znhs
 rsync -av \
   --exclude='__MACOSX' --exclude='.DS_Store' --exclude='__pycache__' \
   --exclude='*.pyc' --exclude='node_modules' --exclude='logs' \
+  --exclude='config/agents_config.json' \
   /tmp/znhs_extract/znhs_refactor/ /Users/zyb/Documents/python/znhs_refactor/
 
 # 4. 修改 config/config.json 为本地开发环境：
@@ -150,6 +158,11 @@ rsync -av \
 #    - elasticsearch.password → ""
 #    - redis_bus.cluster_nodes → []
 #    - redis_bus.password → ""
+
+# 5. 新包覆盖后检查并恢复本地自定义模型配置：
+#    - config/agents_config.json 不得被替换，llm_gateway.max_tokens → 4080
+#    - steps/script_step.py 中 _generate_llm() 的两处 max_tokens → 4080（新包常见值为 300）
+#    - dashscope.max_tokens 保持 8192
 ```
 
 ### 启动步骤

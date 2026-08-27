@@ -14,7 +14,9 @@
       ],
       "script_requirement": "结合【上下文数据】中的当前套餐、历史用量与用户标签，先点出最突出的用户痛点，再用推荐套餐对应字段的真实值说明如何解决；只讲有数据支撑的卖点，口语化、可直接对客播报，150字以内，结尾自然引导办理。",
       "prompt_template": "",
-      "linked_apis": [],
+      "linked_apis": [
+        "cc"
+      ],
       "status": "online",
       "created_by": "admin",
       "template_id": "tpl_shandong_1784256818309_521ddb",

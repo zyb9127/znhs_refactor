@@ -18,6 +18,10 @@ DataStep — Step1: 数据采集
   "api"（默认）  接口查询模式 — 调外部 HTTP 接口，响应作为映射数据源
   "direct"       直传模式 — 不调接口，主服务入参 extra_info 作为映射数据源，
                  复用同一套 response_extract + field_transform 写入 7 大标准域
+
+派生字段（derived_fields，仅直传透传子模式）：
+  在透传字段之上再算一层 —— 数组按条件选元素 / 多路径求和 / 阈值分档，
+  产出值以普通透传字段身份注入【上下文数据】。见 plugins/derived_fields.py。
 """
 from __future__ import annotations
 
@@ -31,6 +35,7 @@ from typing import Any, Callable, Dict, List, Optional
 from loguru import logger
 
 from core.context import FlowContext
+from plugins.derived_fields import compute_derived_fields
 from plugins.unit_converter import UnitConverterRegistry
 from services.api_client import api_client
 from services.cache_service import cache_service
@@ -551,6 +556,25 @@ class DataStep:
                                 and cv not in (None, "", [], {})
                                 and ck not in _NODE_TO_CTX_FIELD):
                             passthrough.setdefault(ck, cv)
+                # 派生字段：在入参之上再算一层（数组按条件选元素 / 多路径求和 / 阈值分档），
+                # 结果与普通透传字段同权注入【上下文数据】，可用 {派生名}、{派生名[子键]} 引用，
+                # 也可被 biz_config.template_match.*_from 当作取值字段消费。
+                # 放在透传字段收集之后：派生名与入参重名时以派生配置为准（显式配置意图优先）。
+                for dk, dv in compute_derived_fields(
+                    raw, api_cfg.get("derived_fields")
+                ).items():
+                    if dk in _NODE_TO_CTX_FIELD:
+                        logger.warning(
+                            f"[DataStep] 直传节点 {api_name} 派生字段 {dk!r} 与标准域同名，"
+                            f"已跳过（请改名，标准域只走 resources 通道）"
+                        )
+                        continue
+                    if dk in passthrough:
+                        logger.warning(
+                            f"[DataStep] 直传节点 {api_name} 派生字段 {dk!r} 与透传入参同名，"
+                            f"已按派生值覆盖（如非预期请给派生字段改名）"
+                        )
+                    passthrough[dk] = dv
                 logger.info(
                     f"[DataStep] 直传节点 {api_name} 透传模式：同名域={list(resources.keys())}，"
                     f"透传字段={list(passthrough.keys())}"

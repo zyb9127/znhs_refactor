@@ -122,6 +122,62 @@ class TestPayloadDetection(unittest.TestCase):
             )
 
 
+class TestPhoneResolution(unittest.TestCase):
+    """手机号多位置兜底：顶层 servNumber 缺失时仍能从 userinfo.userExtra 取到。
+
+    背景（生产事故）：某批报文顶层不带 ``servNumber``，号码只在
+    ``userinfo.userExtra.servNumber`` 里。当时只认顶层，``req.phone`` 为空，
+    入口校验以「servNumber 为空」直接拒收整单（rtnCode=9999），话术根本不会生成。
+    """
+
+    def test_top_level_takes_priority(self):
+        raw = _payload()
+        raw["params"]["inputs"]["userinfo"]["userExtra"]["servNumber"] = "13900139000"
+        self.assertEqual(ma.parse(raw).phone, "13800138000")
+
+    def test_falls_back_to_user_extra(self):
+        raw = _payload()
+        del raw["params"]["inputs"]["servNumber"]
+        raw["params"]["inputs"]["userinfo"]["userExtra"]["servNumber"] = "135****6367"
+        self.assertEqual(ma.parse(raw).phone, "135****6367")
+
+    def test_falls_back_to_userinfo(self):
+        raw = _payload()
+        del raw["params"]["inputs"]["servNumber"]
+        raw["params"]["inputs"]["userinfo"]["servNumber"] = "13700137000"
+        self.assertEqual(ma.parse(raw).phone, "13700137000")
+
+    def test_blank_top_level_falls_through(self):
+        """顶层是空串（而非缺键）时也要继续往下找，不能就此判空。"""
+        raw = _payload()
+        raw["params"]["inputs"]["servNumber"] = "   "
+        raw["params"]["inputs"]["userinfo"]["userExtra"]["servNumber"] = "135****6367"
+        self.assertEqual(ma.parse(raw).phone, "135****6367")
+
+    def test_no_phone_anywhere_stays_empty(self):
+        raw = _payload()
+        del raw["params"]["inputs"]["servNumber"]
+        self.assertEqual(ma.parse(raw).phone, "")
+
+    def test_detected_when_only_nested_phone_present(self):
+        """只靠嵌套号码也要能认出是营销助手报文（否则会以「不符合规范」拒收）。"""
+        raw = {"inputs": {
+            "provinceCode": "220",
+            "userinfo": {"userExtra": {"servNumber": "135****6367"}},
+        }}
+        self.assertTrue(ma.is_marketing_assistant_payload(raw))
+        self.assertEqual(ma.parse(raw).phone, "135****6367")
+
+    def test_callback_value_uses_resolved_phone(self):
+        """回调 value 的 servNumber 与 Redis key 都用兜底取到的号码。"""
+        raw = _payload()
+        del raw["params"]["inputs"]["servNumber"]
+        raw["params"]["inputs"]["userinfo"]["userExtra"]["servNumber"] = "135****6367"
+        req = ma.parse(raw)
+        value = ma.build_callback_value(req, [])
+        self.assertEqual(value["servNumber"], "135****6367")
+
+
 class TestExtraInfoNormalization(unittest.TestCase):
     """入参零改名：业务对象名/层级完全以灵运报文原文为准，只剥传输层。"""
 

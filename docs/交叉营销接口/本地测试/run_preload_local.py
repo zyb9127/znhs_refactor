@@ -39,8 +39,8 @@ async def _main(payload_path: Path) -> int:
 
     captured: dict = {}
 
-    async def _capture_push(*, call_id, phone, value, identifier="hs", trace_id="", **_):
-        captured["call_id"] = call_id
+    async def _capture_push(*, touch_number, phone, value, identifier="hs", trace_id="", **_):
+        captured["touch_number"] = touch_number
         captured["phone"] = phone
         captured["identifier"] = identifier
         captured["value"] = value

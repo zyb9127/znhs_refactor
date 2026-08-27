@@ -72,6 +72,16 @@ _META_KEYS = frozenset({
 # 标准接口特征键：出现即判定为标准报文，绝不按营销助手解析
 _STANDARD_MARKERS = frozenset({"phone", "intent", "province", "extra_info"})
 
+# 手机号（servNumber）在 inputs 下的候选位置，按优先级取第一个非空值。
+# 网关早期报文放在 inputs 顶层；也存在只在 userinfo.userExtra 里带号码、顶层不带的报文
+# （此时若只认顶层，入口校验会以「servNumber 为空」整单拒收，话术根本不会生成），
+# 故两处都要认。新增位置只在前序取不到时才生效，老报文行为不变。
+_PHONE_PATHS: tuple[tuple[str, ...], ...] = (
+    ("servNumber",),
+    ("userinfo", "userExtra", "servNumber"),
+    ("userinfo", "servNumber"),
+)
+
 
 @dataclass
 class MarketingAssistantRequest:
@@ -118,7 +128,8 @@ def _envelope(raw: Any) -> Optional[Dict[str, Any]]:
     非营销助手报文返回 None。判定要求同时满足：
     - 该层没有标准接口特征键（phone/intent/province/extra_info）；
     - ``inputs`` 是非空 dict；
-    - 该层带 systemId/optType，或 inputs 里带 servNumber/sequenceNo。
+    - 该层带 systemId/optType，或 inputs 里带 sequenceNo / 任一位置的 servNumber
+      （见 :data:`_PHONE_PATHS`，顶层不带号码、只在 userinfo.userExtra 里带的报文也要认）。
     """
     if not isinstance(raw, dict) or not raw:
         return None
@@ -133,8 +144,10 @@ def _envelope(raw: Any) -> Optional[Dict[str, Any]]:
         inputs = cur.get("inputs")
         if not isinstance(inputs, dict) or not inputs:
             continue
-        if ({"systemId", "optType"} & set(cur.keys())) or (
-            {"servNumber", "sequenceNo"} & set(inputs.keys())
+        if (
+            ({"systemId", "optType"} & set(cur.keys()))
+            or ("sequenceNo" in inputs)
+            or resolve_phone(inputs)
         ):
             return cur
     return None
@@ -292,6 +305,31 @@ def looks_like_marketing_products(value: Any) -> bool:
     return False
 
 
+def _dig(obj: Any, path: tuple[str, ...]) -> Any:
+    """按固定键路径逐层取值，中途遇到非 dict 或缺键即返回 None。"""
+    cur = obj
+    for key in path:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(key)
+    return cur
+
+
+def resolve_phone(inputs: Any) -> str:
+    """从 ``inputs`` 取手机号，按 :data:`_PHONE_PATHS` 顺序兜底。
+
+    手机号既是入口校验项，也是回调 Redis key 的一部分（``preload:{servNumber}:…``），
+    取不到就整单拒收，因此这里要覆盖报文里所有可能的位置，而不是只认顶层。
+    """
+    if not isinstance(inputs, dict):
+        return ""
+    for path in _PHONE_PATHS:
+        val = str(_dig(inputs, path) or "").strip()
+        if val:
+            return val
+    return ""
+
+
 def parse(raw: Any) -> Optional[MarketingAssistantRequest]:
     """解析营销助手报文；不是该形状返回 None。"""
     envelope = _envelope(raw)
@@ -303,7 +341,7 @@ def parse(raw: Any) -> Optional[MarketingAssistantRequest]:
         system_id=str(envelope.get("systemId") or "").strip(),
         opt_types=_parse_opt_types(envelope.get("optType")),
         sequence_no=str(inputs.get("sequenceNo") or "").strip(),
-        phone=str(inputs.get("servNumber") or "").strip(),
+        phone=resolve_phone(inputs),
         province_code=str(inputs.get("provinceCode") or "").strip(),
         call_id=str(inputs.get("callId") or "").strip(),
         staff_id=str(inputs.get("staffId") or "").strip(),

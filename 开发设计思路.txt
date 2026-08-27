@@ -2875,3 +2875,996 @@ skill测试页面，如果是营销助手接口模式的，测试页面也需要
     }
   }
 }
+
+
+
+山东的优化话术生成需求：
+1、因为底层模板是分别在分中心和中心人工维护的，为了避免后续槽位出现不对称造成员工解释差错，建议我们槽位传**或不传时，总部槽位模板都展示**；
+2、就是说针对山东：就是参数传**，就用**填槽
+
+所以需要根据山东的这个诉求，分析如何提供通用的前端和后端功能，可以针对如果入参是** 或者为空，都**填槽，并这个逻辑可设置；
+
+
+同时，如果在如果需要针对**或者空的入参，这句话不说，这个需要在话术要求里面加提示词；
+
+
+【实现】空槽位口径开关 biz_config.slot_fallback
+
+⚠️ 本节记录的是初版设计（默认 drop、山东按技能包开占位符）。默认口径已在下一节
+「口径反转：默认从『删句』改为『照实透传填槽』」中整体翻转，零值口径也一并翻转。
+本节保留作为问题根因与三层改造思路的说明，读默认值/零值口径请以下一节为准。
+
+配置项（技能包级，前端「模板匹配与填槽设置 → 高级设置 → 兜底也取不到值时，这个槽位怎么办」可配）：
+  {"mode": "passthrough|drop", "placeholder": "**", "treat_as_empty": ["**", ...]}
+  - mode=passthrough：现默认值，保留整句、槽位处填占位符（默认 **），总部与分中心模板槽位对称。
+    （初版名为 placeholder，仍作历史别名接受。）
+  - mode=drop：旧行为，槽位取不到值就删掉整句；现需显式落库才生效。
+  - treat_as_empty：入参中视为「没取到值」的掩码值；passthrough 未显式配置时默认为占位符自身。
+
+改造前的问题不是「不支持填 **」，而是**两条路径不对称**（山东反馈的根因）：
+  - 字段不传 → 三层都在删：prompt_builder 空值 continue 不进上下文、生成规则第 2 条要求删整句、
+    script_step._strip_residual_placeholders 再删含占位符的子句；
+  - 分中心传字面 ** → 被当成有效事实，既进【上下文数据】（出现「月均消费：**」脏事实行），
+    又被确定性填槽填回话术。
+  故 placeholder 模式先把掩码值归一成「缺失」（_drop_masked_values + 各取值点 _unmask），
+  让「传 **」与「不传」收敛到同一条路径，再统一决定呈现方式。
+
+三层改动：
+  1. engine/prompt_builder.py：normalize_slot_fallback / _drop_masked_values；掩码值不入上下文；
+     缺失事实文案与生成规则按模式切换。掩码只比标量整值，正文里含星号的描述不受影响；
+     extra_info/extra_context 整包 JSON 兜底行同样过滤，否则对称性会被这行破坏。
+  2. prompt/script_generation.py：规则拆成片段，drop/placeholder 复用同一批防编造/防串填条文，
+     只替换「空槽位怎么办」及第 3、4 条对它的交叉引用（SCRIPT_GEN_RULES 拼装结果与拆分前逐字节一致）。
+  3. steps/script_step.py：_fill_residual_placeholders 作为确定性兜底，模型没填的 {槽位} 换成 **
+     而非删子句；有映射事实的槽位仍优先填真值。
+
+两个口径边界（有意为之）：
+  - 值确实是 0（0元/0分钟/0GB）仍按原口径略过整句，不填 **：零值是真事实，写成 ** 会诱导坐席补错数字。
+    【已废止】下一节把零值改为照实填 0（仍是真事实，但改为原样播报而非略过）；此口径现仅存于 drop 模式。
+  - 某些分中心宁可不说：在**那条模板自己的「话术要求」**里写提示词（如「月均消费、流量无数据时
+    不要提这两句，直接讲推荐产品」），规则第 2 条显式让位于【话术要求】（与字数规则让位于
+    【话术要求】的既有约定一致）。略过范围由话术要求自述，可为一句/连续几句/一整段。
+    因 script_requirement 是模板级字段，而各分中心各自维护自己的模板行，故同省不同分中心
+    对同一槽位可以有相反口径，无需再加省下一级的配置维度。
+    注意这条覆盖是**提示词级**（模型遵从），不像全局开关那样确定性：模型万一没删句、把占位符
+    留在了输出里，层3 仍会填成 **。这是有意的降级方向——填 ** 比把 {avg_consume} 播给客户安全。
+
+预览一致性：/api/templates/preview_prompt 读取该技能包的 slot_fallback，避免运营在预览里
+看到「删句」而线上是填占位符。
+
+测试：tests/test_slot_fallback.py（含「传 ** 与不传必须生成完全一致的 Prompt」的对称性断言）。
+
+
+
+
+默认提示词需要优化：
+2. 空值/零值必须略过（本条优先于第 3 条）：某 {占位符} 缺失、无对应行，或其对应行的值为 0、0元、0分钟、0个月、0GB、“无”、“—” 等空/零值时，一律视为该项无有效内容，必须整体删除包含该占位符的那句话/短语，严禁说出“0元/0分钟/0个月/0GB”这类表述，也不得改用其他字段的值顶替（例如语音为 0 则不谈语音、不说“0分钟”；优惠月数为 0 则表述为“连续包月”而非“连续 0 个月”）；若整句仅剩该项则删除整句。严禁把占位符原文（如 {current_package}）留在输出中。
+3. 占位符一一对应：【上下文数据】每行已用 {占位符} 标注槽位，请将【话术模板】中出现的同名 {占位符} 替换为该行冒号后的事实值（含 {域[子键]} 子字段占位符，须整串同名精确对应，不得拆开或改名）；有对应行且其值有效（非空、非 0，见第 2 条）则必须填入该行的值，不得留空或改用其他行；若该行的值为空/零值，则按第 2 条略过整句、不得填 0。严禁串填：{current_package}/{current_package[…]} 只用当前套餐行，{pkg_brief}/{pkg_name}/{recommended_package} 只用推荐产品行，不得用推荐套餐名/资费冒充当前套餐，也不得用套餐内包含量（套餐流量/语音额度/月费）冒充历史使用量（月均流量/主叫时长/月均消费），反之亦然；若该行事实包含多个指标（如历史用量、用户标签），不得原样罗列、也不得因内容多而整体略过该槽位，应提炼其中最能支撑推荐理由的 1-3 个要点，口语化融入话术（如“您月均流量已达37GB、接近饱和”）。
+
+
+针对**/空值/零值，默认都是透传填槽，**填**，空值填槽**,零值就填 0；
+
+针对个性化要求，需要在话术要求中自行编辑；
+
+请优化前端和后端。
+
+──────────────────────────────────────────────────────────────────────
+【实现】口径反转：默认从「删句」改为「照实透传填槽」
+──────────────────────────────────────────────────────────────────────
+上一轮的实现是「默认删句、山东按技能包开占位符开关」，本轮按上述要求整体反转为
+平台默认照实填槽，且零值口径同时翻转。核心思路：平台只负责忠实填槽，不替业务判断
+「这句该不该说」；要个性化省略，由那条模板自己的【话术要求】表达。
+
+一、默认口径（mode=passthrough，无需任何配置，全省生效）
+  入参 **   → 输出 **      （掩码归一成「无事实」，再由占位符兜底填回 **）
+  入参 空   → 输出 **      （与传 ** 走同一条路径，产出逐字节一致）
+  入参 0    → 输出 0       （0 是真事实，照实播报「0元」「0GB」）
+  一律不删句：保留模板原句结构，总部与分中心各自人工维护的模板槽位始终对称，
+  坐席照读不会漏项或解释错位。
+
+二、与上一轮实现的差异（本轮改动点）
+  1. 默认值翻转：normalize_slot_fallback 缺省 mode 由 drop 改为 passthrough，
+     缺省 treat_as_empty 由空集改为 {占位符}，即所有省份默认都做掩码归一。
+  2. 零值口径翻转（关键）：上一轮两种模式下零值都「略过整句」，理由是写成 ** 会诱导
+     坐席补错数字；本轮改为照实填 0。默认规则里原有的「严禁说出 0元/0分钟/0个月/0GB」
+     负向约束已移除（留在 drop 口径里），否则会与「照实说 0」自相矛盾。
+     ⚠️ 生产风险：模板若写成「含{pkg_voice}分钟通话」，语音为 0 时会播报「含0分钟通话」；
+     「优惠{n}个月」为 0 时会播报「优惠0个月」。这类句子须由运营在该模板的【话术要求】里
+     写明省略规则（见第四点），或该省整体回退 drop。
+  3. mode 命名：canonical 名由 placeholder 改为 passthrough（覆盖了「0 照实填」语义）；
+     placeholder 作为历史别名继续接受，已落库的配置不会失效。
+  4. 模式常量下沉到 prompt/script_generation.py（最底层、无依赖），engine/prompt_builder.py
+     再导出 SLOT_FALLBACK_PLACEHOLDER 别名，避免规则正文与模式判定两处分叉。
+  5. build_gen_rules / build_missing_facts_tail 签名由 (placeholder) 改为 (mode, placeholder)
+     —— 原来用「placeholder 为空串」表示 drop，默认翻转后这个约定会反直觉。
+     SCRIPT_GEN_RULES 现在等于 build_gen_rules() 的结果（= passthrough 正文）。
+
+三、三层落点（与上一轮相同，只是默认分支互换）
+  层1 prompt_builder：掩码值在六处取值点 + extra_info/extra_context/passthrough 整包
+      兜底行上一律归一成空，使「传 **」与「不传」完全等价；规则正文与【缺失事实】
+      结尾按 mode 选择。
+  层2 script_generation：规则片段化，只有「取不到值 / 值为 0 时怎么办」随 mode 变化，
+      防编造、防串填、模板为主体框架等条文共用一份（测试断言两种口径复用同一批片段）。
+  层3 script_step._post_process：默认把残留占位符换成 **（保句），drop 才删子句。
+      这是确定性兜底 —— 模型即使没听规则第 2 条把句子删了，这里也只能救回它留下的
+      占位符，故层2 与层3 的口径必须同步切换。
+
+四、个性化省略：写在该模板的【话术要求】里
+  规则第 2 条显式让位：「若下方【话术要求】明确指出某项无数据（或为 0）时不要提及，
+  则该项以【话术要求】为准，按其所述范围整体略过（可为一句、连续几句或一整段）」。
+  例：「月均消费、流量无数据或为 0 时不要提这两句，直接讲推荐产品」。
+  因此同省不同分中心的模板可以有相反口径，无需为此改技能包配置。
+
+五、回退开关（mode=drop）：后端保留，前端不暴露
+  用途：某省话术已按旧口径调优过、或上线后发现「0分钟」类表述不可接受时，按技能包
+  快速回滚，不必改代码发版。设置方式 PUT /api/skills/{province}/{intent}/biz_config
+  写入 {"slot_fallback": {"mode": "drop"}}，或经技能包导入带入。
+
+  为什么不放在话术编辑页面（原「兜底也取不到值时，这个槽位怎么办」面板已删除）：
+  1. 三个控件对运营都不是可决策项 —— 翻转后 passthrough 对所有省都正确，drop 只是工程
+     回退杆；占位符山东要的就是 **，且改它会连带变成默认掩码（运营无法预期的副作用）；
+     treat_as_empty 是上游入参质量规则，与话术无关。
+  2. 粒度错配且有误伤：该配置是**技能包级**的，运营编辑一条模板却会改掉该省所有模板的
+     行为。而运营真正的诉求「这句没数据时别说」是**模板级**的，已由该模板自己的
+     script_requirement 承载（规则第 2 条显式让位），粒度才对得上。
+  3. 面板需要 5 行提示文字才能解释清楚，其中 2 行还在引导「你应该去话术要求里写」——
+     这本身就是控件放错位置的信号。且它嵌在 :open="hasCustomMatch" 的高级设置里，
+     只要该技能包配过空域兜底就会自动展开，「藏起来」并未生效。
+  4. 标题级联「空域兜底」→「兜底也取不到值时…」形成"兜底的兜底"，加重理解成本。
+
+  删除后的两处补偿（避免信息丢失）：
+  - TemplateEditDialog ④ 话术要求 的说明里写明当前默认口径（有值原样填 / 0 照实说 /
+    取不到值填 **），并给出「宁可不说」的写法示例 —— 运营在真正能决策的地方看到它。
+  - 技能包若已配 drop，话术编辑页显示只读告警条 + 摘要行标注「空槽位：删掉整句（旧口径）」。
+    默认口径不进摘要（不可编辑时说它只是噪音），只暴露例外。
+
+  实现注意（易踩）：本页面不编辑该配置，但**绝不能在保存时删它**。
+  Mode A 的 saveMatchSettings 是「GET 服务端权威 biz_config → 改 template_match → PUT」，
+  若沿用 `if (cfg) biz.slot_fallback = cfg; else delete biz.slot_fallback` 的写法，
+  一旦父组件 modelValue 不含该字段，运营保存一次话术模板就会把某省的 drop 配置静默擦掉。
+  现改为整段不碰（GET 到的原值随 PUT 回去）；Mode B 从零重建 biz_config，则按 field_aliases
+  的既有写法从 props 原样带回，避免丢掉导入的技能包配置。
+
+六、验证
+  后端 441 用例全绿；tests/test_slot_fallback.py 30 条覆盖默认值、零值照实填、掩码
+  与不传的对称性、drop 完整回退、历史别名兼容、片段复用。前端构建通过。
+  端到端实测（入参 **/空/0，模拟大模型完全未填的最坏情况）：
+    默认口径：推荐5G畅享，月费**元，优惠**元，语音0分钟。
+    drop口径：推荐5G畅享，月费**元，语音0分钟。
+  注：test_prompt_builder.py 的 oracle 原先把【缺失事实】结尾文案写成了字面量副本，
+  与该文件「引用规则常量而非冻结副本」的约定不一致，默认口径一翻就会假失败，已改为
+  引用 build_missing_facts_tail()。
+
+
+
+话术模板编辑图中的UI 需有优化
+一、产品1D
+名称改成：话术匹配ID
+
+二、应用环节
+1、需要补充挽留环节
+2、同时，对于营销助手接口模式，匹配环节只保留三个环节，推荐、切入、挽留三个环节，其他的暂时不需要；因为营销助手模式下返回的时候，是按照 3 个环节返回话术的；
+
+请优化
+
+──────────────────────────────────────────────────────────────────────
+【实现】话术模板编辑弹窗 UI 优化（frontend/src/components/TemplateEditDialog.vue）
+──────────────────────────────────────────────────────────────────────
+一、「产品 ID」标签改名为「话术匹配 ID」（已全站统一）
+  语义上它本就是「用来匹配话术模板的 ID」——营销助手模式下还能填业务类型 / 产品名称
+  （精确优先命中，见 productIdHint），叫「产品 ID」偏窄。改动点：
+  - TemplateEditDialog：多产品 / 单产品两处表单 label、格式校验提示文案。
+  - SkillConfigEditor：模板列表表头列、筛选框 placeholder、CSV 列标签、CSV 下载模板表头。
+  CSV 兼容性：导入是「按列序解析 + _looksLikeHeader 跳过表头行」，改列名不影响；旧 CSV
+  用「产品ID」表头仍能识别（marker 列表保留 '产品id' 并新增 '话术匹配'）。
+  未改：帮助面板讲匹配逻辑的正文、字段选择里「产品 ID：模板匹配首选维度」这类 tip —— 那里
+  说的是匹配维度而非列名，保留「产品 ID」更准确。
+
+二、应用环节下拉候选按接口模式区分（原为固定 4 项写死常量 STAGE_OPTIONS）
+  - 营销助手模式（STAGE_OPTIONS_MARKETING）：仅「推荐环节 / 切入环节 / 挽留环节」。
+    依据：营销助手模式下平台只按这三个环节回话术（words / aiPitchMarketingDesc /
+    aiRetentionMarketingDesc，见 config.json cross_sell.recommend_stage/pitch_stage/
+    retention_stage 与 utils/marketing_assistant.py），配其它环节不会被下游取用。
+  - 其它接口模式（STAGE_OPTIONS_FULL）：切入 / 推荐 / 挽留 / 异议处理 / 促成成交
+    （在原 4 项基础上补了「挽留环节」）。
+  实现：STAGE_OPTIONS 常量拆成上述两份基础列表 + stageOptions 计算属性随
+  marketingAssistantMode 切换；stageSuggest 与提示文案 stageHint 同步走计算属性。
+  下拉收窄之外，营销助手模式保存时**硬校验**环节只能是这三个之一（validateBeforeSave），
+  但**允许留空** —— 空环节回退到推荐话术 words（见 config.json cross_sell 说明），
+  且不影响非营销助手模式（那里仍可自由输入完整销售链路环节，不卡历史遗留模板）。
+
+  后端无需改：三环节候选早已在 config.json 配好、resolve_stage_names / build_batch_contexts
+  按「技能包模板里实际存在的环节」命中，本次只是让前端下拉与之对齐。
+
+
+
+
+
+
+  天津的新需求
+  1、天津是营销助手模式；
+  2、入参样例如下：
+   userinfo_json是数组，timeType//0-当月、1-上月、2-上上月、3-上上上月；
+  {
+    "params": {
+        "optType": "0,1",
+        "systemId": "NGRC",
+        "inputs": {
+            "callId": "",
+            "staffNo": "AEY00423",
+            "cancel_activity_3m_list": [],
+            "provinceCode": "220",
+            "userinfo_json": [
+                {
+                    "over_flow_fee": "",
+                    "used_flow": "",
+                    "over_flow": "0",
+                    "total_flow": "",
+                    "over_voice": "0",
+                    "timeType": "0",
+                    "total_voice": "",
+                    "over_voice_fee": "",
+                    "user_consume": "",
+                    "used_cmn_flow": "",
+                    "used_voice": "",
+                    "over_cmn_flow": "",
+                    "remain_flow": "",
+                    "total_cmn_flow": "",
+                    "remain_cmn_flow": "",
+                    "remain_voice": ""
+                },
+                {
+                    "over_flow_fee": "",
+                    "used_flow": "",
+                    "over_flow": "0",
+                    "total_flow": "",
+                    "over_voice": "0",
+                    "timeType": "3",
+                    "total_voice": "",
+                    "over_voice_fee": "",
+                    "user_consume": "",
+                    "used_cmn_flow": "",
+                    "used_voice": "",
+                    "over_cmn_flow": "",
+                    "remain_flow": "",
+                    "total_cmn_flow": "",
+                    "remain_cmn_flow": "",
+                    "remain_voice": ""
+                },
+                {
+                    "over_flow_fee": "",
+                    "used_flow": "",
+                    "over_flow": "0",
+                    "total_flow": "",
+                    "over_voice": "0",
+                    "timeType": "1",
+                    "total_voice": "",
+                    "over_voice_fee": "",
+                    "user_consume": "",
+                    "used_cmn_flow": "",
+                    "used_voice": "",
+                    "over_cmn_flow": "",
+                    "remain_flow": "",
+                    "total_cmn_flow": "",
+                    "remain_cmn_flow": "",
+                    "remain_voice": ""
+                },
+                {
+                    "over_flow_fee": "",
+                    "used_flow": "",
+                    "over_flow": "0",
+                    "total_flow": "",
+                    "over_voice": "0",
+                    "timeType": "2",
+                    "total_voice": "",
+                    "over_voice_fee": "",
+                    "user_consume": "",
+                    "used_cmn_flow": "",
+                    "used_voice": "",
+                    "over_cmn_flow": "",
+                    "remain_flow": "",
+                    "total_cmn_flow": "",
+                    "remain_cmn_flow": "",
+                    "remain_voice": ""
+                }
+            ],
+            "products": [
+                {
+                    "voice": "",
+                    "gift_cmn_flow": "0",
+                    "productId": "2284056",
+                    "discount_price": "",
+                    "activityTypeName": "",
+                    "productName": "流量日包1GB版【2284056】",
+                    "direct_flow": "",
+                    "product_desc": "【同屏卡片】提醒您一下业务关键信息：流量日包，套餐费3元,包含1GB国内通用流量,订购后立即生效，费用一次性收取，流量自生效时刻起24小时内有效,流量使用完毕或时间到达后均失效。流量不可转赠、不可结转，不可共享，可重复订购，叠加生效，套餐订购次数不限，超出流量后按照原套外标准执行。办理成功后会下发提醒短信。我现在为您下发订购确认短信，请您查收10086或10085开头的短信，同意办理直接回复1即可，请您不要挂机，持机回复。",
+                    "activityId": "2083122460714274821",
+                    "product_attr": "",
+                    "price": "",
+                    "broadband": "",
+                    "activityTypeCode": "",
+                    "Cmn_flow": "",
+                    "businessType": "自有业务"
+                },
+                {
+                    "activityId": "2090717239001427971",
+                    "productId": "2116404",
+                    "activityTypeName": "",
+                    "marketingActivityFlag": "1",
+                    "activityTypeCode": "",
+                    "marketingProductFlag": "1"
+                },
+                {
+                    "voice": "",
+                    "gift_cmn_flow": "0",
+                    "productId": "2828024",
+                    "discount_price": "",
+                    "activityTypeName": "",
+                    "productName": "【2828024】移动优选PLUS会员（存量版）99元档年包",
+                    "direct_flow": "",
+                    "product_desc": "【同屏卡片】提醒您一下业务关键信息：移动优选PLUS会员（存量版）99元档年包：99元/年，办理立即生效，有效期12个月，到期自动取消，有效期内享有以旧换新优惠、守机宝年度保障（本权益将在第8日0时提供服务）、还可享受5G手机系统升级、免费清洗等到厅尊享服务。移动优选PLUS会员服务详情及使用规则请关注“移动优选会员”小程序。办理本产品时话费实时余额（不含赠送话费）需大于产品功能费方可办理。办理成功后会下发提醒短信。我现在为您下发订购确认短信，请您查收10086或10085的短信，请按照短信内提示的数字回复，请您不要挂机，持机回复。",
+                    "activityId": "20263316624694",
+                    "product_attr": "",
+                    "price": "99",
+                    "broadband": "",
+                    "activityTypeCode": "",
+                    "Cmn_flow": "",
+                    "businessType": "自有业务"
+                }
+            ],
+            "touchNumber": "1564161651112154",
+            "sequenceNo": "b2763380-e2f9-4efa-9163-e5a7c424722e",
+            "ordered_activity_list": [],
+            "end_activity_6m_list": [],
+            "staffId": "TJ00850",
+            "userinfo": {
+                "is_sub_card": "",
+                "currDirectedTraffic": "",
+                "currDomesticVoice": "",
+                "userExtra": {
+                    "last3mVoiceSaturation": "14.0",
+                    "last3mFlowSaturation": "73.08"
+                },
+                "currentPackageProductId": "",
+                "currentPackageProductName": "",
+                "currPrice": "",
+                "currDescribe": "",
+                "currDomesticTraffic": "",
+                "currBroadband": ""
+            },
+            "servNumber": "135****6367"
+        }
+    }
+}
+
+
+3、话术生成规则
+天津	营销活动	20266527188432	推荐	开口话术	
+
+"场景1、我看您{XX}月份流量超出{超额量}，超套费用{套餐外上网费}元。分钟超出{超套分钟数}，超套费用{套餐外通话费}元，现在有一个【5G安心月包-1元】（业务编码：2031912）每个月1元，包含100分钟+5GB流量，有效期24个月，到期自动取消，也可随时取消，非常方便。
+
+场景2、我看您{XX}月份流量超出{超额量}，超套费用{套餐外上网费}元。分钟超出{超套分钟数}分钟，超套费用{套餐外通话费}元，现在有一个【5G安心月包-3元】（业务编码：2031913）每个月3元，包含500分钟+20GB流量，有效期24个月，到期自动取消，也可随时取消，非常方便。
+
+
+【AI场景话术规则】
+1、{XX}月需要查询客户当月和前三个月的流量和分钟情况，具体界面见右图
+2、如果{套餐外上网费}≠0且{超额量}=0则添加提示【请结合账单与资源使用情况为客户解释】；如果{套餐外通话费}}≠0且{超套分钟数}=0则添加提示【请结合账单与资源使用情况为客户解释】
+3、如果{套餐外上网费}+{套餐外通话费}之和小于1元则推荐场景1，反之推荐场景2
+
+需要根据userinfo_json中的字段值判断，用场景 1 还是场景 2 的话术，规则参考【AI场景话术规则】
+
+请分析是否可以做成通用能力，包括前端配置 以及后端适配
+
+──────────────────────────────────────────────────────────────────────
+【实现】派生字段 derived_fields —— 数组取值 / 求和 / 阈值分档做成通用配置能力
+──────────────────────────────────────────────────────────────────────
+零、需求拆解与「做/不做」的判断
+  天津这一条需求里混了四种能力，泛化价值差别很大，逐条判断而不是整体上：
+    ① 数组按条件选元素（userinfo_json 按 timeType 取账期）→ 做。账期/分类数组会反复出现。
+    ② 数值计算（套餐外上网费 + 套餐外通话费）           → 做。
+    ③ 条件分档选话术（和 <1 元推场景一，否则场景二）      → 做，且**必须确定性**：
+       两个场景推的是不同产品（5G安心月包-1元 / -3元，业务编码不同），
+       选错是业务错误而不是措辞问题，不能交给模型判断。
+    ④「说哪个月」（{XX}月）                              → **不做成配置**。
+       把 4 个账期都按标签注入，「挑哪个月最值得说」是软判断，LLM 擅长，
+       写在话术要求里即可；数值仍来自确定性注入的事实行，精度不受影响。
+       为它建 argmax 配置属于过度设计。
+
+一、原有能力边界（做之前先确认差距，避免重复造）
+  - 取值：DataStep._get_path 只支持点路径取标量，**遇到 list 直接返回 None**；
+    response_extract / field_transform 无 JSONPath、无数组下标、无按条件筛选数组元素。
+  - 计算：只有 unit_convert（单字段单位换算）与 field_rename，**没有任何算术/比较**。
+    PackageDiff 有差值计算，但语义死绑「当前套餐 vs 当前推荐条」，不能算任意两入参字段。
+  - 数组进提示词：透传字段里的数组会被 _fmt_passthrough_value 转成**整包紧凑 JSON**，
+    既不结构化也没法精确填槽。
+  - 子字段占位符 {域[子键]}：_subfield_roots **只注册 dict**，顶层 list 不注册，
+    所以 {userinfo_json[...]} 这类占位符运行时一律落空。
+  - 模板匹配：静态字符串标签（product_id/stage/scene）+ 12 档降级链，
+    **无法表达任何数值条件**。
+
+  另发现一个坑（已由本次能力绕开）：若在 passthrough_fields 里配 userinfo_json.over_flow，
+  代码因 userinfo_json 是 list 而把它塞进 product_field_allow，而那个白名单只服务
+  products/recommended_packages —— 这条配置会**静默失效**，不报错也不生效。
+
+二、架构选择：加「派生字段」层，不给模板选择加规则引擎
+  最容易走错的一步是在 template 上加 match_rules/when 做条件选模板 —— 那要连带改
+  template_selector 的 12 档、template_index 的桶键、conflict_detector 的冲突分组、
+  schema、前端与一批测试，且引入第二套匹配语义。
+  改为：**只新增派生字段计算层，产出普通槽位，让现有各条消费路径原样吃它**。
+    - 话术里 {派生名} / {派生名[子键]} 直接引用；
+    - biz_config.template_match.*_from 本就是「从哪个字段取值」，可直接消费派生字段，
+      于是**零改动复用完整 12 档匹配**。
+  关键收益：array_find 返回**整个元素 dict**，而 dict 型透传值会被 build_prompt 注册为
+  子字段根 —— 于是 {当月资源} 与 {当月资源[over_flow_fee]} 同时可用，
+  正好绕开「顶层 list 不注册为子字段根」的既有限制，**没改 prompt_builder 一行**。
+
+三、后端实现（plugins/derived_fields.py，新增；steps/data_step.py 接入）
+  配置位置：api_nodes.<节点>.derived_fields，**仅 direct_mode=passthrough 生效**
+  （营销助手模式即走这条链路）。按声明顺序求值，后面的规则可引用前面已算出的派生名。
+  三个算子（受限声明式，**不做表达式 DSL、不用 eval** —— 前端才能表单化、运营才看得懂，
+  也不引入注入风险与「配置即代码」的调试难题）：
+    array_find  {"type":"array_find","from":"userinfo_json","where":{"timeType":"0"}}
+                → 返回第一个全条件命中的元素（整个 dict）；where 按字符串比，兼容 "0" 与 0
+    sum         {"type":"sum","from":["当月资源.over_flow_fee","当月资源.over_voice_fee"]}
+    bucket      {"type":"bucket","from":"超套费用合计",
+                 "rules":[{"lt":1,"value":"场景一"},{"value":"场景二"}]}
+                 多字段条件写法：{"when":{"路径":{"ne":0},"路径2":{"eq":0}},"value":"…"}
+  取值路径：新写了一个解析器（**没动 _get_path**，避免影响 response_extract 的既有行为），
+  根名先查已算出的派生字段再查原始报文，支持 dict 键与 list 数字下标。
+  比较算子只有 lt/lte/gt/gte/eq/ne —— 够表达阈值分档与零值判定，不扩成通用表达式。
+
+  ★ 三条「不臆造」语义（都有单测锁定，是本次最容易做错的地方）：
+    1. sum 全部路径取不到 → 返回 None 而**不是 0**。否则「没数据」会被分档当成真的 0，
+       天津规则 3 会把用户错误路由到场景一（推错产品）。
+    2. 比较算子遇到空值一律判否，不拿 None 当 0 比。
+       所以「上网费为空」不会被 {"ne":0} 误判成「非零」而误触发账单异常提示。
+    3. bucket 声明了 from 却取不到值 → **整条不产出，不落兜底档**。
+       落兜底等于没有依据就选了一档。纯 when 写法（不声明 from）不受此限，
+       兜底档正常生效，配 "value":"" 即表示「不追加」（值为空的派生字段不注入）。
+  健壮性：未知 type / 单条求值异常只告警跳过，不影响其余字段与整体话术
+  —— 派生字段是增强项，不该让话术整体失败。
+  防污染：派生名与 7 大标准域同名时跳过并告警（标准域只走 resources 通道）；
+  与透传入参同名时以派生配置为准（显式配置意图优先）并告警。
+
+四、与 slot_fallback 新默认口径的联动（正好咬合，不是巧合）
+  天津报文里 over_flow / over_voice 是字符串 "0"，其余资源字段大量是空串。
+  上一轮把默认口径翻成「照实填充、0 填 0」，恰好是天津规则 2 的前提 ——
+  {超额量} 必须显示成 0，才可能触发「费用≠0 但超额量=0 → 提示坐席结合账单解释」。
+  若还是旧的 drop 口径，这句会被整句删掉，规则 2 根本无从触发。
+  空串仍按 ** 处理，两者语义不混。
+
+五、前端实现（SkillConfigEditor.vue，接口配置弹窗「出参/透传」页 ③ 段）
+  沿用 field_transform 的既有范式（不引入新交互风格）：**表格配置优先 + 高级 JSON 兜底**，
+  ifcEditForm.derived_fields（JSON 串）是唯一数据源，dfRows 只是它的可视投影。
+  - 三种算子各自的子表单：array_find（数组 + 多条 key=value 选取条件）、
+    sum（多路径 multiple select）、bucket（判断依据 + 档位行：算子/阈值/取值，兜底档一项）。
+  - from/路径候选来自样例解析出的透传字段 + 前面已定义的派生名（支持层层引用）。
+  - 表格表达不了的写法（多字段 when 条件）整条标记「高级规则」并**原样保留在 row.raw**，
+    否则运营点开一次弹窗就会把这类配置擦掉。
+  - 保存前校验 validateDerivedFields：只挡「一定跑不出结果」的写法（type 不支持、
+    必填路径为空、bucket 无档位、**兜底档放在中间导致后面档位永远取不到**、与标准域同名）。
+  持久化四处同步（openIfcEdit 加载 / 快照变更检测 / saveIfcEdit body / saveLocalIfcEdit +
+  emitChange）。Mode A 后端按节点 merge（body 没有的键保留原值），所以清空要显式传 {}。
+
+  ★ 顺手修掉一个既有 bug（Mode B / Import 路径）：
+    emitChange 原先不显式序列化 request_variant，它只靠 _extra 透传；而
+    saveLocalIfcEdit 把 _extra 整个从**编辑前的旧节点**拷过来，_extra 展开又在最后 ——
+    结果在创建/导入页改「接口规范」（标准 ↔ 营销助手）会被旧值盖回去，静默保存不上。
+    修法：把 request_variant 与 derived_fields 都提为一等字段（从 _extra 排除名单里剔除、
+    load 时单独取、emitChange 显式写出、saveLocalIfcEdit 保存前把 _extra 里的同名残留删掉）。
+    天津是营销助手模式，这个 bug 会直接卡住配置，故一并修。
+
+六、天津落地方式（场景一/场景二的选择）
+  scene 维度已被「开口话术」占用，拆成两条模板按 scene 匹配会撞车，故选**事实注入**：
+  保持一条模板，把派生出的 {推荐场景} 作为确定性事实注入【上下文数据】，
+  话术要求里写明「只输出该场景对应的那段，另一段完全不要提」。
+  匹配链路零改动；分档本身是确定性的，模型只负责按已定好的场景组织措辞。
+  参考配置（已作为端到端测试用例固化在 tests/test_derived_fields.py）：
+    当月资源     array_find userinfo_json where timeType=0
+    上月资源     array_find userinfo_json where timeType=1
+    超套费用合计 sum        当月资源.over_flow_fee + 当月资源.over_voice_fee
+    推荐场景     bucket     超套费用合计 → lt 1 ? 场景一 : 场景二
+    账单解释提示 bucket     when 当月资源.over_flow_fee≠0 且 当月资源.over_flow=0 → 提示语
+                            when 当月资源.over_voice_fee≠0 且 当月资源.over_voice=0 → 提示语
+                            兜底 ""（不追加）
+  话术里用 {当月资源[over_flow]}、{当月资源[over_flow_fee]} 精确填槽；
+  「说哪个月」把 4 个账期都注入后交给话术要求（见第零节 ④）。
+
+七、边界与后续
+  - derived_fields 目前只在直传透传子模式生效。映射模式（response_extract +
+    field_transform 写 7 大域）的产物是标准域，派生标量没有天然落点，暂不接入。
+  - 没做：通用表达式 DSL、argmax/取最大值、数组「每个元素各出一条话术」的展开
+    （products 那套逐条生成硬绑 recommended_packages → final_recommendations →
+    ScriptStep 循环，不是通用 map 能力，要复用需另建展开维度）。
+  - 测试：tests/test_derived_fields.py 41 条（三算子语义与边界、求值顺序、健壮性、
+    天津端到端、保存守护不清配置、派生值真能填进提示词）；全量 482 条通过，无回归。
+  - schema：schemas/api_nodes.schema.json 增加 derived_fields 与 $defs/derived_field。
+
+
+
+
+
+规则逻辑包括：
+
+话术模板	备注
+"场景1、我看您{XX}月份流量超出{超额量}，超套费用{套餐外上网费}元。分钟超出{超套分钟数}，超套费用{套餐外通话费}元，现在有一个【5G安心月包-1元】（业务编码：2031912）每个月1元，包含100分钟+5GB流量，有效期24个月，到期自动取消，也可随时取消，非常方便。
+
+场景2、我看您{XX}月份流量超出{超额量}，超套费用{套餐外上网费}元。分钟超出{超套分钟数}分钟，超套费用{套餐外通话费}元，现在有一个【5G安心月包-3元】（业务编码：2031913）每个月3元，包含500分钟+20GB流量，有效期24个月，到期自动取消，也可随时取消，非常方便。
+【AI场景仅供参考】"	"1、{XX}月需要查询客户当月和前三个月的流量和分钟情况，具体界面见右图
+2、如果{套餐外上网费}≠0且{超额量}=0则添加提示【请结合账单与资源使用情况为客户解释】；如果{套餐外通话费}}≠0且{超套分钟数}=0则添加提示【请结合账单与资源使用情况为客户解释】
+3、如果{套餐外上网费}+{套餐外通话费}之和小于1元则推荐场景1，反之推荐场景2
+"
+"切入语：您现在用的还是个老资费，只有{XX}分钟，{XX}流量，现在新出一款资费更适合您，包含50分钟+2G流量，您当前资费8元，新资费9元，跟您现在就差1块钱，多给您20分钟和2G流量。 
++ 
+
+场景1：您当前资费分钟超出后一分钟就0.25元，新资费每月多花1元（不到1瓶水的价格），不仅多了20分钟，而且超出后是0.15/分钟，大部分客户都已经更换了，给您也申请上吧，这样用着更安心。
+场景2：当前资费您上网超出后一兆就是0.29元,现在新资费多花1元（不到1瓶水的价格）给您2G，大部分客户都已经更换了，给您也申请上吧，这样用着更安心。
+场景3：您当前资费分钟超出后一分钟就0.25元，您上网超出一兆就0.29元,现在新资费多花1元（不到1瓶水的价格）多给您20分钟和2G流量。 
++
+月费28元，每月赠费19元，相当于每月9元，有效期三年，到期可续约使用，相当于终身有效，您可以放心使用。
+【AI话术仅供参考】"	"1、{XX}分钟，{XX}流量从客户主套餐关联chbn中获取。如{XX}分钟为0或者{XX}流量为0，则不展示对应字段。
+2、{前三月语音饱和度>0}且{前三月流量饱和度=0}则推荐场景1
+3、{前三月流量饱和度>0}且{前三月语音饱和度=0}则推荐场景2
+4、{前三月语音饱和度>0}且{前三月流量饱和度>0}则推荐场景3
+5、{前三月语音饱和度=0}且{前三月流量饱和度=0}则不推荐任何场景"
+"场景1、我看您{XX}月份流量超出{超额量}，超套费用{套餐外上网费}元。分钟超出{超套分钟数}，超套费用{套餐外通话费}元，现在有一个【5G安心月包-1元】（业务编码：2031912）每个月1元，包含100分钟+5GB流量，有效期24个月，到期自动取消，也可随时取消，非常方便。
+
+场景2、我看您{XX}月份流量超出{超额量}，超套费用{套餐外上网费}元。分钟超出{超套分钟数}分钟，超套费用{套餐外通话费}元，现在有一个【5G安心月包-3元】（业务编码：2031913）每个月3元，包含500分钟+20GB流量，有效期24个月，到期自动取消，也可随时取消，非常方便。
+【AI场景仅供参考】"	"1、{XX}月需要查询客户当月和前三个月的流量和分钟情况，具体界面见右图
+2、如果{套餐外上网费}≠0且{超额量}=0则添加提示【请结合账单与资源使用情况为客户解释】；如果{套餐外通话费}}≠0且{超套分钟数}=0则添加提示【请结合账单与资源使用情况为客户解释】
+3、如果{套餐外上网费}+{套餐外通话费}之和小于1元则推荐场景1，反之推荐场景2"
+我看您{XX}月份流量超出{超额量}，超套费用{套餐外上网费}元。，可以考虑办一个季度流量包，包含5GB流量（国内通用，不含港澳台），3个月内可以使用，这月用不完后面两个月可以接着用，只收3元钱。我给您申请上，您就可以放心使用，减少超套产生额外费用的情况。	"1、{XX}月需要查询客户当月和前三个月的流量和分钟情况，具体界面见右图
+2、如果{套餐外上网费}≠0且{超额量}=0则添加提示【请结合账单与资源使用情况为客户解释】
+3、 {套餐外上网费}}=0且{超额量}=0则直接显示"
+"场景1、我看您{XX}月份流量超出{超额量}，超套费用{套餐外上网费}元。分钟超出{超套分钟数}，超套费用{套餐外通话费}元，现在有一个【5G安心月包-1元】（业务编码：2031912）每个月1元，包含100分钟+5GB流量，有效期24个月，到期自动取消，也可随时取消，非常方便。
+
+场景2、我看您{XX}月份流量超出{超额量}，超套费用{套餐外上网费}元。分钟超出{超套分钟数}分钟，超套费用{套餐外通话费}元，现在有一个【5G安心月包-3元】（业务编码：2031913）每个月3元，包含500分钟+20GB流量，有效期24个月，到期自动取消，也可随时取消，非常方便。
+【AI场景仅供参考】"	"1、{XX}月需要查询客户当月和前三个月的流量和分钟情况，具体界面见右图
+2、如果{套餐外上网费}≠0且{超额量}=0则添加提示【请结合账单与资源使用情况为客户解释】；如果{套餐外通话费}}≠0且{超套分钟数}=0则添加提示【请结合账单与资源使用情况为客户解释】
+3、如果{套餐外上网费}+{套餐外通话费}之和小于1元则推荐场景1，反之推荐场景2
+"
+
+
+
+请确认是否都可以覆盖
+1、规则能覆盖；
+2、前端可以配置，包括：接口配置 和话术模板里面可以配置；
+
+
+
+昨天修改天津的需求，请确认不会影响其他省份的生产的配置；
+
+同时，昨天天津生产请求参数
+{
+    "params": {
+        "optType": "0,1",
+        "systemId": "NGRC",
+        "inputs": {
+            "callId": "",
+            "staffNo": "AEY00423",
+            "cancel_activity_3m_list": [],
+            "provinceCode": "220",
+            "userinfo_json": [
+                {
+                    "over_flow_fee": "",
+                    "used_flow": "",
+                    "over_flow": "0",
+                    "total_flow": "",
+                    "over_voice": "0",
+                    "timeType": "0",
+                    "total_voice": "",
+                    "over_voice_fee": "",
+                    "user_consume": "",
+                    "used_cmn_flow": "",
+                    "used_voice": "",
+                    "over_cmn_flow": "",
+                    "remain_flow": "",
+                    "total_cmn_flow": "",
+                    "remain_cmn_flow": "",
+                    "remain_voice": ""
+                },
+                {
+                    "over_flow_fee": "5",
+                    "used_flow": "",
+                    "over_flow": "0",
+                    "total_flow": "",
+                    "over_voice": "0",
+                    "timeType": "1",
+                    "total_voice": "",
+                    "user_consume": "",
+                    "used_cmn_flow": "",
+                    "used_voice": "",
+                    "over_cmn_flow": "",
+                    "remain_flow": "",
+                    "total_cmn_flow": "",
+                    "remain_cmn_flow": "",
+                    "remain_voice": ""
+                },
+                {
+                    "over_flow_fee": "",
+                    "used_flow": "",
+                    "over_flow": "0",
+                    "total_flow": "",
+                    "over_voice": "0",
+                    "timeType": "2",
+                    "total_voice": "",
+                    "over_voice_fee": "",
+                    "user_consume": "",
+                    "used_cmn_flow": "",
+                    "used_voice": "",
+                    "over_cmn_flow": "",
+                    "remain_flow": "",
+                    "total_cmn_flow": "",
+                    "remain_cmn_flow": "",
+                    "remain_voice": ""
+                },
+                {
+                    "over_flow_fee": "",
+                    "used_flow": "",
+                    "over_flow": "0",
+                    "total_flow": "",
+                    "over_voice": "0",
+                    "timeType": "3",
+                    "total_voice": "",
+                    "over_voice_fee": "",
+                    "user_consume": "",
+                    "used_cmn_flow": "",
+                    "used_voice": "",
+                    "over_cmn_flow": "",
+                    "remain_flow": "",
+                    "total_cmn_flow": "",
+                    "remain_cmn_flow": "",
+                    "remain_voice": ""
+                }
+            ],
+            "products": [
+                {
+                    "voice": "",
+                    "gift_cmn_flow": "0",
+                    "productId": "2284056",
+                    "discount_price": "",
+                    "activityTypeName": "",
+                    "productName": "流量日包1GB版【2284056】",
+                    "direct_flow": "",
+                    "product_desc": "【同屏卡片】提醒您一下业务关键信息：流量日包，套餐费3元,包含1GB国内通用流量,订购后立即生效，费用一次性收取，流量自生效时刻起24小时内有效,流量使用完毕或时间到达后均失效。流量不可转赠、不可结转，不可共享，可重复订购，叠加生效，套餐订购次数不限，超出流量后按照原套餐外标准执行。办理成功后会下发提醒短信。我现在为您下发订购确认短信，请您查收10086或10085开头的短信，同意办理直接回复1即可，请您不要挂机，待机回复。",
+                    "activityId": "2083122460714274821",
+                    "product_attr": "",
+                    "price": "3",
+                    "broadband": "",
+                    "activityTypeCode": "",
+                    "Cmn_flow": "",
+                    "businessType": "自有业务"
+                },
+                {
+                    "voice": "",
+                    "gift_cmn_flow": "0",
+                    "productId": "2028009",
+                    "discount_price": "",
+                    "activityTypeName": "营销活动",
+                    "marketingActivityFlag": "1",
+                    "marketingProductFlag": "1",
+                    "productName": "午休流量1元包",
+                    "direct_flow": "",
+                    "product_desc": "【同屏卡片】提醒您一下业务关键信息：午休流量1元包业务，每月1元。包含2GB国内（不含我国港澳台地区）通用流量（仅限每日中午12：00‑14：00使用），可重复订购。可选择当月/次月生效，办理后有效期12个月。到期自动取消。有效期内可申请取消，无违约金。可同时叠加办理畅看定向流量包、畅听定向流量包、畅玩定向流量包。流量不结转、不能共享、不能转赠。我现在为您下发订购确认短信，请您查收10086或10085的短信，请按照短信内提示的数字回复，请您不要挂机，待机回复。",
+                    "activityId": "2090717239001427971",
+                    "product_attr": "",
+                    "price": "1",
+                    "broadband": "",
+                    "activityTypeCode": "yxhd",
+                    "Cmn_flow": "",
+                    "businessType": "自有业务"
+                },
+                {
+                    "voice": "",
+                    "gift_cmn_flow": "0",
+                    "productId": "2828024",
+                    "discount_price": "",
+                    "activityTypeName": "",
+                    "productName": "【2828024】移动优选PLUS会员（存量版）99元档年包",
+                    "direct_flow": "",
+                    "product_desc": "【同屏卡片】提醒您一下业务关键信息：移动优选PLUS会员（存量版）99元档年包：99元/年，办理立即生效，有效期12个月，到期自动取消，有效期内享有以旧换新优惠、守机宝年度保障（本权益将在第8日0时提供服务）、还可享受5G手机系统升级、免费清洗等到厅尊享服务。移动优选PLUS会员服务详情及使用规则请关注“移动优选会员”小程序。办理本产品时话费实时余额（不含赠送话费）需大于产品功能费方可办理。办理成功后会下发提醒短信。我现在为您下发订购确认短信，请您查收10086或10085的短信，请按照短信内提示的数字回复，请您不要挂机，待机回复。",
+                    "activityId": "20263316624694",
+                    "product_attr": "",
+                    "price": "99",
+                    "broadband": "",
+                    "activityTypeCode": "",
+                    "Cmn_flow": "",
+                    "businessType": "自有业务"
+                }
+            ],
+            "touchNumber": "20260824002",
+            "sequenceNo": "a046c906‑e609‑46d1‑8569‑fd4b7fd94d0b",
+            "ordered_activity_list": [],
+            "end_activity_6m_list": [],
+            "staffId": "TJ00850",
+            "userinfo": {
+                "is_sub_card": "",
+                "currDirectedTraffic": "",
+                "currDomesticTraffic": "",
+                "userExtra": {
+                    "last3mVoiceSaturation": "14.0",
+                    "last3mFlowSaturation": "73.08",
+                    "currentPackageProductId": "",
+                    "currentPackageProductName": "",
+                    "currPrice": "",
+                    "currDescribe": "",
+                    "currDomesticTraffic": "",
+                    "currBroadband": "",
+                    "servNumber": "135****6367"
+                }
+            }
+        },
+        "formDataMultiPart": null
+    }
+}
+
+营销助手反馈没有话术生成响应，请排查我们这针对营销助手某事，请求能执行成功
+
+
+================================================================================
+天津 220 报文「无话术生成」定位与两处修复（2026-08-25）
+================================================================================
+
+一、根因：请求在入口就被拒收，根本没进入话术生成
+  用该报文跑 docs/交叉营销接口/本地测试/run_preload_local.py 复现，日志：
+    [preload] ▶ 收到营销助手报文 provinceCode='220'→'tianjin' products=3
+    [preload] 拒收: servNumber 为空
+    ack: {'rtnMsg': '数据接收失败！', 'rtnCode': '9999'}
+  省份识别正常（220→tianjin），但 cross_sell.py 的入口校验
+  `if not req.phone: _ack_fail("servNumber 为空")` 直接打回，
+  未走到意图路由 / 产品匹配 / 模板选择 / LLM。
+
+  为什么之前能出话术、这条不行 —— 上游报文里手机号的位置变了：
+    - 之前的报文（preload_payload.json）：inputs.servNumber = "13800138000"（顶层）
+    - 这条 220 报文：顶层无 servNumber，号码在 inputs.userinfo.userExtra.servNumber
+  而 marketing_assistant.parse() 只取 `inputs.get("servNumber")`，取不到 → phone 为空。
+  与昨天天津的改动（derived_fields / 模板 / 省份映射 / 前端）无关：那些都在这道校验之后。
+
+二、修复①：手机号多位置兜底（utils/marketing_assistant.py）
+  新增 _PHONE_PATHS 候选路径（按优先级取第一个非空）：
+    ("servNumber",) → ("userinfo","userExtra","servNumber") → ("userinfo","servNumber")
+  新增 _dig() / resolve_phone()，parse() 改用 resolve_phone(inputs)。
+  _envelope() 的报文识别也一并放宽：systemId/optType 或 sequenceNo 或**任一位置**的
+  servNumber —— 否则顶层不带号码的变体连「是营销助手报文」都认不出来，会以
+  「入参不符合规范」拒收。
+  老报文顶层有号码，取值与识别行为完全不变（新位置只在前序取不到时才生效）。
+  验证：该报文重跑全链路 → 可营销=1 scripts=1 回调项=1（words=1），
+        key=preload:135****6367:20260824002:hs；测试 +7 条，全量 489 条通过。
+
+  注：修好入口后，这条报文的营销产品是 2028009（午休流量1元包），与天津模板写死的
+      product_id=20266527188432 匹配不上 → 未命中模板、退到兜底 Prompt 仍出话术
+      （不是零话术）。产品ID是否要对齐/改通用模板，待 xlsx 明确后单独处理。
+
+三、修复②：派生字段配置界面按「先算后判」重构（SkillConfigEditor.vue）
+  问题：三个算子（array_find/sum/bucket）平铺成一个类型下拉，运营要先理解算子名才知道
+        配哪个；带 when 多字段条件的规则被判为「高级规则」锁死、只能改 JSON。
+  改法：
+    - 分两组呈现，落库仍是同一个 derived_fields 对象：
+        ① 字段计算（array_find / sum）—— 取值、算数，产出**数据值**
+        ② 逻辑判断（bucket）      —— 比条件，产出**结论**
+      两组用左侧色条 + 徽标区分；逻辑判断组不再有类型下拉（类型固定 bucket）。
+    - 落库顺序 = 界面顺序（字段计算全部 → 逻辑判断全部，组内相对顺序原样保留）。
+      后端按声明顺序求值、判断依赖计算结果，该顺序即所见即所得。
+      （反向依赖不成立：array_find 需要 list、sum 需要数值，都不可能消费 bucket 的标签串。）
+    - bucket 的每条规则显式选「模式」，取代原先用运算符空值表达兜底：
+        比大小（threshold）/ 多字段条件（when）/ 兜底（fallback）
+      when 条件可视化为「路径 + 运算符 + 值」多行（且关系），不再强制改 JSON。
+      支持裸值简写 {"路径": "场景一"}，回写为显式 {eq: 值}（后端 _cmp_all 语义等价）。
+    - 「判断依据」(from) 改为**仅在存在「比大小」规则时才显示/校验**：纯 when 的判断
+      没有单一依据。commit 时 from 为空不再写 "from": ""。
+    - 仍保留高级 JSON 兜底：同一路径挂多个运算符等表格放不下的写法整条保原样，不擦除。
+
+  顺带修掉一个真 bug：validateDerivedFields 原先对 bucket 一律要求 from，
+  而天津「账单解释提示」是纯 when、无 from → 保存必被拦
+  （报「要填分档的判断依据」）。这正是该条规则此前"保存后消失"的机制。
+
+  验证：从 .vue 抽出该段真实源码 + Vue 最小 stub 跑往返测试，20 项全过 ——
+        天津 5 条配置解析→回写与原文完全一致（无丢失、顺序不变）、二次往返幂等、
+        分组正确、账单解释提示不再判高级且不要求判断依据、多运算符 when 仍保原样。
+        vite build 通过。
+
+四、天津本地技能包对齐生产报文（便于测试）
+  确认该报文为生产真实报文后，把本地天津配置对齐到它：
+    - biz_config 模板 product_id：20266527188432 → 2028009（生产真实营销产品
+      「午休流量1元包」；template_match.product_id_from=productId）。
+    - biz_config 模板 scene：开口话术 → ""。营销助手的 batch_contexts 只传 stage
+      不传 scence，严格 12 档要求「请求维度为空 → 模板该维也为空」，配了 scene 会
+      掉到 select_template_loose 宽松兜底命中，日志还会打「疑似下游漏传 scence」的
+      误导性告警。留空后走严格档位（产品精确+环节）直接命中。
+    - api_nodes mock_response 的 products 同步换成 2028009/午休流量1元包（活动
+      2090717239001427971、activityTypeCode=yxhd），但**保留可用的超套数据**，
+      让配置测试页仍能演示场景分档；passthrough_fields 补
+      products.activityTypeCode / price / product_desc。
+
+  两条路径分别覆盖两种数据形态（均已实测）：
+    - 配置测试页（mock_response，有超套数据）：超套费用合计=3.5 → 推荐场景=场景二；
+      over_voice_fee=2≠0 且 over_voice=0 → 账单解释提示命中。功能完整演示。
+    - 真实生产报文（_tj_prod_220.json）：模板命中「营销活动-5G安心月包」，
+      但当月 over_flow_fee / over_voice_fee 都是空串 →
+      超套费用合计/推荐场景/账单解释提示**三项都不产出**（设计如此：没数据不臆造）。
+
+  由此补的一条安全约束（script_requirement 末尾）：
+    「如果【上下文数据】里根本没有【推荐场景】这一项……两个业务编码一个都不要提、
+      更不许自己挑一个场景，只按已有账期数据做简短提醒，绝不编造超套金额。」
+    原要求只写了「严格按【推荐场景】输出对应那段」，而生产数据恰好取不到该字段，
+    模型就失去依据、可能在 2031912/2031913 之间乱挑 —— 那正是本设计要防的业务错误。
+
+五、其他
+  - config/province_mapping.json 已含 "220": "tianjin"（本地）。
+  - 本地联调脚本 run_preload_local.py 的 push_cache stub 签名过时（call_id →
+    touch_number）导致回调捕获报 TypeError，已修。
+  - 复现报文留档：docs/交叉营销接口/本地测试/_tj_prod_220.json。
+  - 待定（业务确认后再改）：天津模板正文推的是 5G安心月包-1元/-3元
+    （业务编码 2031912/2031913），而营销助手下发的产品是 2028009 午休流量1元包，
+    两者不是同一个产品。当前按「模板正文决定要推的业务编码、product_id 只作匹配键」
+    处理；若实际应推下发产品本身，则模板正文要改成动态产品占位符（或 product_id
+    留空做通用模板）。
+
+
+
+
+话术模板的匹配ID 设置的活动 Id，activityId：2083122460714274821
+
+那么下面的参数能匹配到话术模板么？
+{
+    "params": {
+        "optType": "0,1",
+        "systemId": "NGRC",
+        "inputs": {
+            "callId": "",
+            "staffNo": "AEY00423",
+            "cancel_activity_3m_list": [],
+            "provinceCode": "220",
+            "userinfo_json": [
+                {
+                    "over_flow_fee": "",
+                    "used_flow": "",
+                    "over_flow": "0",
+                    "total_flow": "",
+                    "over_voice": "0",
+                    "timeType": "0",
+                    "total_voice": "",
+                    "over_voice_fee": "",
+                    "user_consume": "",
+                    "used_cmn_flow": "",
+                    "used_voice": "",
+                    "over_cmn_flow": "",
+                    "remain_flow": "",
+                    "total_cmn_flow": "",
+                    "remain_cmn_flow": "",
+                    "remain_voice": ""
+                },
+                {
+                    "over_flow_fee": "5",
+                    "used_flow": "",
+                    "over_flow": "0",
+                    "total_flow": "",
+                    "over_voice": "0",
+                    "timeType": "1",
+                    "total_voice": "",
+                    "user_consume": "",
+                    "used_cmn_flow": "",
+                    "used_voice": "",
+                    "over_cmn_flow": "",
+                    "remain_flow": "",
+                    "total_cmn_flow": "",
+                    "remain_cmn_flow": "",
+                    "remain_voice": ""
+                },
+                {
+                    "over_flow_fee": "",
+                    "used_flow": "",
+                    "over_flow": "0",
+                    "total_flow": "",
+                    "over_voice": "0",
+                    "timeType": "2",
+                    "total_voice": "",
+                    "over_voice_fee": "",
+                    "user_consume": "",
+                    "used_cmn_flow": "",
+                    "used_voice": "",
+                    "over_cmn_flow": "",
+                    "remain_flow": "",
+                    "total_cmn_flow": "",
+                    "remain_cmn_flow": "",
+                    "remain_voice": ""
+                },
+                {
+                    "over_flow_fee": "",
+                    "used_flow": "",
+                    "over_flow": "0",
+                    "total_flow": "",
+                    "over_voice": "0",
+                    "timeType": "3",
+                    "total_voice": "",
+                    "over_voice_fee": "",
+                    "user_consume": "",
+                    "used_cmn_flow": "",
+                    "used_voice": "",
+                    "over_cmn_flow": "",
+                    "remain_flow": "",
+                    "total_cmn_flow": "",
+                    "remain_cmn_flow": "",
+                    "remain_voice": ""
+                }
+            ],
+            "products": [
+                {
+                    "voice": "",
+                    "gift_cmn_flow": "0",
+                    "productId": "2284056",
+                    "discount_price": "",
+                    "activityTypeName": "",
+                    "productName": "流量日包1GB版【2284056】",
+                    "direct_flow": "",
+                    "product_desc": "【同屏卡片】提醒您一下业务关键信息：流量日包，套餐费3元,包含1GB国内通用流量,订购后立即生效，费用一次性收取，流量自生效时刻起24小时内有效,流量使用完毕或时间到达后均失效。流量不可转赠、不可结转，不可共享，可重复订购，叠加生效，套餐订购次数不限，超出流量后按照原套餐外标准执行。办理成功后会下发提醒短信。我现在为您下发订购确认短信，请您查收10086或10085开头的短信，同意办理直接回复1即可，请您不要挂机，待机回复。",
+                    "activityId": "2083122460714274821",
+                    "product_attr": "",
+                    "price": "3",
+                    "broadband": "",
+                    "activityTypeCode": "",
+                    "Cmn_flow": "",
+                    "businessType": "自有业务"
+                },
+                {
+                    "voice": "",
+                    "gift_cmn_flow": "0",
+                    "productId": "2028009",
+                    "discount_price": "",
+                    "activityTypeName": "营销活动",
+                    "marketingActivityFlag": "1",
+                    "marketingProductFlag": "1",
+                    "productName": "午休流量1元包",
+                    "direct_flow": "",
+                    "product_desc": "【同屏卡片】提醒您一下业务关键信息：午休流量1元包业务，每月1元。包含2GB国内（不含我国港澳台地区）通用流量（仅限每日中午12：00‑14：00使用），可重复订购。可选择当月/次月生效，办理后有效期12个月。到期自动取消。有效期内可申请取消，无违约金。可同时叠加办理畅看定向流量包、畅听定向流量包、畅玩定向流量包。流量不结转、不能共享、不能转赠。我现在为您下发订购确认短信，请您查收10086或10085的短信，请按照短信内提示的数字回复，请您不要挂机，待机回复。",
+                    "activityId": "2090717239001427971",
+                    "product_attr": "",
+                    "price": "1",
+                    "broadband": "",
+                    "activityTypeCode": "yxhd",
+                    "Cmn_flow": "",
+                    "businessType": "自有业务"
+                },
+                {
+                    "voice": "",
+                    "gift_cmn_flow": "0",
+                    "productId": "2828024",
+                    "discount_price": "",
+                    "activityTypeName": "",
+                    "productName": "【2828024】移动优选PLUS会员（存量版）99元档年包",
+                    "direct_flow": "",
+                    "product_desc": "【同屏卡片】提醒您一下业务关键信息：移动优选PLUS会员（存量版）99元档年包：99元/年，办理立即生效，有效期12个月，到期自动取消，有效期内享有以旧换新优惠、守机宝年度保障（本权益将在第8日0时提供服务）、还可享受5G手机系统升级、免费清洗等到厅尊享服务。移动优选PLUS会员服务详情及使用规则请关注“移动优选会员”小程序。办理本产品时话费实时余额（不含赠送话费）需大于产品功能费方可办理。办理成功后会下发提醒短信。我现在为您下发订购确认短信，请您查收10086或10085的短信，请按照短信内提示的数字回复，请您不要挂机，待机回复。",
+                    "activityId": "20263316624694",
+                    "product_attr": "",
+                    "price": "99",
+                    "broadband": "",
+                    "activityTypeCode": "",
+                    "Cmn_flow": "",
+                    "businessType": "自有业务"
+                }
+            ],
+            "touchNumber": "20260824002",
+            "sequenceNo": "a046c906‑e609‑46d1‑8569‑fd4b7fd94d0b",
+            "ordered_activity_list": [],
+            "end_activity_6m_list": [],
+            "staffId": "TJ00850",
+            "userinfo": {
+                "is_sub_card": "",
+                "currDirectedTraffic": "",
+                "currDomesticTraffic": "",
+                "userExtra": {
+                    "last3mVoiceSaturation": "14.0",
+                    "last3mFlowSaturation": "73.08",
+                    "currentPackageProductId": "",
+                    "currentPackageProductName": "",
+                    "currPrice": "",
+                    "currDescribe": "",
+                    "currDomesticTraffic": "",
+                    "currBroadband": "",
+                    "servNumber": "135****6367"
+                }§
+            }
+        },
+        "formDataMultiPart": null
+    }
+}

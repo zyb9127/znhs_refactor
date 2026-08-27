@@ -24,6 +24,51 @@
         "field_transform": {
           "type": "object",
           "description": "第 2 步：{目标路径: 规则}，规则字段 from/type(passthrough|filter_include|include|filter_exclude|exclude|constant)/include_keys/exclude_keys/unit_convert/field_rename/value；from 直接写源对象在响应中的真实路径（如 bean.tags），不建 raw_xxx 中间槽位"
+        },
+        "derived_fields": {
+          "type": "object",
+          "description": "派生字段（仅 direct_mode=passthrough 生效）：{派生名: 规则}，在透传字段之上再算一层，结果以普通透传字段身份注入【上下文数据】，可用 {派生名} / {派生名[子键]} 引用，也可被 biz_config.template_match.*_from 消费。按声明顺序求值，后面的规则可引用前面已算出的派生名；值为空则不产出该字段。实现见 plugins/derived_fields.py",
+          "additionalProperties": {"$ref": "#/$defs/derived_field"}
+        }
+      }
+    },
+    "derived_field": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["array_find", "sum", "bucket"],
+          "description": "array_find=数组按 where 条件选出第一个匹配元素（返回整个 dict）；sum=多路径求和；bucket=按阈值/多字段条件分档取 value"
+        },
+        "from": {
+          "description": "取值点路径。array_find/bucket 为字符串，sum 可为字符串数组。根名先查已算出的派生字段再查原始报文；路径支持 dict 键与 list 数字下标",
+          "type": ["string", "array"],
+          "items": {"type": "string"}
+        },
+        "where": {
+          "type": "object",
+          "description": "仅 array_find：{字段名: 期望值}，按字符串比较（兼容 \"0\" 与 0），需全部相等才算命中"
+        },
+        "rules": {
+          "type": "array",
+          "description": "仅 bucket：按顺序取第一个命中的档位，不带任何条件的档位即兜底档（放最后）",
+          "items": {
+            "type": "object",
+            "properties": {
+              "when": {
+                "type": "object",
+                "description": "多字段条件：{点路径: {比较算子: 操作数}}，需全部成立。与同级 lt/lte/gt/gte/eq/ne 二选一"
+              },
+              "lt":    {"description": "小于（比较对象为 spec.from）"},
+              "lte":   {"description": "小于等于"},
+              "gt":    {"description": "大于"},
+              "gte":   {"description": "大于等于"},
+              "eq":    {"description": "等于（两边都是数按数比，否则按字符串比）"},
+              "ne":    {"description": "不等于"},
+              "value": {"description": "命中该档位时派生字段取这个值；写空串表示「不产出该字段」"}
+            }
+          }
         }
       }
     }

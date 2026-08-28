@@ -110,6 +110,11 @@
       "userinfo_json.over_voice",
       "userinfo_json.over_voice_fee",
       "userinfo_json.user_consume",
+      "userinfo_json.used_flow",
+      "userinfo_json.total_flow",
+      "userinfo_json.total_voice",
+      "userinfo_json.remain_flow",
+      "userinfo_json.remain_voice",
       "products",
       "products.productId",
       "products.productName",
@@ -118,9 +123,8 @@
       "products.activityTypeName",
       "products.activityTypeCode",
       "products.price",
-      "products.product_desc",
-      "products.marketingActivityFlag",
       "products.marketingProductFlag",
+      "products.marketingActivityFlag",
       "userinfo",
       "userinfo.currDomesticVoice",
       "userinfo.currDomesticTraffic",
@@ -148,11 +152,310 @@
           "timeType": "1"
         }
       },
-      "超套费用合计": {
+      "上上月资源": {
+        "type": "array_find",
+        "from": "userinfo_json",
+        "where": {
+          "timeType": "2"
+        }
+      },
+      "当月超套": {
         "type": "sum",
         "from": [
           "当月资源.over_flow_fee",
           "当月资源.over_voice_fee"
+        ]
+      },
+      "上月超套": {
+        "type": "sum",
+        "from": [
+          "上月资源.over_flow_fee",
+          "上月资源.over_voice_fee"
+        ]
+      },
+      "上上月超套": {
+        "type": "sum",
+        "from": [
+          "上上月资源.over_flow_fee",
+          "上上月资源.over_voice_fee"
+        ]
+      },
+      "当月是否超套": {
+        "type": "bucket",
+        "from": "当月超套",
+        "rules": [
+          {
+            "gt": 0,
+            "value": "是"
+          },
+          {
+            "value": "否"
+          }
+        ]
+      },
+      "上月是否超套": {
+        "type": "bucket",
+        "from": "上月超套",
+        "rules": [
+          {
+            "gt": 0,
+            "value": "是"
+          },
+          {
+            "value": "否"
+          }
+        ]
+      },
+      "上上月是否超套": {
+        "type": "bucket",
+        "from": "上上月超套",
+        "rules": [
+          {
+            "gt": 0,
+            "value": "是"
+          },
+          {
+            "value": "否"
+          }
+        ]
+      },
+      "超套月份": {
+        "type": "bucket",
+        "rules": [
+          {
+            "when": {
+              "当月是否超套": {
+                "eq": "是"
+              }
+            },
+            "value": "当月超套"
+          },
+          {
+            "when": {
+              "上月是否超套": {
+                "eq": "是"
+              }
+            },
+            "value": "上月超套"
+          },
+          {
+            "when": {
+              "上上月是否超套": {
+                "eq": "是"
+              }
+            },
+            "value": "上上月超套"
+          },
+          {
+            "value": "兜底场景"
+          }
+        ]
+      },
+      "推荐场景": {
+        "type": "bucket",
+        "rules": [
+          {
+            "when": {
+              "超套月份": {
+                "eq": "当月超套"
+              },
+              "当月超套": {
+                "lte": 1
+              }
+            },
+            "value": "场景一"
+          },
+          {
+            "when": {
+              "超套月份": {
+                "eq": "上月超套"
+              },
+              "上月超套": {
+                "lte": 1
+              }
+            },
+            "value": "场景一"
+          },
+          {
+            "when": {
+              "超套月份": {
+                "eq": "上上月超套"
+              },
+              "上上月超套": {
+                "lte": 1
+              }
+            },
+            "value": "场景一"
+          },
+          {
+            "when": {
+              "超套月份": {
+                "eq": "兜底场景"
+              }
+            },
+            "value": "兜底场景"
+          },
+          {
+            "value": "场景二"
+          }
+        ]
+      }
+    },
+    "updated_by": "admin",
+    "updated_at": "2026-08-27 15:51:46"
+  },
+  "新接口": {
+    "_comment": "",
+    "url": "",
+    "method": "POST",
+    "enabled": true,
+    "source_type": "direct",
+    "request_template": {},
+    "response_extract": {},
+    "field_transform": {},
+    "mock_mode": false,
+    "mock_response": {
+      "params": {
+        "systemId": "skill-test",
+        "optType": "0",
+        "inputs": {
+          "sequenceNo": "SEQ20260827143631",
+          "servNumber": "13800138000",
+          "provinceCode": "022",
+          "callId": "test_ma_20260827143631",
+          "userinfo_json": [
+            {
+              "timeType": "0",
+              "over_flow": "3",
+              "over_flow_fee": "",
+              "over_voice": "0",
+              "over_voice_fee": "",
+              "user_consume": "58",
+              "used_flow": "",
+              "total_flow": "",
+              "total_voice": "",
+              "remain_flow": "",
+              "remain_voice": ""
+            },
+            {
+              "timeType": "1",
+              "over_flow": "0",
+              "over_flow_fee": "0.2",
+              "over_voice": "0",
+              "over_voice_fee": "0.3",
+              "user_consume": "",
+              "used_flow": "",
+              "total_flow": "",
+              "total_voice": "",
+              "remain_flow": "",
+              "remain_voice": ""
+            },
+            {
+              "timeType": "2",
+              "over_flow": "0",
+              "over_flow_fee": "",
+              "over_voice": "0",
+              "over_voice_fee": "",
+              "user_consume": "",
+              "used_flow": "",
+              "total_flow": "",
+              "total_voice": "",
+              "remain_flow": "",
+              "remain_voice": ""
+            },
+            {
+              "timeType": "3",
+              "over_flow": "0",
+              "over_flow_fee": "",
+              "over_voice": "0",
+              "over_voice_fee": "",
+              "user_consume": "",
+              "used_flow": "",
+              "total_flow": "",
+              "total_voice": "",
+              "remain_flow": "",
+              "remain_voice": ""
+            }
+          ],
+          "products": [
+            {
+              "productId": "123",
+              "productName": "午休流量1元包",
+              "activityId": "2090717239001427971",
+              "businessType": "自有业务",
+              "activityTypeName": "营销活动",
+              "activityTypeCode": "yxhd",
+              "price": "1",
+              "marketingProductFlag": "1",
+              "marketingActivityFlag": "1"
+            }
+          ],
+          "userinfo": {
+            "currDomesticVoice": "",
+            "currDomesticTraffic": "",
+            "currPrice": "",
+            "currentPackageProductName": "",
+            "userExtra": {
+              "last3mVoiceSaturation": "14.0",
+              "last3mFlowSaturation": "73.08"
+            }
+          }
+        }
+      }
+    },
+    "direct_mode": "passthrough",
+    "passthrough_fields": [
+      "userinfo_json",
+      "userinfo_json.timeType",
+      "userinfo_json.over_flow",
+      "userinfo_json.over_flow_fee",
+      "userinfo_json.over_voice",
+      "userinfo_json.over_voice_fee",
+      "userinfo_json.user_consume",
+      "userinfo_json.used_flow",
+      "userinfo_json.total_flow",
+      "userinfo_json.total_voice",
+      "userinfo_json.remain_flow",
+      "userinfo_json.remain_voice",
+      "products",
+      "products.productId",
+      "products.productName",
+      "products.activityId",
+      "products.businessType",
+      "products.activityTypeName",
+      "products.activityTypeCode",
+      "products.price",
+      "products.marketingProductFlag",
+      "products.marketingActivityFlag",
+      "userinfo",
+      "userinfo.currDomesticVoice",
+      "userinfo.currDomesticTraffic",
+      "userinfo.currPrice",
+      "userinfo.currentPackageProductName",
+      "userinfo.userExtra",
+      "userinfo.userExtra.last3mVoiceSaturation",
+      "userinfo.userExtra.last3mFlowSaturation"
+    ],
+    "request_variant": "marketing_assistant",
+    "derived_fields": {
+      "超套月份数据": {
+        "type": "array_find",
+        "from": "userinfo_json",
+        "match": "any",
+        "where": {
+          "over_flow_fee": {
+            "gt": 0
+          },
+          "over_voice_fee": {
+            "gt": 0
+          }
+        }
+      },
+      "超套费用合计": {
+        "type": "sum",
+        "from": [
+          "超套月份数据.over_flow_fee",
+          "超套月份数据.over_voice_fee"
         ]
       },
       "推荐场景": {
@@ -160,7 +463,7 @@
         "from": "超套费用合计",
         "rules": [
           {
-            "lt": 1,
+            "lte": 1,
             "value": "场景一"
           },
           {
@@ -173,10 +476,10 @@
         "rules": [
           {
             "when": {
-              "当月资源.over_flow_fee": {
+              "超套月份数据.over_flow_fee": {
                 "ne": 0
               },
-              "当月资源.over_flow": {
+              "超套月份数据.over_flow": {
                 "eq": 0
               }
             },
@@ -184,10 +487,10 @@
           },
           {
             "when": {
-              "当月资源.over_voice_fee": {
+              "超套月份数据.over_voice_fee": {
                 "ne": 0
               },
-              "当月资源.over_voice": {
+              "超套月份数据.over_voice": {
                 "eq": 0
               }
             },
@@ -197,9 +500,29 @@
             "value": ""
           }
         ]
+      },
+      "超套月份名称": {
+        "type": "bucket",
+        "from": "超套月份数据.timeType",
+        "rules": [
+          {
+            "eq": 0,
+            "value": "当月"
+          },
+          {
+            "eq": 1,
+            "value": "上月"
+          },
+          {
+            "eq": 2,
+            "value": "上上月"
+          }
+        ]
       }
     },
+    "created_by": "admin",
+    "created_at": "2026-08-27 16:26:51",
     "updated_by": "admin",
-    "updated_at": "2026-08-24 15:48:43"
+    "updated_at": "2026-08-27 16:37:34"
   }
 }

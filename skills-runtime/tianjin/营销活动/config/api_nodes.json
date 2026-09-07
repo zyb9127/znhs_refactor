@@ -85,7 +85,10 @@
               "activityTypeCode": "yxhd",
               "price": "1",
               "marketingProductFlag": "1",
-              "marketingActivityFlag": "1"
+              "marketingActivityFlag": "1",
+              "extra": {
+                "name": "dog"
+              }
             }
           ],
           "userinfo": {
@@ -132,7 +135,8 @@
       "userinfo.currentPackageProductName",
       "userinfo.userExtra",
       "userinfo.userExtra.last3mVoiceSaturation",
-      "userinfo.userExtra.last3mFlowSaturation"
+      "userinfo.userExtra.last3mFlowSaturation",
+      "products.extra"
     ],
     "request_variant": "marketing_assistant",
     "created_by": "local-test",
@@ -302,7 +306,7 @@
       }
     },
     "updated_by": "admin",
-    "updated_at": "2026-08-27 15:51:46"
+    "updated_at": "2026-09-02 11:11:05"
   },
   "新接口": {
     "_comment": "",

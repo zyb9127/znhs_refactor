@@ -743,8 +743,23 @@ def _merge_auto_domain_vars(province: str, intent: str, linked_vars) -> List[str
     return merged
 
 
-def _fill_placeholder_vars(content: Any, linked_vars: Any) -> tuple:
-    """保存即补齐：把模板里真实写出的占位符所属数据域并入 linked_vars（只增不减）。
+_PLACEHOLDER_LINKED_VAR_KEYS = {
+    # canonical keys
+    "current_package", "pkg_brief", "pkg_fee", "pkg_flow", "pkg_voice",
+    "usage", "tags", "diff_str", "user_info", "user_profile", "domain_ext",
+    "extra_info", "extra_context", "table",
+    # historical aliases that may remain in older saved templates
+    "cur_brief", "cur_name", "pkg_name", "recommended", "recommend",
+    "usage_line", "data_usage", "voice_usage", "consumption", "user_tags", "diff",
+}
+
+
+def _fill_placeholder_vars(
+    content: Any,
+    linked_vars: Any,
+    preserve_vars: Optional[List[str]] = None,
+) -> tuple:
+    """按当前模板正文重算自动占位符变量，并保留接口域/手工变量。
 
     子字段占位符 ``{usage[consumption][近6月平均月消费]}`` 只写了根名 ``usage`` 的子键，
     历史推断（infer_linked_vars 的 ``\\{(\\w+)\\}`` 精确层）匹配不到，模板若又没手动勾选
@@ -754,8 +769,21 @@ def _fill_placeholder_vars(content: Any, linked_vars: Any) -> tuple:
     Returns:
         (补齐后的 linked_vars, 新增的变量列表)
     """
-    merged = list(linked_vars or [])
-    added = [v for v in infer_placeholder_vars(str(content or "")) if v not in merged]
+    original = list(dict.fromkeys(linked_vars or []))
+    inferred = infer_placeholder_vars(str(content or ""))
+    if preserve_vars is None:
+        # 兼容不带技能包上下文的调用方：仍保留显式变量，只补齐正文占位符。
+        merged = original
+    else:
+        protected = set(preserve_vars or [])
+        # 自动推导出的标准变量以当前正文为准；接口域变量和自定义手工变量不受影响。
+        merged = [
+            value for value in original
+            if value not in _PLACEHOLDER_LINKED_VAR_KEYS
+            or value in protected
+            or value in inferred
+        ]
+    added = [v for v in inferred if v not in merged]
     merged.extend(added)
     return merged, added
 
@@ -1232,7 +1260,8 @@ async def create_template(body: TemplateCreateRequest, request: Request):
         if auto_flag:
             data["linked_vars"] = _merge_auto_domain_vars(body.province, body.intent, data.get("linked_vars"))
         data["linked_vars"], _added = _fill_placeholder_vars(
-            data.get("template_content"), data.get("linked_vars"))
+            data.get("template_content"), data.get("linked_vars"),
+            preserve_vars=_derive_api_domain_var_keys(body.province, body.intent))
         saved = skill_registry.upsert_template(body.province, body.intent, data)
         from services.kafka_service import send_op_log
         send_op_log(request, "add", "新建话术模板",
@@ -1268,6 +1297,7 @@ async def bulk_create_templates(body: TemplateBulkRequest, request: Request):
         _merge_auto_domain_vars(body.province, body.intent, [])
         if body.auto_domain_vars else []
     )
+    protected_domain_vars = _derive_api_domain_var_keys(body.province, body.intent)
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     data_list: List[Dict[str, Any]] = []
@@ -1282,7 +1312,8 @@ async def bulk_create_templates(body: TemplateBulkRequest, request: Request):
             for k in domain_vars:
                 if k not in linked:
                     linked.append(k)
-        linked, _ = _fill_placeholder_vars(content, linked)
+        linked, _ = _fill_placeholder_vars(
+            content, linked, preserve_vars=protected_domain_vars)
         item = dict(
             province=body.province, intent=body.intent,
             template_name=str(t.get("template_name") or body.intent),
@@ -1359,11 +1390,12 @@ async def update_template(template_id: str, body: TemplateUpdateRequest, request
     auto_flag = update_data.pop("auto_domain_vars", None)
     if auto_flag and "linked_vars" in update_data:
         update_data["linked_vars"] = _merge_auto_domain_vars(province, intent, update_data.get("linked_vars"))
-    # 保存即补齐：正文改了就按新正文里的占位符补全数据域声明（含子字段占位符的根名）
-    if "template_content" in update_data:
-        base_vars = update_data["linked_vars"] if "linked_vars" in update_data else tpl.get("linked_vars")
-        update_data["linked_vars"], _added = _fill_placeholder_vars(
-            update_data["template_content"], base_vars)
+    # 每次保存都按当前正文重算自动占位符变量，即使正文本次未提交也能清理历史残留。
+    current_content = update_data.get("template_content", tpl.get("template_content"))
+    base_vars = update_data["linked_vars"] if "linked_vars" in update_data else tpl.get("linked_vars")
+    update_data["linked_vars"], _added = _fill_placeholder_vars(
+        current_content, base_vars,
+        preserve_vars=_derive_api_domain_var_keys(province, intent))
 
     try:
         saved = skill_registry.upsert_template(province, intent, update_data)

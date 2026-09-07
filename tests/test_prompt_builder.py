@@ -1165,6 +1165,28 @@ class TestNewFormatLinkedVars(EquivalenceBase):
         # 纯固定文案不凭空补
         self.assertEqual(_fill_placeholder_vars("您好，简单给您介绍一下。", []), ([], []))
 
+    def test_template_save_recomputes_auto_placeholder_vars(self) -> None:
+        """保存时清理已删除的自动占位符变量，同时保留接口域和自定义变量。"""
+        from routers.management import _fill_placeholder_vars
+
+        merged, added = _fill_placeholder_vars(
+            "您好，您的月均消费是 {usage}。",
+            ["table", "pkg_brief", "usage", "custom_field"],
+            preserve_vars=["usage"],
+        )
+        self.assertEqual(merged, ["usage", "custom_field"])
+        self.assertEqual(added, [])
+
+    def test_template_save_keeps_custom_placeholder_root(self) -> None:
+        """直传/自定义占位符按原始根名加入 linked_vars。"""
+        from routers.management import _fill_placeholder_vars
+
+        merged, added = _fill_placeholder_vars(
+            "活动等级：{uniProdGrade}", [], preserve_vars=[]
+        )
+        self.assertEqual(merged, ["uniProdGrade"])
+        self.assertEqual(added, ["uniProdGrade"])
+
     def test_fmt_tags_keeps_numeric_values(self) -> None:
         """数值型标签必须带值进上下文（北京把月均消费/流量放在 tags 里），
         标记型标签仍只报标签名，假值整条丢弃。"""

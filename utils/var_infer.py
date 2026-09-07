@@ -204,7 +204,9 @@ def infer_placeholder_vars(template_content: str) -> List[str]:
         return []
     matched: Set[str] = set()
     for root in _PLACEHOLDER_TOKEN_RE.findall(template_content):
-        ctx_var = _KEY_ALIAS.get(str(root).lower())
-        if ctx_var:
-            matched.add(ctx_var)
+        root = str(root)
+        ctx_var = _KEY_ALIAS.get(root.lower())
+        # 未知根名视为直传/自定义变量，保留原名，供 Prompt 从 extra_info
+        # 或 passthrough_context 中按字段名取值（例如 {uniProdGrade}）。
+        matched.add(ctx_var or root)
     return _ordered(matched)

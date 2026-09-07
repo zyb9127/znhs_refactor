@@ -1881,7 +1881,7 @@
           <el-button
             type="primary"
             :loading="csvImporting"
-            :disabled="!csvFile"
+            :disabled="!csvFile || csvImportCompleted"
             @click="doImportCsv"
           >{{ (props.province && props.intent) ? '导入并保存' : '确认导入' }}</el-button>
         </template>
@@ -4506,11 +4506,13 @@ async function handleTemplateSave(formData) {
 const importVisible  = ref(false)
 const csvFile        = ref(null)
 const csvImporting   = ref(false)
+const csvImportCompleted = ref(false)
 const importMsg      = ref('')
 const importOk       = ref(false)
 
 function openImportCsv() {
   csvFile.value  = null
+  csvImportCompleted.value = false
   importMsg.value = ''
   importVisible.value = true
 }
@@ -4535,11 +4537,13 @@ function downloadCsvTemplate() {
 // el-upload（拖拽/点击）选择文件：取原生 File 供 arrayBuffer 解码
 function onCsvUploadChange(uploadFile) {
   csvFile.value = uploadFile?.raw || null
+  csvImportCompleted.value = false
   importMsg.value = ''
 }
 
 function clearCsvFile() {
   csvFile.value = null
+  csvImportCompleted.value = false
   importMsg.value = ''
 }
 
@@ -4655,7 +4659,11 @@ async function doImportCsv() {
           }),
         })
         const json = await res.json()
-        if (json.code === 200) ok = json.data?.imported ?? parsed.length
+        if (json.code === 200) {
+          ok = json.data?.imported ?? parsed.length
+          // 保留文件卡片供用户确认，但成功后禁止重复提交；重新选择文件时恢复按钮。
+          csvImportCompleted.value = true
+        }
         else failMsg = json.detail || json.message || '保存失败'
       } catch (e) {
         failMsg = e.message
@@ -4694,6 +4702,8 @@ async function doImportCsv() {
       + (skipped ? `，跳过 ${skipped} 条（话术内容为空）` : '')
       + '，保存配置后生效。'
     importOk.value = true
+    // 保留文件卡片供用户确认，并阻止重复追加同一份文件。
+    csvImportCompleted.value = true
     emitChange()
   } catch (e) {
     importMsg.value = '解析失败：' + e.message

@@ -115,6 +115,16 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.warning(f"⚠️ Redis 配置总线初始化失败（不影响启动）: {e}")
 
+        # ── 2.5 分省模型调用量统计（复用 Redis 配置总线连接）─────────
+        # dev 模式不走到这里（llm_stats 保持禁用，查询接口返回 enabled:false）
+        try:
+            from services.llm_stats import llm_stats
+            from services.redis_config_bus import redis_config_bus as _redis_bus
+            llm_stats.init(_redis_bus.client)
+            llm_stats.start()
+        except Exception as e:
+            logger.warning(f"⚠️ 分省调用量统计初始化失败（不影响启动）: {e}")
+
     # ── 3. 加载技能包（从 ES/Redis 或本地文件）────────────────
     skill_registry.initialize()
     logger.info(f"📦 已加载技能包: {len(skill_registry.list_all())} 个")
@@ -296,6 +306,7 @@ _sys.path.insert(0, str(Path(__file__).resolve().parent / "AutoConfigAgent"))
 from routers.realtime import router as realtime_router
 from routers.cross_sell import router as cross_sell_router
 from routers.management import router as management_router
+from routers.stats import router as stats_router
 from management.interface_mapper.router import router as interface_mapper_router
 from routers.spa import gray_router as spa_gray_router, prod_router as spa_prod_router
 from AutoConfigAgent.server import router as auto_config_router
@@ -312,6 +323,7 @@ app.include_router(management_router, prefix="/znhs-gray")
 app.include_router(interface_mapper_router, prefix="/znhs-gray")
 app.include_router(auto_config_router, prefix="/znhs-gray/api/auto-config")
 app.include_router(config_agent_router, prefix="/znhs-gray")
+app.include_router(stats_router, prefix="/znhs-gray")
 
 
 
@@ -321,6 +333,7 @@ app.include_router(management_router, prefix="/znhs")
 app.include_router(interface_mapper_router, prefix="/znhs")
 app.include_router(auto_config_router, prefix="/znhs/api/auto-config")
 app.include_router(config_agent_router, prefix="/znhs")
+app.include_router(stats_router, prefix="/znhs")
 logger.info("🔀 管理路由已挂载: /znhs-gray/api/... 和 /znhs/api/...")
 
 # ── SPA 路由（必须最后注册，含 catch-all）─────────────────────────

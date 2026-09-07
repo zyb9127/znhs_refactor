@@ -669,7 +669,9 @@ class TestNewFormatLinkedVars(EquivalenceBase):
         self.assertIn("提炼其中最能支撑推荐理由的 1-3 个要点", out)
 
     def test_template_is_the_backbone_rule(self) -> None:
-        """规则 4 必须明确「以话术模板为主体框架」：不得改写行文、不得增删模板没有的卖点。"""
+        """规则 4：以话术模板为「内容蓝本」——环节/卖点/事实必须全覆盖且不新增，
+        但允许用自己的口语重新表达（换措辞/句式/语序）以获得每次生成的泛化差异，
+        同时事实值（数字/金额/套餐名/方括号数值）须严格照第 2、3 条原样填入。"""
         out = self.assert_same_prompt(
             ctx=make_ctx(),
             pkg=_SAMPLE_PKG,
@@ -677,9 +679,14 @@ class TestNewFormatLinkedVars(EquivalenceBase):
             linked_vars=["cur_brief", "pkg_brief"],
             field_aliases=_FIELD_ALIASES,
         )
-        self.assertIn("4. 以【话术模板】为话术主体框架", out)
-        self.assertIn("沿用它的句子顺序", out)
-        self.assertIn("不得改写成自己的行文", out)
+        self.assertIn("4. 以【话术模板】为内容蓝本", out)
+        # 必须完整覆盖模板环节/要点、不得新增模板没有的卖点
+        self.assertIn("逐一覆盖、不遗漏也不新增", out)
+        # 允许换措辞/句式/语序以产生泛化差异（不再逐字复述）
+        self.assertIn("不要逐字复述模板", out)
+        self.assertIn("适度调整句子顺序", out)
+        # 但事实值须严格原样填入
+        self.assertIn("须严格照第 2、3 条原样填入、不得改动", out)
 
     def test_length_rule_uses_max_length_and_defers_to_requirement(self) -> None:
         """字数规则按 max_length 实时渲染，并显式让位于运营写的「话术要求」。"""

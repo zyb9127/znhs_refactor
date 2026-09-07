@@ -1,0 +1,55 @@
+{
+  "cases": [
+    {
+      "name": "【演示】河南·营销助手·product_attr 嵌套扩展属性子字段引用",
+      "payload": {
+        "callId": "henan-demo-pa-01",
+        "intent": "套餐推荐",
+        "phone": "15012340511",
+        "topN": 1,
+        "province": "henan",
+        "extra_data": {},
+        "extra_info": {
+          "userinfo": {
+            "currentPackageProductName": "159元5G畅享套餐",
+            "currPrice": "159元/月",
+            "currDomesticTraffic": "30GB",
+            "currDomesticVoice": "500分钟"
+          },
+          "products": [
+            {
+              "activityId": "20230424511581",
+              "productId": "jtppv.2021999900002456",
+              "price": "39.00",
+              "discount_price": "19.00",
+              "Cmn_flow": "10GB",
+              "voice": "100",
+              "direct_flow": "30GB",
+              "business_type": "流量包",
+              "gift_cmn_flow": "5GB",
+              "product_desc": "19元10GB通用流量月包，赠送语音与视频会员",
+              "product_attr": {
+                "voiceShareGift": "50分钟",
+                "giftBusiMcdsName": "视频会员",
+                "discountRate": "5折"
+              },
+              "marketingProductFlag": "1",
+              "marketingActivityFlag": "1",
+              "productName": "19元10G流量包",
+              "activityTypeCode": "1",
+              "activityTypeName": "套餐推荐"
+            }
+          ]
+        },
+        "batch_contexts": [
+          {
+            "product_id": "jtppv.2021999900002456",
+            "stage": "推荐",
+            "scence": ""
+          }
+        ]
+      },
+      "updated_at": "2026-09-02 14:20"
+    }
+  ]
+}

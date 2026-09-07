@@ -1,0 +1,17 @@
+{
+  "name": "zhejiang-downgrade-retention",
+  "description": "浙江降档挽留话术生成 Skill（透传模式）· 迁移自小挽机器人：逐降档原因各出一条挽留话术，支持套餐对比 diff 与空参固定话术兜底",
+  "version": "1.0.0",
+  "type": "scenario",
+  "province": "浙江",
+  "scenario_id": "降档挽留",
+  "config_files": [
+    "api_nodes.json",
+    "biz_config.json"
+  ],
+  "required_plugins": [],
+  "author": "local-test",
+  "openclaw_compatible": true,
+  "status": "published",
+  "published_at": "2026-09-03 11:10"
+}

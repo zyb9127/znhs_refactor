@@ -1,0 +1,82 @@
+{
+  "cc": {
+    "_comment": "浙江·降档挽留（透传模式/直传）。调用方已持有用户信息，通过 extra_info 直传，服务不再回调外部接口。recommended_packages 每个条目=一个降档原因，product_id=原因名；原因专属画像字段放在条目里（{pkg_brief[字段]} 引用），current_package/usage 全原因共享。套餐对比场景条目带目标套餐字段，系统自动算 {diff_str}/diff_table。",
+    "url": "",
+    "method": "POST",
+    "enabled": true,
+    "source_type": "direct",
+    "request_template": {},
+    "response_extract": {},
+    "field_transform": {},
+    "mock_mode": false,
+    "mock_response": {
+      "current_package": {
+        "package_name": "5G智享套餐128元档",
+        "actual_price": "128",
+        "baseFlow": "30",
+        "voice_minutes": "500"
+      },
+      "usage": {
+        "data_usage": {
+          "近6月平均流量(GB)": "12",
+          "近6月平均流量饱和度": "40%"
+        },
+        "voice_usage": {
+          "近6月平均主叫时长": "95"
+        }
+      },
+      "user_info": {
+        "internetAge": "17"
+      },
+      "recommended_packages": [
+        {
+          "product_id": "现有资费太贵",
+          "rank": 1
+        },
+        {
+          "product_id": "流量用不完",
+          "rank": 2,
+          "top5Business": ["腾讯视频", "微信", "抖音短视频"]
+        },
+        {
+          "product_id": "已办理移动其他号码",
+          "rank": 3,
+          "netAge": "2008-02-13(17年)"
+        },
+        {
+          "product_id": "套餐比较口径",
+          "offerName": "目标降档套餐-58元档",
+          "initFee": "58",
+          "offerFlow": "10",
+          "offerVoice": "200",
+          "rank": 4
+        }
+      ]
+    },
+    "direct_mode": "passthrough",
+    "passthrough_fields": [
+      "current_package",
+      "current_package.package_name",
+      "current_package.actual_price",
+      "current_package.baseFlow",
+      "current_package.voice_minutes",
+      "usage",
+      "usage.data_usage",
+      "usage.voice_usage",
+      "user_info",
+      "user_info.internetAge",
+      "recommended_packages",
+      "recommended_packages.product_id",
+      "recommended_packages.offerName",
+      "recommended_packages.initFee",
+      "recommended_packages.offerFlow",
+      "recommended_packages.offerVoice",
+      "recommended_packages.top5Business",
+      "recommended_packages.netAge"
+    ],
+    "created_by": "local-test",
+    "created_at": "2026-09-03 11:10:00",
+    "updated_by": "local-test",
+    "updated_at": "2026-09-03 11:10:00"
+  }
+}

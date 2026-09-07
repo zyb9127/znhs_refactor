@@ -623,42 +623,22 @@
                               <el-option v-for="p in dfPathCandidates" :key="p" :label="p" :value="p" />
                             </el-select>
                           </div>
-                          <div class="df-line">
-                            <span class="df-label">匹配方式</span>
-                            <el-select v-model="row.match" size="small" class="df-match"
-                              @change="commitDfRows">
-                              <el-option label="全部条件满足" value="all" />
-                              <el-option label="任一条件满足" value="any" />
-                            </el-select>
-                            <span class="df-sub-hint df-inline-hint">
-                              任一满足适合判断“流量或语音超套”
-                            </span>
-                          </div>
                           <div class="df-line df-line-top">
                             <span class="df-label">选取条件</span>
                             <div class="df-where-list">
                               <div v-for="(w, j) in row.wheres" :key="j" class="df-where-row">
-                                <el-select v-model="w.k" size="small" class="df-field"
-                                  filterable allow-create default-first-option
-                                  placeholder="字段名，如 over_flow"
-                                  @change="commitDfRows">
-                                  <el-option v-for="p in dfArrayFieldCandidates(row)" :key="p"
-                                    :label="p" :value="p" />
-                                </el-select>
-                                <el-select v-model="w.op" size="small" class="df-op"
-                                  @change="commitDfRows">
-                                  <el-option v-for="o in DF_CMP_OPTIONS" :key="o.value"
-                                    :label="o.label" :value="o.value" />
-                                </el-select>
+                                <el-input v-model="w.k" size="small" placeholder="字段名，如 timeType"
+                                  @input="commitDfRows" />
+                                <span class="df-eq">=</span>
                                 <el-input v-model="w.v" size="small" placeholder="值，如 0"
                                   @input="commitDfRows" />
                                 <el-button link type="danger" size="small"
                                   @click="row.wheres.splice(j, 1); commitDfRows()">删除</el-button>
                               </div>
                               <el-button size="small" plain
-                                @click="row.wheres.push({ k: '', op: 'eq', v: '' }); commitDfRows()">+ 添加条件</el-button>
+                                @click="row.wheres.push({ k: '', v: '' })">+ 添加条件</el-button>
                               <div class="df-sub-hint">
-                                命中第一个匹配元素；“任一条件满足”时，多个条件按或处理。留空则取数组第一条。
+                                多个条件需全部满足；命中第一个匹配元素。留空则取数组第一条。
                               </div>
                             </div>
                           </div>
@@ -1427,6 +1407,71 @@
           <el-badge :value="templateList.length" type="info" style="margin-left:6px;" />
         </template>
 
+        <!-- 话术生成参数（采样温度 / 字数上限）-->
+        <details class="tpl-match-panel" open>
+          <summary class="tpl-match-summary">
+            ▶ 话术生成参数（本技能包生效）
+            <span class="tpl-match-summary-hint">
+              控制大模型生成话术的多样性与长度；改后点右侧「保存设置」生效
+            </span>
+          </summary>
+          <div class="tpl-match-body">
+            <div class="tpl-match-toolbar">
+              <span class="tpl-match-hint" style="margin:0;">
+                打开时自动回填已保存配置；与下方「模板匹配规则」共用「保存设置」
+              </span>
+              <el-button
+                type="primary" size="small"
+                :loading="matchSettingsSaving"
+                :disabled="matchSettingsSaving"
+                @click="saveMatchSettings"
+              >保存设置</el-button>
+        </div>
+
+            <div class="gen-param-grid">
+              <div class="gen-param-item">
+                <div class="gen-param-label">
+                  采样温度
+                  <span class="gen-param-tip">
+                    越低越稳定（相同入参趋近同一话术、标点也固定），越高越多样。
+                    推荐 0.7~0.9；需要每次都一样可调低到 0.2 左右。默认 0.8。
+                  </span>
+          </div>
+                <div class="gen-param-ctrl">
+                  <el-slider
+                    v-model="strategy.script_temperature"
+                    :min="0" :max="1.5" :step="0.05"
+                    :marks="{ 0.2: '稳定', 0.8: '默认', 1.2: '多样' }"
+                    style="max-width: 360px;"
+                  />
+                  <el-input-number
+                    v-model="strategy.script_temperature"
+                    :min="0" :max="1.5" :step="0.05" :precision="2"
+                    size="small" controls-position="right"
+                    style="width: 120px; margin-left: 16px;"
+                  />
+        </div>
+        </div>
+
+              <div class="gen-param-item">
+                <div class="gen-param-label">
+                  话术字数上限
+                  <span class="gen-param-tip">单条话术最大字符数，超出会被截断。营销话术一般 150 字内。</span>
+                </div>
+                <div class="gen-param-ctrl">
+                  <el-input-number
+                    v-model="strategy.max_script_length"
+                    :min="20" :max="500" :step="10"
+                    size="small" controls-position="right"
+                    style="width: 140px;"
+                  />
+                  <span style="margin-left: 8px; color: #909399;">字</span>
+              </div>
+              </div>
+            </div>
+          </div>
+        </details>
+
         <!-- 模板匹配与填槽设置（接口查询模式）-->
         <details class="tpl-match-panel" open @toggle="e => e.target.open && ensureIfcDetails()">
           <summary class="tpl-match-summary">
@@ -1434,7 +1479,7 @@
             <span class="tpl-match-summary-hint">
               直传模式 / 接口查询模式通用；决定每个推荐产品命中哪条模板，以及标准域为空时如何兜底
             </span>
-          </summary>
+            </summary>
           <div class="tpl-match-body">
             <div class="tpl-match-toolbar">
               <span class="tpl-match-hint" style="margin:0;">
@@ -1468,7 +1513,7 @@
               <el-tag v-if="hasCustomMatch" size="small" type="warning">已自定义</el-tag>
               <el-tag v-else size="small" type="success">全部默认</el-tag>
               <span class="tpl-match-summary-txt">{{ matchConfigSummary }}</span>
-        </div>
+                  </div>
 
             <!-- 高级设置：自定义取值字段与兜底，默认折叠，未配置时不影响默认行为 -->
             <details class="tpl-adv" :open="hasCustomMatch">
@@ -1494,7 +1539,7 @@
                   </el-select>
                   <el-button size="small" plain @click="autoRecommendMatchField">智能推荐</el-button>
                   <span class="tpl-match-hint">留空即用默认字段，通常不用改</span>
-                </div>
+                  </div>
                 <div class="tpl-match-row">
                   <span class="tpl-match-label"><span class="tpl-match-step">2</span>业务类型字段</span>
                   <el-select
@@ -1512,7 +1557,7 @@
                     </el-option>
                   </el-select>
                   <span class="tpl-match-hint">产品里没这个字段会自动跳过，留空即可</span>
-              </div>
+                </div>
                 <div class="tpl-match-row">
                   <span class="tpl-match-label"><span class="tpl-match-step">3</span>产品名兜底</span>
                   <el-switch
@@ -1561,7 +1606,7 @@
                     </el-option>
                   </el-select>
                   <span class="tpl-match-hint">入参已传「意图」则忽略</span>
-                  </div>
+            </div>
 
                 <el-divider style="margin:12px 0 6px;" />
                 <div class="tpl-match-group-title">话术槽位没数据时，从入参回填（空域兜底）</div>
@@ -1596,7 +1641,7 @@
                     <div class="tpl-match-hint" style="margin-top:4px;">
                       仅当接口映射后标准域仍为空时生效（如：当前套餐 ← currentMainOffer）；接口有数据则不覆盖
               </div>
-                  </div>
+              </div>
             </div>
 
                 <!-- 空槽位口径（biz_config.slot_fallback）不在本页面暴露：默认「照实填充」对所有
@@ -1608,8 +1653,8 @@
                   ⚠ 本技能包已配置<b>空槽位「删掉整句」</b>（旧口径）：槽位取不到值、或值为
                   0（0元 / 0分钟 / 0GB）时，包含它的那句话会被整句删除。
                   平台默认口径为「照实填充」，如需切回请联系管理员调整技能包配置
-              </div>
-            </div>
+          </div>
+        </div>
           </details>
           </div>
         </details>
@@ -2171,26 +2216,30 @@ const passthroughSampleFields = computed(() => {
       const v = obj[k]
       const children = []
       const seen = new Set()
-      const push = (src, isList) => {
+      // 递归收子字段：字典型字段（userinfo.userExtra / products[].product_attr）父级可整块勾选，
+      // 同时把下一级子键逐一列出，支持多级（如 a.b.c）。数组元素（产品）与字典同样对待，
+      // 打通营销助手 products 里的嵌套扩展属性。seen 以完整路径 key 去重，避免多产品并集重复。
+      const push = (src, pathPrefix, leafPrefix) => {
         if (!src || typeof src !== 'object' || Array.isArray(src)) return
         for (const c of Object.keys(src)) {
-          if (c.startsWith('_') || seen.has(c)) continue
-          seen.add(c)
+          if (c.startsWith('_')) continue
+          const key = `${pathPrefix}.${c}`
+          const leaf = leafPrefix ? `${leafPrefix}.${c}` : c
           const cv = src[c]
-          // 嵌套对象子字段（userinfo.userExtra）：只列它的叶子，父级本身仍可整块勾选
-          if (!isList && _isPlainObj(cv) && Object.keys(cv).length) {
-            children.push({ key: `${k}.${c}`, leaf: c, preview: _shortPreview(cv) })
-            for (const g of Object.keys(cv)) {
-              if (g.startsWith('_')) continue
-              children.push({ key: `${k}.${c}.${g}`, leaf: `${c}.${g}`, preview: _shortPreview(cv[g]) })
-            }
+          if (_isPlainObj(cv) && Object.keys(cv).length) {
+            // 字典型：父级本身可整块勾选（chip 去重列一条），并「始终」递归展开子键（多级）——
+            // 数组多元素时不同产品的子键要取并集，故命中 seen 也不能跳过递归。
+            if (!seen.has(key)) { seen.add(key); children.push({ key, leaf, preview: _shortPreview(cv) }) }
+            push(cv, key, leaf)
             continue
           }
-          children.push({ key: `${k}.${c}`, leaf: c, preview: _shortPreview(cv) })
+          if (seen.has(key)) continue
+          seen.add(key)
+          children.push({ key, leaf, preview: _shortPreview(cv) })
         }
       }
-      if (Array.isArray(v)) v.forEach(it => push(it, true))  // 数组各元素字段取并集（产品间字段可不齐）
-      else push(v, false)
+      if (Array.isArray(v)) v.forEach(it => push(it, k, ''))  // 数组各元素字段取并集（产品间字段可不齐）
+      else push(v, k, '')
       return { key: k, preview: _shortPreview(v), children, isList: Array.isArray(v) }
     })
   } catch { return [] }
@@ -2398,76 +2447,19 @@ const DF_RESERVED_NAMES = [
   'user_info', 'user_profile', 'domain_ext',
 ]
 
-/**
- * from/路径候选：样例里的顶层与子字段 + 前面已定义的派生名（派生可层层引用）。
- *
- * array_find 产出的是样例数组中的一个对象。以前这里只加入了派生名本身，
- * 所以「当月资源.over_flow_fee」虽然是后端支持的合法路径，却不会出现在
- * sum 的下拉候选里，只能依赖 allow-create 手输。这里根据 array_find 的来源
- * 数组，把对象子字段映射到派生名下，供后续 sum/bucket 直接选择。
- */
+/** from/路径候选：样例里的顶层与子字段 + 前面已定义的派生名（派生可层层引用）*/
 const dfPathCandidates = computed(() => {
   const out = []
   for (const f of passthroughSampleFields.value) {
     out.push(f.key)
     for (const c of (f.children || [])) out.push(c.key)
   }
-  // 样例暂时为空或接口详情尚未回填时，复用已保存的透传路径，避免下拉只剩派生变量。
-  for (const p of (ifcEditForm.passthrough_fields || [])) {
-    if (typeof p === 'string' && p.trim() && !out.includes(p.trim())) out.push(p.trim())
-  }
   for (const r of dfRows.value) {
     const n = (r.name || '').trim()
-    if (!n) continue
-    if (!out.includes(n)) out.push(n)
-
-    // array_find 的结果是一个数组元素对象。复用样例解析出的来源数组子字段，
-    // 生成「派生名.子字段」候选，例如：当月资源.over_flow_fee。
-    if (r.type === 'array_find') {
-      const source = String(r.from || '').trim()
-      const sourceField = passthroughSampleFields.value.find(f => f.key === source)
-      for (const c of (sourceField?.children || [])) {
-        const prefix = `${source}.`
-        const childPath = c.key.startsWith(prefix) ? c.key.slice(prefix.length) : c.key
-        const derivedPath = `${n}.${childPath}`
-        if (childPath && !out.includes(derivedPath)) out.push(derivedPath)
-      }
-      // 样例字段未回填时，从已保存的透传路径推导 array_find 结果对象的子路径。
-      const prefix = source ? `${source}.` : ''
-      if (prefix) {
-        for (const p of (ifcEditForm.passthrough_fields || [])) {
-          if (typeof p !== 'string' || !p.startsWith(prefix)) continue
-          const childPath = p.slice(prefix.length)
-          const derivedPath = `${n}.${childPath}`
-          if (childPath && !out.includes(derivedPath)) out.push(derivedPath)
-        }
-      }
-    }
+    if (n && !out.includes(n)) out.push(n)
   }
   return out
 })
-
-/** array_find 条件字段候选：来源数组元素的字段名 + 已保存透传路径中的叶子名。 */
-function dfArrayFieldCandidates(row) {
-  const out = []
-  const push = (v) => {
-    const s = String(v || '').trim()
-    if (s && !out.includes(s)) out.push(s)
-  }
-  const source = String(row?.from || '').trim()
-  const sourceField = passthroughSampleFields.value.find(f => f.key === source)
-  const prefix = source ? `${source}.` : ''
-  for (const c of (sourceField?.children || [])) {
-    push(c.key.startsWith(prefix) ? c.key.slice(prefix.length) : c.key)
-  }
-  for (const p of (ifcEditForm.passthrough_fields || [])) {
-    if (typeof p === 'string' && prefix && p.startsWith(prefix)) {
-      push(p.slice(prefix.length).split('.')[0])
-    }
-  }
-  for (const w of (row?.wheres || [])) push(w.k)
-  return out
-}
 
 const dfNameWarnings = computed(() => {
   const warns = []
@@ -2522,19 +2514,10 @@ function parseDfToRows() {
       name,
       type: DF_TYPES.includes(type) ? type : 'array_find',
       from: Array.isArray(spec.from) ? '' : String(spec.from ?? ''),
-      match: spec.match === 'any' ? 'any' : 'all',
       sumFrom: Array.isArray(spec.from)
         ? spec.from.map(String)
         : (type === 'sum' && spec.from ? [String(spec.from)] : []),
-      wheres: Object.entries(spec.where || {}).map(([k, v]) => {
-        const op = v && typeof v === 'object' && !Array.isArray(v)
-          ? DF_OPS.find(o => v[o] !== undefined) : null
-        return {
-          k,
-          op: op || 'eq',
-          v: op ? String(v[op] ?? '') : (v == null ? '' : String(v)),
-        }
-      }),
+      wheres: Object.entries(spec.where || {}).map(([k, v]) => ({ k, v: v == null ? '' : String(v) })),
       rules: [],
       advanced: false,
       raw: null,
@@ -2559,7 +2542,7 @@ function parseDfToRows() {
       }
       if (unsupported) { row.advanced = true; row.raw = spec; row.rules = [] }
     }
-    if (row.type === 'array_find' && !row.wheres.length) row.wheres = [{ k: '', op: 'eq', v: '' }]
+    if (row.type === 'array_find' && !row.wheres.length) row.wheres = [{ k: '', v: '' }]
     rows.push(row)
   }
   dfRows.value = rows
@@ -2577,16 +2560,11 @@ function commitDfRows() {
       const where = {}
       for (const w of (row.wheres || [])) {
         const k = (w.k || '').trim()
-        if (!k) continue
-        const op = DF_OPS.includes(w.op) ? w.op : 'eq'
-        where[k] = op === 'eq'
-          ? String(w.v ?? '')
-          : { [op]: _dfOperand(w.v) }
+        if (k) where[k] = String(w.v ?? '')
       }
       out[name] = {
         type: 'array_find',
         from: (row.from || '').trim(),
-        ...(row.match === 'any' ? { match: 'any' } : {}),
         ...(Object.keys(where).length ? { where } : {}),
       }
     } else if (row.type === 'sum') {
@@ -2627,7 +2605,6 @@ function dfNeedsFrom(row) {
 function addDfRow(kind) {
   const row = {
     uid: ++_dfUid, name: '', from: '', sumFrom: [],
-    match: 'all',
     wheres: [], rules: [], advanced: false, raw: null,
   }
   if (kind === 'judge') {
@@ -2639,7 +2616,7 @@ function addDfRow(kind) {
     dfRows.value.push(row)
   } else {
     row.type = 'array_find'
-    row.wheres = [{ k: '', op: 'eq', v: '' }]
+    row.wheres = [{ k: '', v: '' }]
     // 插到最后一条字段计算之后：界面分组顺序与数组顺序保持一致
     const lastCalc = dfRows.value.reduce((acc, r, i) => (r.type !== 'bucket' ? i : acc), -1)
     dfRows.value.splice(lastCalc + 1, 0, row)
@@ -2661,10 +2638,7 @@ function onDfRuleModeChange(r) {
 }
 /** 字段计算内换算子（数组选元素 ↔ 求和）时补齐子结构 */
 function onDfTypeChange(row) {
-  if (row.type === 'array_find' && !row.wheres.length) {
-    row.match = row.match || 'all'
-    row.wheres = [{ k: '', op: 'eq', v: '' }]
-  }
+  if (row.type === 'array_find' && !row.wheres.length) row.wheres = [{ k: '', v: '' }]
   commitDfRows()
 }
 // 高级 JSON → 表格：切回表格模式时同步（与 field_transform 的 ftVisualMode 同行为）
@@ -4704,7 +4678,7 @@ async function doImportCsv() {
 }
 
 // ── 默认话术要求（context 工程版，与 TemplateEditDialog 保持一致）──────────────
-const DEFAULT_SCRIPT_REQ = '以用户专属客户经理的口吻，用自然、口语化、像真人一对一沟通的语气说话，杜绝生硬模板腔与官话套话（如"尊敬的客户""钜惠来袭"）。话术骨架以【话术模板】为准：模板已给出句子顺序与结构时就照模板走，只做占位符填充和语句通顺化，不要另起一套结构、不要增删模板里没有的卖点；模板没写明结构时，再按「亲切开场 → 结合【上下文数据】中的当前套餐、历史用量与用户标签点出 1 个最突出的痛点 → 用推荐套餐对应字段的真实值（月费/流量/语音等）说清如何解决、并做前后对比放大获得感 → 一句自然的办理引导」组织。各句衔接顺滑不生硬；只讲有数据支撑的卖点，无数据的点不提、不夸大；有真实的专属/限时权益可点明（无则不编）。控制在 150 字以内，只保留一个明确的行动引导，结尾干脆不啰嗦。'
+const DEFAULT_SCRIPT_REQ = '以用户专属客户经理的口吻，用自然、口语化、像真人一对一沟通的语气说话，杜绝生硬模板腔与官话套话（如"尊敬的客户""钜惠来袭"）。话术骨架以【话术模板】为准：模板已给出环节、卖点与大致顺序时，覆盖其中每个要点、不增删模板没有的卖点，但请用自己的自然口语重新表达（可更换措辞、句式与连接词、适度调整语序），让同一模板每次生成都有合理差异；月费/流量/语音等事实数值照实填、不改动。模板没写明结构时，再按「亲切开场 → 结合【上下文数据】中的当前套餐、历史用量与用户标签点出 1 个最突出的痛点 → 用推荐套餐对应字段的真实值（月费/流量/语音等）说清如何解决、并做前后对比放大获得感 → 一句自然的办理引导」组织。各句衔接顺滑不生硬；只讲有数据支撑的卖点，无数据的点不提、不夸大；有真实的专属/限时权益可点明（无则不编）。控制在 150 字以内，只保留一个明确的行动引导，结尾干脆不啰嗦。'
 
 // ── 智能映射状态 ────────────────────────────────────────
 const smartMapOpen    = ref([])
@@ -5848,6 +5822,8 @@ const strategy = reactive({
   top_n: 3,
   max_script_length: 150,
   max_parallel_scripts: 3,
+  // 话术生成采样温度：越低越稳定（相同入参趋近同一结果），越高越多样。默认 0.8。
+  script_temperature: 0.8,
 })
 // 模板匹配取值配置（biz_config.template_match）：指定产品信息中哪个字段
 // （支持点路径、逗号分隔多候选）用于匹配话术模板维度。
@@ -6222,6 +6198,7 @@ function loadFromProps(val) {
   strategy.top_n               = s.top_n               ?? 3
   strategy.max_script_length   = s.max_script_length   ?? 150
   strategy.max_parallel_scripts = s.max_parallel_scripts ?? 3
+  strategy.script_temperature  = (s.script_temperature ?? 0.8)
 
   // 模板匹配取值配置（值可能是字符串或数组，UI 统一按逗号分隔字符串编辑）
   const tm = biz.template_match || {}
@@ -6625,6 +6602,36 @@ async function removeTemplate(idx) {
   border-radius: var(--radius);
   padding: 14px 16px;
   margin-bottom: 16px;
+}
+
+/* 话术生成参数面板 */
+.gen-param-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 4px 2px;
+}
+.gen-param-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gen-param-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+}
+.gen-param-tip {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #909399;
+  line-height: 1.5;
+}
+.gen-param-ctrl {
+  display: flex;
+  align-items: center;
 }
 
 
@@ -8356,10 +8363,6 @@ async function removeTemplate(idx) {
   display: flex; align-items: center; gap: 6px; margin-bottom: 5px;
 }
 .df-where-row .el-input { flex: 1; min-width: 0; }
-.df-where-row .df-field { flex: 1; min-width: 0; }
-.df-where-row .df-op { width: 106px; flex: 0 0 106px; }
-.df-match { width: 150px; flex: 0 0 150px; }
-.df-inline-hint { margin-left: 0; }
 .df-rule-row .df-op { width: 106px; flex-shrink: 0; }
 .df-rule-row .df-operand { width: 96px; flex-shrink: 0; }
 .df-rule-row > .el-input:last-of-type { flex: 1; min-width: 0; }
@@ -9004,3 +9007,9 @@ async function removeTemplate(idx) {
 }
 .dfm-v2-tpl-section-hd--unlinked { color: #e6a23c; border-bottom-color: #fdf3e3; }
 </style>
+
+
+
+
+
+

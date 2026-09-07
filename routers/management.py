@@ -573,6 +573,28 @@ async def get_context_vars(province: str, intent: str):
             "token": _path, "label": _path, "path": _path, "sample": _sf.get("sample"),
         })
 
+    # 产品字段里的「字典型扩展属性」（如营销助手 0902 报文的 products.product_attr）——
+    # 逐产品各取自己那份，且要精确到下一级子键（支持多级）。运行期这类嵌套子字段只有
+    # {pkg_brief[父][子]…} 这种以推荐条为根的方括号占位符可解析（裸叶子名走不到嵌套里），
+    # 故这里用 subfields_map['pkg_brief'] 里带层级（path 含 '.'）的条目，保留其可解析的
+    # 方括号 token，供两种口径的调色板展开选取。ID/排序类根字段的子键同样跳过。
+    _prod_nested_subs: List[Dict[str, Any]] = []
+    for _sf in (subfields_map.get("pkg_brief") or []):
+        _path = str(_sf.get("path") or "")
+        if "." not in _path:
+            continue                              # 顶层字段沿用上方裸叶子 chip
+        if _path.split(".", 1)[0] in _PKG_SKIP:
+            continue                              # ID/排序等根字段的子键不作话术槽位
+        _tok = str(_sf.get("token") or "")
+        if not _tok:
+            continue
+        _prod_nested_subs.append({
+            "token": _tok,                        # 形如 pkg_brief[product_attr][voiceShareGift]
+            "label": _path.split(".")[-1],
+            "path": _path,
+            "sample": _sf.get("sample"),
+        })
+
     result = []
     seen = set()
 
@@ -628,6 +650,17 @@ async def get_context_vars(province: str, intent: str):
                         continue
                     _seen_lf.add(_lf)
                     _subs.append({"token": _lf, "label": _lf, "path": _lf, "sample": _lv})
+            # 追加列表元素里「字典型扩展属性」的下一级子键（多级），如 products.product_attr：
+            # 裸叶子走不进嵌套，改用可解析的 {pkg_brief[父][子]…} 方括号占位符（见 _prod_nested_subs）。
+            # 仅当子键的根字段确实存在于本列表元素中时才追加，避免把产品的嵌套子键错挂到其它列表域。
+            if _prod_nested_subs:
+                _el_keys: set = set()
+                for _el in _sample:
+                    if isinstance(_el, dict):
+                        _el_keys.update(k for k in _el.keys() if isinstance(k, str))
+                for _ns in _prod_nested_subs:
+                    if str(_ns.get("path") or "").split(".", 1)[0] in _el_keys:
+                        _subs.append(_ns)
         elif _selected:
             # 运营在「透传字段」页精确勾了子字段 → 只暴露这几个
             for _lf in _selected:
@@ -685,7 +718,7 @@ async def get_context_vars(province: str, intent: str):
             "label": "推荐产品字段",
             "source": "recommended_product",
             "desc": "推荐产品字段（展开选具体字段作占位符；多产品时每条话术各取自己那条产品的值）",
-            "subfields": _prod_subs,
+            "subfields": _prod_subs + _prod_nested_subs,
         })
 
     # 固定变量（主服务传入 / 通用）

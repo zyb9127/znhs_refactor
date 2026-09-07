@@ -1,0 +1,148 @@
+{
+  "params": {
+    "systemId": "NGRC",
+    "optType": "0,1,2",
+    "inputs": {
+      "sequenceNo": "bb45ccc4-de6c-4d9b-b92f-e27e72ac9e20",
+      "servNumber": "15012340511",
+      "provinceCode": "371",
+      "callId": "CALL_20260902_0001",
+      "staffId": "HE06209",
+      "staffNo": "6209",
+      "touchNumber": "TOUCH_20260902_0001",
+      "userinfo": {
+        "currentPackageProductId": "jtppv.2021999900001001",
+        "currentPackageProductName": "5G畅享套餐59元档",
+        "currPrice": "59",
+        "currDomesticTraffic": "30",
+        "currDescribe": "59元含30GB国内流量+500分钟国内语音",
+        "currDirectedTraffic": "10",
+        "currDomesticVoice": "500",
+        "currBroadband": "300M",
+        "is_sub_card": "0"
+      },
+      "products": [
+        {
+          "activityId": "20230424511581",
+          "productId": "jtppv.2021999900002456",
+          "price": "10",
+          "discount_price": "5",
+          "Cmn_flow": "0",
+          "voice": "0",
+          "direct_flow": "0",
+          "business_type": "语音加装包",
+          "gift_cmn_flow": "0",
+          "product_desc": "语音共享包，家庭成员共享语音分钟数",
+          "product_attr": {
+            "voiceShareGift": "200分钟",
+            "giftBusiMcdsName": "亲情网",
+            "discountRate": "0.5"
+          },
+          "marketingProductFlag": "1",
+          "marketingActivityFlag": "1",
+          "productName": "语音共享优惠包",
+          "activityTypeCode": "YYGX",
+          "activityTypeName": "语音共享",
+          "broadband": ""
+        },
+        {
+          "activityId": "20230424511582",
+          "productId": "jtppv.2021999900002457",
+          "price": "20",
+          "discount_price": "15",
+          "Cmn_flow": "20",
+          "voice": "100",
+          "direct_flow": "5",
+          "business_type": "流量包",
+          "gift_cmn_flow": "5",
+          "product_desc": "20GB通用流量+5GB定向流量+5GB赠送流量",
+          "product_attr": {
+            "voiceShareGift": "0分钟",
+            "giftBusiMcdsName": "",
+            "discountRate": "0.75"
+          },
+          "marketingProductFlag": "1",
+          "marketingActivityFlag": "0",
+          "productName": "20GB流量畅享包",
+          "activityTypeCode": "LLB",
+          "activityTypeName": "流量加装",
+          "broadband": ""
+        }
+      ],
+      "userinfo_json": [
+        {
+          "timeType": "0",
+          "total_flow": "30",
+          "used_flow": "32",
+          "remain_flow": "0",
+          "over_flow": "2",
+          "total_cmn_flow": "30",
+          "used_cmn_flow": "31",
+          "remain_cmn_flow": "0",
+          "over_cmn_flow": "1",
+          "total_voice": "500",
+          "used_voice": "520",
+          "remain_voice": "0",
+          "over_voice": "20",
+          "user_consume": "78.5",
+          "over_flow_fee": "6",
+          "over_voice_fee": "3"
+        },
+        {
+          "timeType": "1",
+          "total_flow": "30",
+          "used_flow": "28",
+          "remain_flow": "2",
+          "over_flow": "0",
+          "total_cmn_flow": "30",
+          "used_cmn_flow": "27",
+          "remain_cmn_flow": "3",
+          "over_cmn_flow": "0",
+          "total_voice": "500",
+          "used_voice": "460",
+          "remain_voice": "40",
+          "over_voice": "0",
+          "user_consume": "59",
+          "over_flow_fee": "0",
+          "over_voice_fee": "0"
+        },
+        {
+          "timeType": "2",
+          "total_flow": "30",
+          "used_flow": "35",
+          "remain_flow": "0",
+          "over_flow": "5",
+          "total_cmn_flow": "30",
+          "used_cmn_flow": "33",
+          "remain_cmn_flow": "0",
+          "over_cmn_flow": "3",
+          "total_voice": "500",
+          "used_voice": "600",
+          "remain_voice": "0",
+          "over_voice": "100",
+          "user_consume": "95",
+          "over_flow_fee": "15",
+          "over_voice_fee": "15"
+        }
+      ],
+      "ordered_activity_list": [
+        {
+          "package_id": "PKG_ORD_001",
+          "package_name": "视频彩铃体验包"
+        }
+      ],
+      "cancel_activity_3m_list": [
+        {
+          "package_id": "PKG_CAN_001",
+          "package_name": "流量翻倍活动"
+        }
+      ],
+      "end_activity_6m_list": [
+        {
+          "package_id": "PKG_END_001",
+          "package_name": "5G会员权益包"
+        }
+      ]
+    }
+  }
+}

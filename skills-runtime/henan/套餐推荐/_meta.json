@@ -1,0 +1,17 @@
+{
+  "name": "henan-package-recommend",
+  "description": "河南套餐推荐话术生成 Skill（营销助手统一接口 · product_attr 嵌套扩展属性子字段引用演示）",
+  "version": "1.0.0",
+  "type": "scenario",
+  "province": "河南",
+  "scenario_id": "套餐推荐",
+  "config_files": [
+    "api_nodes.json",
+    "biz_config.json"
+  ],
+  "required_plugins": [],
+  "author": "local-test",
+  "openclaw_compatible": true,
+  "status": "published",
+  "published_at": "2026-09-02 14:20"
+}

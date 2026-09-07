@@ -30,6 +30,143 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# ── ES 客户端版本兼容层 ──────────────────────────────────────────────
+# 本模块全程使用 elasticsearch-py 7.x 的调用风格：body= / ignore= / doc_type=。
+# 这三者在 8.x 起被移除或改名（http_auth→basic_auth、body→显式 kwargs、
+# doc_type 删除、ignore→ignore_status），且 8.x 客户端默认拒绝连接非 8.x 服务端。
+# 因此线上一旦装到 8.x/9.x，官方客户端不可用 → 配置读写全失败 → 页面查不到配置。
+# 下面的 REST 适配器直接走 ES HTTP 接口，使 ES 访问与 elasticsearch-py 版本解耦：
+# 装了 7.x 走官方客户端（行为不变），未装或装了 8.x+ 自动改走 REST，无需改部署环境。
+
+
+class _EsHttpError(Exception):
+    """ES 返回非预期状态码（与 elasticsearch-py 抛异常的行为对齐）。"""
+
+    def __init__(self, status: int, payload: Any) -> None:
+        self.status = status
+        self.payload = payload
+        super().__init__(f"ES HTTP {status}: {payload}")
+
+
+def _quote_seg(value: Any) -> str:
+    """URL 路径段转义。文档 _id 含 ':' 与中文意图名（如 tianjin:营销活动:biz_config:1），
+    必须整体百分号编码，否则 ES 按路径分隔符解析导致 404。"""
+    from urllib.parse import quote
+
+    return quote(str(value), safe="")
+
+
+class _RestIndices:
+    """indices.* 子命名空间：仅实现本模块用到的 create / get_mapping / put_settings。"""
+
+    def __init__(self, client: "_RestEsClient") -> None:
+        self._c = client
+
+    def create(self, index: str, body: Optional[Dict[str, Any]] = None,
+               ignore: Any = (), **_: Any) -> Dict[str, Any]:
+        return self._c.request("PUT", f"/{index}", body=body, ignore=ignore)
+
+    def get_mapping(self, index: str, ignore: Any = (), **_: Any) -> Dict[str, Any]:
+        return self._c.request("GET", f"/{index}/_mapping", ignore=ignore)
+
+    def put_settings(self, index: str, body: Optional[Dict[str, Any]] = None,
+                     ignore: Any = (), **_: Any) -> Dict[str, Any]:
+        return self._c.request("PUT", f"/{index}/_settings", body=body, ignore=ignore)
+
+
+class _RestEsClient:
+    """基于 httpx 的极简 ES 客户端（只实现本模块用到的 API）。
+
+    对外保持 elasticsearch-py 7.x 的签名与响应结构，因此 ESConfigStore 的
+    全部调用点无需任何改动；兼容 ES 5.x~8.x 服务端。
+    多节点按顺序故障转移：连不上换下一个；服务端已应答的错误状态不再重试。
+    """
+
+    def __init__(self, hosts: Any, username: str = "", password: str = "",
+                 timeout: float = 10.0) -> None:
+        import httpx  # 延迟 import：httpx 缺失时不影响主服务启动
+
+        self._hosts = [str(h).rstrip("/") for h in (hosts or []) if h]
+        if not self._hosts:
+            raise ValueError("ES hosts 为空")
+        self._http = httpx.Client(
+            timeout=timeout,
+            verify=False,
+            auth=(username, password) if username else None,
+            headers={"Content-Type": "application/json"},
+        )
+        self.indices = _RestIndices(self)
+
+    @staticmethod
+    def _ignore_set(ignore: Any) -> set:
+        """把 ignore=404 / [400, 404] 归一为状态码集合（与 es-py 语义一致：
+        命中的状态码不抛异常，直接返回响应体）。"""
+        if ignore is None:
+            return set()
+        if isinstance(ignore, int):
+            return {ignore}
+        try:
+            return {int(x) for x in ignore}
+        except (TypeError, ValueError):
+            return set()
+
+    def request(self, method: str, path: str, body: Optional[Dict[str, Any]] = None,
+                ignore: Any = ()) -> Dict[str, Any]:
+        allow = self._ignore_set(ignore)
+        last_err = ""
+        for host in self._hosts:
+            try:
+                resp = self._http.request(method, f"{host}{path}", json=body)
+            except Exception as e:  # 该节点不可达 → 换下一个
+                last_err = f"{host}: {e}"
+                continue
+            try:
+                data = resp.json()
+            except Exception:
+                data = {"raw": resp.text}
+            if not isinstance(data, dict):
+                data = {"raw": data}
+            if resp.status_code < 300 or resp.status_code in allow:
+                return data
+            # 服务端已应答的错误：与 es-py 一致抛出，不再试其它节点
+            raise _EsHttpError(resp.status_code, data)
+        raise ConnectionError(
+            f"ES 所有节点均不可达（共 {len(self._hosts)} 个），最后错误: {last_err}"
+        )
+
+    def _doc_path(self, index: str, doc_id: Any, doc_type: Optional[str] = None) -> str:
+        return f"/{index}/{_quote_seg(doc_type or '_doc')}/{_quote_seg(doc_id)}"
+
+    # ── 文档级 API ────────────────────────────────────────────
+    def info(self, **_: Any) -> Dict[str, Any]:
+        return self.request("GET", "/")
+
+    def index(self, index: str, id: Any = None, body: Optional[Dict[str, Any]] = None,
+              doc_type: Optional[str] = None, ignore: Any = (), **_: Any) -> Dict[str, Any]:
+        return self.request("PUT", self._doc_path(index, id, doc_type), body=body, ignore=ignore)
+
+    def get(self, index: str, id: Any = None, doc_type: Optional[str] = None,
+            ignore: Any = (), **_: Any) -> Dict[str, Any]:
+        return self.request("GET", self._doc_path(index, id, doc_type), ignore=ignore)
+
+    def delete(self, index: str, id: Any = None, doc_type: Optional[str] = None,
+               ignore: Any = (), **_: Any) -> Dict[str, Any]:
+        return self.request("DELETE", self._doc_path(index, id, doc_type), ignore=ignore)
+
+    def update(self, index: str, id: Any = None, body: Optional[Dict[str, Any]] = None,
+               doc_type: Optional[str] = None, ignore: Any = (), **_: Any) -> Dict[str, Any]:
+        # 7.x+：POST /{index}/_update/{id}；5.x/6.x：POST /{index}/{type}/{id}/_update
+        if doc_type:
+            path = f"/{index}/{_quote_seg(doc_type)}/{_quote_seg(id)}/_update"
+        else:
+            path = f"/{index}/_update/{_quote_seg(id)}"
+        return self.request("POST", path, body=body, ignore=ignore)
+
+    def search(self, index: str, body: Optional[Dict[str, Any]] = None,
+               ignore: Any = (), **_: Any) -> Dict[str, Any]:
+        return self.request("POST", f"/{index}/_search", body=body, ignore=ignore)
+
+
 class ESConfigStore:
     """ES 配置版本存储（单例）"""
 
@@ -59,19 +196,54 @@ class ESConfigStore:
             return
 
         try:
+            self._client, transport = self._build_client(hosts, username, password)
+            self._enabled = True
+            logger.info(f"[ESConfigStore] ES 客户端就绪（传输方式: {transport}）")
+            self._detect_doc_type()
+            self._ensure_indices()
+            logger.info("[ESConfigStore] ES 初始化完成")
+        except Exception as e:
+            logger.warning(f"[ESConfigStore] ES 初始化失败（不影响主服务）: {e}")
+
+    @staticmethod
+    def _lib_major() -> Optional[int]:
+        """已安装 elasticsearch-py 的主版本号；未安装或无法识别返回 None。
+        注意 __version__ 在 7.x 是元组 (7, 17, 9)，在部分版本是字符串。"""
+        try:
+            import elasticsearch
+        except ImportError:
+            return None
+        raw: Any = getattr(elasticsearch, "__version__", None)
+        if isinstance(raw, (tuple, list)) and raw:
+            raw = raw[0]
+        try:
+            return int(str(raw).split(".")[0])
+        except (TypeError, ValueError):
+            return None
+
+    def _build_client(self, hosts: Any, username: str, password: str) -> Tuple[Any, str]:
+        """构造 ES 客户端，返回 (client, 传输方式说明)。
+
+        - elasticsearch-py <= 7.x：用官方客户端，既有生产环境行为完全不变；
+        - 未安装 / >= 8.x：改用内置 REST 适配器。8.x 起移除了 http_auth 并默认拒连
+          非 8.x 服务端，而本模块依赖 body/doc_type/ignore 的 7.x 用法，官方客户端不可用。
+          走 REST 后无需变更部署环境即可正常读写。
+        """
+        major = self._lib_major()
+        if major is not None and major <= 7:
             from elasticsearch import Elasticsearch
             kwargs: Dict[str, Any] = {"hosts": hosts, "verify_certs": False, "ssl_show_warn": False}
             if username:
                 kwargs["http_auth"] = (username, password)
-            self._client = Elasticsearch(**kwargs)
-            self._enabled = True
-            self._detect_doc_type()
-            self._ensure_indices()
-            logger.info("[ESConfigStore] ES 初始化完成")
-        except ImportError:
-            logger.warning("[ESConfigStore] elasticsearch-py 未安装，ES 存储不可用")
-        except Exception as e:
-            logger.warning(f"[ESConfigStore] ES 初始化失败（不影响主服务）: {e}")
+            return Elasticsearch(**kwargs), f"elasticsearch-py {major}.x 官方客户端"
+
+        reason = ("未安装 elasticsearch-py" if major is None
+                  else f"elasticsearch-py {major}.x 与本模块调用方式不兼容")
+        logger.warning(
+            f"[ESConfigStore] {reason}，已自动切换为内置 REST 适配器"
+            "（直连 ES HTTP 接口，兼容 ES 5.x~8.x，与客户端版本无关）"
+        )
+        return _RestEsClient(hosts, username, password), "内置 REST 适配器"
 
     @property
     def enabled(self) -> bool:

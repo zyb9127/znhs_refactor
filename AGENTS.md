@@ -138,20 +138,30 @@ Step 实例按 `province:intent` 维度缓存（`StepBundle`），同省同意�
 ### 替换步骤
 
 ```bash
-# 1. 停掉当前服务
+# 1. 替换前保存当前分支的代码
+git status --short
+# 如果上面显示有未提交改动，执行以下三条命令提交并推送当前分支
+git add -A
+git commit -m "chore: checkpoint before package replacement"
+git push
+
+# 2. 切换到 main 分支执行新包替换
+git switch main
+
+# 3. 停掉当前服务
 lsof -ti :8000 | xargs kill -9 2>/dev/null; sleep 1
 
-# 2. 解压新包到临时目录
+# 4. 解压新包到临时目录
 unzip -o "/Users/zyb/Documents/python/znhs_refactor(最新版).zip" -d /tmp/znhs_extract
 
-# 3. rsync 覆盖项目文件（排除缓存和 node_modules）
+# 5. rsync 覆盖项目文件（排除缓存和 node_modules）
 rsync -av \
   --exclude='__MACOSX' --exclude='.DS_Store' --exclude='__pycache__' \
   --exclude='*.pyc' --exclude='node_modules' --exclude='logs' \
   --exclude='config/agents_config.json' \
   /tmp/znhs_extract/znhs_refactor/ /Users/zyb/Documents/python/znhs_refactor/
 
-# 4. 修改 config/config.json 为本地开发环境：
+# 6. 修改 config/config.json 为本地开发环境：
 #    - app.environment → "development"
 #    - elasticsearch.hosts → []
 #    - elasticsearch.username → ""
@@ -159,7 +169,7 @@ rsync -av \
 #    - redis_bus.cluster_nodes → []
 #    - redis_bus.password → ""
 
-# 5. 新包覆盖后检查并恢复本地自定义模型配置：
+# 7. 新包覆盖后检查并恢复本地自定义模型配置：
 #    - config/agents_config.json 不得被替换，llm_gateway.max_tokens → 4080
 #    - steps/script_step.py 中 _generate_llm() 的两处 max_tokens → 4080（新包常见值为 300）
 #    - dashscope.max_tokens 保持 8192

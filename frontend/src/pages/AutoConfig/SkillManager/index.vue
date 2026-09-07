@@ -47,6 +47,9 @@
           <el-button v-if="showExportLog" size="small" plain @click="logDrawerVisible = true">
             <el-icon><Document /></el-icon>&nbsp;操作日志
           </el-button>
+          <el-button size="small" plain @click="llmStatsVisible = true">
+            <el-icon><DataAnalysis /></el-icon>&nbsp;调用统计
+          </el-button>
         </div>
       </div>
     </div>
@@ -262,6 +265,17 @@
 
     <!-- ── 日志侧边抽屉（规范 6）────────────────────── -->
     <LogDrawer v-model="logDrawerVisible" />
+
+    <!-- ── 模型调用统计弹窗（打开时才挂载 LlmStatsPanel，避免主页多余请求）── -->
+    <el-dialog
+      v-model="llmStatsVisible"
+      title="模型调用统计"
+      width="90%"
+      top="5vh"
+      destroy-on-close
+    >
+      <LlmStatsPanel v-if="llmStatsVisible" />
+    </el-dialog>
 
     <!-- ── 详情抽屉（查看） ─────────────────────────── -->
     <el-drawer
@@ -538,6 +552,7 @@ import EsStatusTag from '@/components/EsStatusTag.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import LogDrawer from '@/components/LogDrawer.vue'
 import EnvBanner from '@/components/EnvBanner.vue'
+import LlmStatsPanel from '@/components/LlmStatsPanel.vue'
 import SkillConfigEditor from '../components/SkillConfigEditor.vue'
 
 // ── 权限 / 路由 ────────────────────────────────────────
@@ -566,6 +581,7 @@ const skills  = ref([])
 const allSkillsCache = ref([])
 const filter  = ref({ province: '', intent: '' })
 const logDrawerVisible = ref(false)
+const llmStatsVisible = ref(false)   // 「调用统计」弹窗（LlmStatsPanel 懒挂载）
 
 const provinceOptions = computed(() => {
   const seen = new Set()

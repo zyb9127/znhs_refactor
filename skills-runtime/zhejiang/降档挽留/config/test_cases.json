@@ -1,0 +1,86 @@
+{
+  "cases": [
+    {
+      "name": "【降档挽留】浙江·纯挽留·多原因（资费贵/流量用不完/已办其他号码）",
+      "payload": {
+        "callId": "xw-zj-001",
+        "intent": "降档挽留",
+        "phone": "15988734796",
+        "topN": 3,
+        "province": "zhejiang",
+        "extra_data": {},
+        "extra_info": {
+          "current_package": {
+            "package_name": "5G智享套餐128元档",
+            "actual_price": "128",
+            "baseFlow": "30",
+            "voice_minutes": "500"
+          },
+          "usage": {
+            "data_usage": { "近6月平均流量(GB)": "12", "近6月平均流量饱和度": "40%" },
+            "voice_usage": { "近6月平均主叫时长": "95" }
+          },
+          "user_info": { "internetAge": "17" },
+          "recommended_packages": [
+            { "product_id": "现有资费太贵", "rank": 1 },
+            { "product_id": "流量用不完", "rank": 2, "top5Business": ["腾讯视频", "微信", "抖音短视频"] },
+            { "product_id": "已办理移动其他号码", "rank": 3, "netAge": "2008-02-13(17年)" }
+          ]
+        },
+        "batch_contexts": [
+          { "product_id": "", "stage": "挽留" }
+        ]
+      },
+      "updated_at": "2026-09-03 11:10"
+    },
+    {
+      "name": "【降档挽留】浙江·套餐对比（目标降档58元档，diff 自动算）",
+      "payload": {
+        "callId": "xw-zj-002",
+        "intent": "降档挽留",
+        "phone": "13777322255",
+        "topN": 1,
+        "province": "zhejiang",
+        "extra_data": {},
+        "extra_info": {
+          "current_package": {
+            "package_name": "5G智享套餐128元档",
+            "actual_price": "128",
+            "baseFlow": "30",
+            "voice_minutes": "500"
+          },
+          "recommended_packages": [
+            {
+              "product_id": "套餐比较口径",
+              "offerName": "目标降档套餐-58元档",
+              "initFee": "58",
+              "offerFlow": "10",
+              "offerVoice": "200",
+              "rank": 1
+            }
+          ]
+        },
+        "batch_contexts": [
+          { "product_id": "", "stage": "挽留", "scence": "套餐比较口径" }
+        ]
+      },
+      "updated_at": "2026-09-03 11:10"
+    },
+    {
+      "name": "【降档挽留】浙江·空参兜底（无画像→固定挽留话术）",
+      "payload": {
+        "callId": "xw-zj-003",
+        "intent": "降档挽留",
+        "phone": "13900000000",
+        "topN": 1,
+        "province": "zhejiang",
+        "extra_data": {},
+        "extra_info": {},
+        "batch_contexts": [
+          { "product_id": "", "stage": "挽留" }
+        ]
+      },
+      "updated_at": "2026-09-03 11:10"
+    }
+  ]
+}

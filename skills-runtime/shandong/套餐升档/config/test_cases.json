@@ -31,6 +31,38 @@
         "topn": "1"
       },
       "updated_at": "2026-09-08T03:10:47.407Z"
+    },
+    {
+      "name": "场景切入",
+      "payload": {
+        "callId": "123",
+        "uid": "qryRecommendAgent",
+        "extra_info": {
+          "uniProdGrade": "30",
+          "shareFlow": "50",
+          "totalFlow": "68",
+          "giftFlow": "80",
+          "origPrice": "99",
+          "discountPrice": "0",
+          "internetAge": "18",
+          "flowGiftFlowTf": "32",
+          "flowGiftFlow": "100",
+          "reducePrice": "99",
+          "flow": "20"
+        },
+        "province": "shandong",
+        "phone": "136****7815",
+        "intent": "套餐升档",
+        "batch_contexts": [
+          {
+            "stage": "场景切入",
+            "scence": "近3个月流量超套",
+            "product_id": "20250226873187"
+          }
+        ],
+        "topn": "1"
+      },
+      "updated_at": "2026-09-08T07:09:39.393Z"
     }
   ]
 }

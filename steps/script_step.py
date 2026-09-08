@@ -63,8 +63,9 @@ _DEFAULT_CONCURRENCY = 8
 # 未显式配置时严格按模板原文输出，不做第二次模型改写。
 _DEFAULT_SCRIPT_TEMPERATURE = 0.0
 
-# 二次表达改写的保护标记：改写模型只能调整标记周围的表达，不能改动标记内容。
-_REWRITE_TOKEN_RE = re.compile(r"__ZNHS_(?:FACT|NUM)_[A-Z]+__")
+# 二次表达改写的保护标记：真实事实和未传入参数的占位符都不能改动。
+# SLOT 与 FACT/NUM 分开，便于日志识别；SLOT 仍必须原样保留，不能被模型猜测或省略。
+_REWRITE_TOKEN_RE = re.compile(r"__ZNHS_(?:FACT|NUM|SLOT)_[A-Z]+__")
 _REWRITE_NUMBER_RE = re.compile(
     r"(?<![A-Za-z_])\d+(?:\.\d+)?(?:\s*(?:元|GB|G|MB|M|TB|分钟|个月|月|年|天|折|%))?"
 )
@@ -402,6 +403,7 @@ class ScriptStep:
         masked = text or ""
         protected: Dict[str, str] = {}
         fallback_placeholder = normalize_slot_fallback(slot_fallback).get("placeholder", "**")
+        fallback_values = {"**", "＿＿", str(fallback_placeholder).strip()}
         values = sorted(
             {
                 str(value).strip()
@@ -422,9 +424,17 @@ class ScriptStep:
         for value in values:
             if value not in masked:
                 continue
-            token = f"__ZNHS_FACT_{_rewrite_token_label(len(protected))}__"
-            masked = masked.replace(value, token)
-            protected[token] = value
+
+            # 不能用 str.replace：三个相同的 ** 必须拥有三个独立标记，
+            # 否则模型漏掉其中一个时无法知道漏的是哪个位置。
+            token_kind = "SLOT" if value in fallback_values else "FACT"
+
+            def _mask_value(_match: re.Match[str]) -> str:
+                token = f"__ZNHS_{token_kind}_{_rewrite_token_label(len(protected))}__"
+                protected[token] = value
+                return token
+
+            masked = re.sub(re.escape(value), _mask_value, masked)
 
         def _mask_number(match: re.Match[str]) -> str:
             token = f"__ZNHS_NUM_{_rewrite_token_label(len(protected))}__"
@@ -443,9 +453,11 @@ class ScriptStep:
             "严格遵守以下规则：\n"
             "1. 只能调整措辞、语序、连接词和口语化表达；不得依据任何上下文补充信息。\n"
             "2. 不得新增、删除或推断任何产品、价格、流量、权益、时间、办理方式或其他事实。\n"
-            "3. 所有 __ZNHS_FACT_A__ 和 __ZNHS_NUM_A__ 形式的标记必须原样保留，且出现次数完全一致；"
-            "标记代表的内容不可改写。\n"
-            "4. 只输出改写后的完整话术，不要解释、不要前缀、不要 Markdown。\n\n"
+            "3. 所有 __ZNHS_FACT_A__、__ZNHS_NUM_A__ 和 __ZNHS_SLOT_A__ 形式的标记都必须原样保留，"
+            "且出现次数完全一致；标记代表的真实事实或未知事实都不可改写、删除或猜测。\n"
+            "4. __ZNHS_SLOT_A__ 代表未传入参数的占位符（例如 **），不能把它改成“这个月”、具体价格"
+            "或任何其他看似自然但未经提供的内容。\n"
+            "5. 只输出改写后的完整话术，不要解释、不要前缀、不要 Markdown。\n\n"
             f"【基础话术】\n{masked_text}\n\n"
             "【改写结果】"
         )
@@ -456,13 +468,34 @@ class ScriptStep:
         masked_text: str,
         protected: Dict[str, str],
     ) -> str:
-        """校验保护标记后还原事实；任一标记被改动则返回空串触发回退。"""
+        """校验全部事实标记并还原；真实事实和未知占位符都必须完整保留。"""
         candidate = (rewritten or "").strip()
-        expected = sorted(_REWRITE_TOKEN_RE.findall(masked_text))
-        actual = sorted(_REWRITE_TOKEN_RE.findall(candidate))
-        if expected != actual:
+        expected = _REWRITE_TOKEN_RE.findall(masked_text)
+        actual = _REWRITE_TOKEN_RE.findall(candidate)
+        expected_counts = {}
+        actual_counts = {}
+        for token in expected:
+            expected_counts[token] = expected_counts.get(token, 0) + 1
+        for token in actual:
+            actual_counts[token] = actual_counts.get(token, 0) + 1
+
+        # FACT/NUM 是已知事实，SLOT 是未知事实占位符；两者都必须逐个保留，
+        # 不能因模型润色而删除、改写或凭空新增。
+        invalid_tokens = set(actual_counts) - set(expected_counts)
+        mismatched_tokens = {
+            token
+            for token, count in expected_counts.items()
+            if actual_counts.get(token, 0) != count
+        }
+        duplicated_tokens = {
+            token
+            for token, count in actual_counts.items()
+            if count > expected_counts.get(token, 0)
+        }
+        if invalid_tokens or mismatched_tokens or duplicated_tokens:
             logger.warning(
-                f"[ScriptStep] 二次表达改写保护标记不一致，expected={expected} actual={actual}"
+                f"[ScriptStep] 二次表达改写保护标记不一致，expected={sorted(expected)} "
+                f"actual={sorted(actual)}"
             )
             return ""
 

@@ -427,6 +427,46 @@ class TestPostGenerationRewrite(unittest.TestCase):
             base,
         )
 
+    def test_rewrite_keeps_unprovided_slots_while_changing_expression(self) -> None:
+        """无参数时仍允许二次改写，但未知占位符必须原样保留。"""
+        base = "我看您**月流量用超**元啦，咱超出后**元/G，太贵了。"
+        masked, protected = ScriptStep._mask_rewrite_facts(base, {})
+        tokens = list(protected)
+        self.assertEqual(tokens, [
+            "__ZNHS_SLOT_A__",
+            "__ZNHS_SLOT_B__",
+            "__ZNHS_SLOT_C__",
+        ])
+
+        # 模型只调整表达方式，三个未知占位符全部保留。
+        rewritten = (
+            "我看您__ZNHS_SLOT_A__月流量超出__ZNHS_SLOT_B__元啦，"
+            "咱超出后__ZNHS_SLOT_C__元/G，挺贵的。"
+        )
+        out = ScriptStep._restore_rewrite_facts(rewritten, masked, protected)
+        self.assertEqual(out, "我看您**月流量超出**元啦，咱超出后**元/G，挺贵的。")
+
+    def test_rewrite_rejects_guessing_unprovided_slot(self) -> None:
+        """模型把未知月份占位符改成具体月份时必须回退。"""
+        base = "我看您**月流量用超**元啦。"
+        masked, protected = ScriptStep._mask_rewrite_facts(base, {})
+        slot_token = next(token for token in protected if token.startswith("__ZNHS_SLOT_"))
+        rewritten = masked.replace(slot_token, "这个月")
+        self.assertEqual(
+            ScriptStep._restore_rewrite_facts(rewritten, masked, protected),
+            "",
+        )
+
+    def test_rewrite_still_rejects_new_numbers_when_slot_is_missing(self) -> None:
+        base = "月费**元，流量30GB。"
+        masked, protected = ScriptStep._mask_rewrite_facts(base, {"flow": "30GB"})
+        slot_token = next(token for token in protected if token.startswith("__ZNHS_SLOT_"))
+        rewritten = masked.replace(slot_token, "99元")
+        self.assertEqual(
+            ScriptStep._restore_rewrite_facts(rewritten, masked, protected),
+            "",
+        )
+
     def test_zero_temperature_disables_rewrite(self) -> None:
         import asyncio
 

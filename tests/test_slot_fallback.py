@@ -322,6 +322,119 @@ class TestPostProcessResidualPlaceholders(unittest.TestCase):
             template, {"origPrice": "99", "flow": "0"})
         self.assertEqual(out, "新套餐原价99元，流量0GB，网龄**年。")
 
+    def test_strict_template_selects_derived_scene_before_rendering(self) -> None:
+        template = (
+            "场景一：推荐1元安心包（业务编码：2031912），流量{flow}GB。\n"
+            "场景二：推荐3元安心包（业务编码：2031913），流量{flow}GB。"
+        )
+        scene_one = ScriptStep._render_strict_template(
+            template, {"推荐场景": "场景一", "flow": "5"}
+        )
+        scene_two = ScriptStep._render_strict_template(
+            template, {"推荐场景": "场景二", "flow": "20"}
+        )
+        self.assertEqual(scene_one, "推荐1元安心包（业务编码：2031912），流量5GB。")
+        self.assertEqual(scene_two, "推荐3元安心包（业务编码：2031913），流量20GB。")
+        self.assertNotIn("2031913", scene_one)
+        self.assertNotIn("2031912", scene_two)
+
+    def test_strict_template_does_not_guess_missing_scene(self) -> None:
+        template = "场景一：业务编码2031912。\n场景二：业务编码2031913。"
+        out = ScriptStep._render_strict_template(template, {})
+        self.assertEqual(out, "")
+
+    def test_strict_template_selects_fallback_scene(self) -> None:
+        template = (
+            "场景一：业务编码2031912。\n"
+            "场景二：业务编码2031913。\n"
+            "兜底场景：目前套餐一切正常，请继续保持。"
+        )
+        out = ScriptStep._render_strict_template(
+            template, {"推荐场景": "兜底场景"}
+        )
+        self.assertEqual(out, "目前套餐一切正常，请继续保持。")
+
+    def test_strict_template_matches_arbitrary_derived_scene_value(self) -> None:
+        template = (
+            "高流量客户：推荐大流量产品。\n"
+            "低活跃客户：推荐基础产品。\n"
+            "暂不推荐：先保持当前套餐。"
+        )
+        out = ScriptStep._render_strict_template(
+            template, {"推荐场景": "暂不推荐"}
+        )
+        self.assertEqual(out, "先保持当前套餐。")
+
+
+@unittest.skipUnless(_BASELINE_AVAILABLE, f"script_step 导入失败: {_BASELINE_IMPORT_ERROR}")
+class TestPostGenerationRewrite(unittest.TestCase):
+    """二次表达改写只能调整措辞，不能修改或新增基础话术事实。"""
+
+    BASE = "您好，推荐5G畅享套餐，每月59元，包含30GB流量。"
+    FACTS = {"package": "5G畅享套餐", "price": "59元", "flow": "30GB"}
+
+    def test_mask_and_restore_protected_facts(self) -> None:
+        masked, protected = ScriptStep._mask_rewrite_facts(self.BASE, self.FACTS)
+        self.assertRegex(masked, r"__ZNHS_FACT_[A-Z]+__")
+        self.assertNotRegex(masked, r"__ZNHS_(?:FACT|NUM)_\d+__")
+        self.assertNotIn("5G畅享套餐", masked)
+        self.assertNotIn("59元", masked)
+        self.assertNotIn("30GB", masked)
+        self.assertEqual(
+            ScriptStep._restore_rewrite_facts(masked, masked, protected),
+            self.BASE,
+        )
+
+    def test_rewrite_can_change_expression_but_keeps_facts(self) -> None:
+        masked, protected = ScriptStep._mask_rewrite_facts(self.BASE, self.FACTS)
+        rewritten = masked.replace("您好，推荐", "您好，给您介绍").replace("包含", "还享有")
+        out = ScriptStep._restore_rewrite_facts(rewritten, masked, protected)
+        self.assertEqual(out, "您好，给您介绍5G畅享套餐，每月59元，还享有30GB流量。")
+
+    def test_rewrite_rejects_missing_or_new_facts(self) -> None:
+        masked, protected = ScriptStep._mask_rewrite_facts(self.BASE, self.FACTS)
+        token = next(iter(protected))
+        self.assertEqual(
+            ScriptStep._restore_rewrite_facts(masked.replace(token, "其他套餐", 1), masked, protected),
+            "",
+        )
+        self.assertEqual(
+            ScriptStep._restore_rewrite_facts(masked + " 100元", masked, protected),
+            "",
+        )
+
+    def test_rewrite_prompt_contains_no_unmasked_context(self) -> None:
+        masked, _ = ScriptStep._mask_rewrite_facts(self.BASE, self.FACTS)
+        prompt = ScriptStep._rewrite_prompt(masked)
+        self.assertNotIn("5G畅享套餐", prompt)
+        self.assertNotIn("59元", prompt)
+        self.assertIn("只输出改写后的完整话术", prompt)
+
+    def test_rewrite_preserves_missing_slot_placeholder(self) -> None:
+        base = "月费**元，流量30GB。"
+        masked, protected = ScriptStep._mask_rewrite_facts(base, {"flow": "30GB"})
+        self.assertNotIn("**", masked)
+        self.assertEqual(
+            ScriptStep._restore_rewrite_facts(masked, masked, protected),
+            base,
+        )
+
+    def test_zero_temperature_disables_rewrite(self) -> None:
+        import asyncio
+
+        step = ScriptStep()
+        step._script_temperature = 0
+        out, ok = asyncio.run(
+            step._rewrite_after_generation("原始模板话术。", {}, None, None, "test")
+        )
+        self.assertTrue(ok)
+        self.assertEqual(out, "原始模板话术。")
+
+    def test_missing_temperature_defaults_to_disabled(self) -> None:
+        step = ScriptStep()
+        step._load_biz({})
+        self.assertEqual(step._script_temperature, 0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

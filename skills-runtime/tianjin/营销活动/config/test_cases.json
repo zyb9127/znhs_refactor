@@ -215,6 +215,78 @@
         ]
       },
       "updated_at": "2026-09-01 09:30"
+    },
+    {
+      "name": "兜底场景",
+      "payload": {
+        "callId": "tj-demo-02",
+        "intent": "营销活动",
+        "phone": "13512366367",
+        "topN": 1,
+        "province": "tianjin",
+        "extra_data": {},
+        "extra_info": {
+          "userinfo": {
+            "currentPackageProductName": "畅享套餐58元档",
+            "currPrice": "58",
+            "currDomesticTraffic": "20",
+            "currDomesticVoice": "100",
+            "userExtra": {
+              "last3mFlowSaturation": "96.5",
+              "last3mVoiceSaturation": "88.2"
+            }
+          },
+          "userinfo_json": [
+            {
+              "timeType": "0",
+              "over_flow": "3",
+              "over_flow_fee": "1.5",
+              "over_voice": "10",
+              "over_voice_fee": "2",
+              "user_consume": "63.5",
+              "used_flow": "",
+              "total_flow": "",
+              "total_voice": "",
+              "remain_flow": "",
+              "remain_voice": ""
+            },
+            {
+              "timeType": "1",
+              "over_flow": "2",
+              "over_flow_fee": "1",
+              "over_voice": "5",
+              "over_voice_fee": "1",
+              "user_consume": "61",
+              "used_flow": "",
+              "total_flow": "",
+              "total_voice": "",
+              "remain_flow": "",
+              "remain_voice": ""
+            }
+          ],
+          "products": [
+            {
+              "productId": "",
+              "productName": "5G安心月包",
+              "activityId": "2090717239001427971",
+              "businessType": "自有业务",
+              "activityTypeName": "营销活动",
+              "activityTypeCode": "yxhd",
+              "price": "1",
+              "marketingProductFlag": "1",
+              "marketingActivityFlag": "1"
+            }
+          ]
+        },
+        "batch_contexts": [
+          {
+            "product_id": "2028009",
+            "stage": "推荐环节",
+            "scence": ""
+          }
+        ]
+      },
+      "updated_at": "2026-09-08T06:15:21.729Z"
     }
   ]
 }

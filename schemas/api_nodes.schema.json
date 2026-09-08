@@ -48,7 +48,12 @@
         },
         "where": {
           "type": "object",
-          "description": "仅 array_find：{字段名: 期望值}，按字符串比较（兼容 \"0\" 与 0），需全部相等才算命中"
+          "description": "仅 array_find：{字段名: 期望值或比较条件}；裸值按字符串精确比较，也可写 {gt/lte/...: 操作数}"
+        },
+        "match": {
+          "type": "string",
+          "enum": ["all", "any"],
+          "description": "仅 array_find：多个 where 条件的匹配方式；all=全部满足（默认），any=任一满足"
         },
         "rules": {
           "type": "array",

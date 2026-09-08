@@ -10,7 +10,7 @@
       "properties": {
         "default_strategy":     {"type": "string", "description": "推荐策略名，默认 direct"},
         "max_script_length":    {"type": "integer", "description": "单条话术最大长度，默认 150"},
-        "script_temperature":   {"type": "number", "description": "话术生成采样温度（0~1.5）；越低越稳定、越高越多样。缺省 0.8。由前端「话术生成参数」面板配置"},
+        "script_temperature":   {"type": "number", "description": "话术生成后的表达改写采样温度（0~1.5）；设置为 0 关闭改写并原样返回，只调整表达方式，不修改或新增事实，数值越高越随机。缺省 0（未显式配置时关闭）。由前端配置"},
         "max_parallel_scripts": {"type": "integer", "description": "话术生成并发数（历史字段；缺省读 config/concurrency.json，默认 8）"},
         "llm_max_concurrency":  {"type": "integer", "description": "LLM 调用并发信号量上限；缺省读 config/concurrency.json（默认 8）"}
       }

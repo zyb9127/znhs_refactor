@@ -201,5 +201,173 @@
     },
     "updated_by": "admin",
     "updated_at": "2026-08-24 15:48:43"
+  },
+  "新接口": {
+    "_comment": "天津营销活动新接口：按最近有超套费用的账期选取资源，再计算场景与账单解释提示。",
+    "url": "",
+    "method": "POST",
+    "enabled": true,
+    "source_type": "direct",
+    "request_template": {},
+    "response_extract": {},
+    "field_transform": {},
+    "mock_mode": false,
+    "mock_response": {
+      "params": {
+        "systemId": "skill-test",
+        "optType": "0",
+        "inputs": {
+          "sequenceNo": "SEQ20260827143631",
+          "servNumber": "13800138000",
+          "provinceCode": "022",
+          "callId": "test_ma_20260827143631",
+          "userinfo_json": [
+            {
+              "timeType": "0",
+              "over_flow": "3",
+              "over_flow_fee": "",
+              "over_voice": "0",
+              "over_voice_fee": ""
+            },
+            {
+              "timeType": "1",
+              "over_flow": "0",
+              "over_flow_fee": "0.2",
+              "over_voice": "0",
+              "over_voice_fee": "0.3"
+            },
+            {
+              "timeType": "2",
+              "over_flow": "0",
+              "over_flow_fee": "",
+              "over_voice": "0",
+              "over_voice_fee": ""
+            }
+          ],
+          "products": [
+            {
+              "productId": "2028009",
+              "productName": "午休流量1元包",
+              "businessType": "自有业务",
+              "marketingProductFlag": "1",
+              "marketingActivityFlag": "1"
+            }
+          ],
+          "userinfo": {
+            "userExtra": {
+              "last3mVoiceSaturation": "14.0",
+              "last3mFlowSaturation": "73.08"
+            }
+          }
+        }
+      }
+    },
+    "direct_mode": "passthrough",
+    "passthrough_fields": [
+      "userinfo_json",
+      "userinfo_json.timeType",
+      "userinfo_json.over_flow",
+      "userinfo_json.over_flow_fee",
+      "userinfo_json.over_voice",
+      "userinfo_json.over_voice_fee",
+      "products",
+      "products.productId",
+      "products.productName",
+      "products.businessType",
+      "products.marketingProductFlag",
+      "products.marketingActivityFlag",
+      "userinfo",
+      "userinfo.userExtra",
+      "userinfo.userExtra.last3mVoiceSaturation",
+      "userinfo.userExtra.last3mFlowSaturation"
+    ],
+    "request_variant": "marketing_assistant",
+    "derived_fields": {
+      "超套月份数据": {
+        "type": "array_find",
+        "from": "userinfo_json",
+        "match": "any",
+        "where": {
+          "over_flow_fee": {
+            "gt": 0
+          },
+          "over_voice_fee": {
+            "gt": 0
+          }
+        }
+      },
+      "超套费用合计": {
+        "type": "sum",
+        "from": [
+          "超套月份数据.over_flow_fee",
+          "超套月份数据.over_voice_fee"
+        ]
+      },
+      "推荐场景": {
+        "type": "bucket",
+        "from": "超套费用合计",
+        "rules": [
+          {
+            "lte": 1,
+            "value": "场景一"
+          },
+          {
+            "value": "兜底场景"
+          }
+        ]
+      },
+      "账单解释提示": {
+        "type": "bucket",
+        "rules": [
+          {
+            "when": {
+              "超套月份数据.over_flow_fee": {
+                "ne": 0
+              },
+              "超套月份数据.over_flow": {
+                "eq": 0
+              }
+            },
+            "value": "请结合账单与资源使用情况为客户解释"
+          },
+          {
+            "when": {
+              "超套月份数据.over_voice_fee": {
+                "ne": 0
+              },
+              "超套月份数据.over_voice": {
+                "eq": 0
+              }
+            },
+            "value": "请结合账单与资源使用情况为客户解释"
+          },
+          {
+            "value": ""
+          }
+        ]
+      },
+      "超套月份名称": {
+        "type": "bucket",
+        "from": "超套月份数据.timeType",
+        "rules": [
+          {
+            "eq": 0,
+            "value": "当月"
+          },
+          {
+            "eq": 1,
+            "value": "上月"
+          },
+          {
+            "eq": 2,
+            "value": "上上月"
+          }
+        ]
+      }
+    },
+    "created_by": "admin",
+    "created_at": "2026-08-27 16:26:51",
+    "updated_by": "admin",
+    "updated_at": "2026-09-08 14:11:42"
   }
 }

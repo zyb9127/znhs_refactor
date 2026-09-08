@@ -623,22 +623,42 @@
                               <el-option v-for="p in dfPathCandidates" :key="p" :label="p" :value="p" />
                             </el-select>
                           </div>
+                          <div class="df-line">
+                            <span class="df-label">匹配方式</span>
+                            <el-select v-model="row.match" size="small" class="df-match"
+                              @change="commitDfRows">
+                              <el-option label="全部条件满足" value="all" />
+                              <el-option label="任一条件满足" value="any" />
+                            </el-select>
+                            <span class="df-sub-hint df-inline-hint">
+                              任一满足适合判断“流量或语音超套”
+                            </span>
+                          </div>
                           <div class="df-line df-line-top">
                             <span class="df-label">选取条件</span>
                             <div class="df-where-list">
                               <div v-for="(w, j) in row.wheres" :key="j" class="df-where-row">
-                                <el-input v-model="w.k" size="small" placeholder="字段名，如 timeType"
-                                  @input="commitDfRows" />
-                                <span class="df-eq">=</span>
+                                <el-select v-model="w.k" size="small" class="df-field"
+                                  filterable allow-create default-first-option
+                                  placeholder="字段名，如 over_flow"
+                                  @change="commitDfRows">
+                                  <el-option v-for="p in dfArrayFieldCandidates(row)" :key="p"
+                                    :label="p" :value="p" />
+                                </el-select>
+                                <el-select v-model="w.op" size="small" class="df-op"
+                                  @change="commitDfRows">
+                                  <el-option v-for="o in DF_CMP_OPTIONS" :key="o.value"
+                                    :label="o.label" :value="o.value" />
+                                </el-select>
                                 <el-input v-model="w.v" size="small" placeholder="值，如 0"
                                   @input="commitDfRows" />
                                 <el-button link type="danger" size="small"
                                   @click="row.wheres.splice(j, 1); commitDfRows()">删除</el-button>
                               </div>
                               <el-button size="small" plain
-                                @click="row.wheres.push({ k: '', v: '' })">+ 添加条件</el-button>
+                                @click="row.wheres.push({ k: '', op: 'eq', v: '' }); commitDfRows()">+ 添加条件</el-button>
                               <div class="df-sub-hint">
-                                多个条件需全部满足；命中第一个匹配元素。留空则取数组第一条。
+                                命中第一个匹配元素；“任一条件满足”时，多个条件按或处理。留空则取数组第一条。
                               </div>
                             </div>
                           </div>
@@ -1431,17 +1451,17 @@
             <div class="gen-param-grid">
               <div class="gen-param-item">
                 <div class="gen-param-label">
-                  采样温度
+                  话术表达改写温度
                   <span class="gen-param-tip">
-                    越低越稳定（相同入参趋近同一话术、标点也固定），越高越多样。
-                    推荐 0.7~0.9；需要每次都一样可调低到 0.2 左右。默认 0.8。
+                    只在严格模板出稿后调整表达方式，不参与模板事实填充，也不能新增或修改事实。
+                    设置为 0 表示关闭改写、原样返回；大于 0 时数值越高越随机，只有明确需要表达改写的技能包才建议设置。默认 0。
                   </span>
           </div>
                 <div class="gen-param-ctrl">
                   <el-slider
                     v-model="strategy.script_temperature"
                     :min="0" :max="1.5" :step="0.05"
-                    :marks="{ 0.2: '稳定', 0.8: '默认', 1.2: '多样' }"
+                    :marks="{ 0: '关闭', 0.8: '改写', 1.2: '多样' }"
                     style="max-width: 360px;"
                   />
                   <el-input-number
@@ -2454,12 +2474,62 @@ const dfPathCandidates = computed(() => {
     out.push(f.key)
     for (const c of (f.children || [])) out.push(c.key)
   }
+  // 样例暂时为空或接口详情尚未回填时，复用已保存的透传路径，避免下拉只剩派生变量。
+  for (const p of (ifcEditForm.passthrough_fields || [])) {
+    if (typeof p === 'string' && p.trim() && !out.includes(p.trim())) out.push(p.trim())
+  }
   for (const r of dfRows.value) {
     const n = (r.name || '').trim()
-    if (n && !out.includes(n)) out.push(n)
+    if (!n) continue
+    if (!out.includes(n)) out.push(n)
+
+    // array_find 的结果是一个数组元素对象。复用样例解析出的来源数组子字段，
+    // 生成「派生名.子字段」候选，例如：当月资源.over_flow_fee。
+    if (r.type === 'array_find') {
+      const source = String(r.from || '').trim()
+      const sourceField = passthroughSampleFields.value.find(f => f.key === source)
+      for (const c of (sourceField?.children || [])) {
+        const prefix = `${source}.`
+        const childPath = c.key.startsWith(prefix) ? c.key.slice(prefix.length) : c.key
+        const derivedPath = `${n}.${childPath}`
+        if (childPath && !out.includes(derivedPath)) out.push(derivedPath)
+      }
+      // 样例字段未回填时，从已保存的透传路径推导 array_find 结果对象的子路径。
+      const prefix = source ? `${source}.` : ''
+      if (prefix) {
+        for (const p of (ifcEditForm.passthrough_fields || [])) {
+          if (typeof p !== 'string' || !p.startsWith(prefix)) continue
+          const childPath = p.slice(prefix.length)
+          const derivedPath = `${n}.${childPath}`
+          if (childPath && !out.includes(derivedPath)) out.push(derivedPath)
+        }
+      }
+    }
   }
   return out
 })
+
+/** array_find 条件字段候选：来源数组元素的字段名 + 已保存透传路径中的叶子名。 */
+function dfArrayFieldCandidates(row) {
+  const out = []
+  const push = (v) => {
+    const s = String(v || '').trim()
+    if (s && !out.includes(s)) out.push(s)
+  }
+  const source = String(row?.from || '').trim()
+  const sourceField = passthroughSampleFields.value.find(f => f.key === source)
+  const prefix = source ? `${source}.` : ''
+  for (const c of (sourceField?.children || [])) {
+    push(c.key.startsWith(prefix) ? c.key.slice(prefix.length) : c.key)
+  }
+  for (const p of (ifcEditForm.passthrough_fields || [])) {
+    if (typeof p === 'string' && prefix && p.startsWith(prefix)) {
+      push(p.slice(prefix.length).split('.')[0])
+    }
+  }
+  for (const w of (row?.wheres || [])) push(w.k)
+  return out
+}
 
 const dfNameWarnings = computed(() => {
   const warns = []
@@ -2514,10 +2584,19 @@ function parseDfToRows() {
       name,
       type: DF_TYPES.includes(type) ? type : 'array_find',
       from: Array.isArray(spec.from) ? '' : String(spec.from ?? ''),
+      match: spec.match === 'any' ? 'any' : 'all',
       sumFrom: Array.isArray(spec.from)
         ? spec.from.map(String)
         : (type === 'sum' && spec.from ? [String(spec.from)] : []),
-      wheres: Object.entries(spec.where || {}).map(([k, v]) => ({ k, v: v == null ? '' : String(v) })),
+      wheres: Object.entries(spec.where || {}).map(([k, v]) => {
+        const op = v && typeof v === 'object' && !Array.isArray(v)
+          ? DF_OPS.find(o => v[o] !== undefined) : null
+        return {
+          k,
+          op: op || 'eq',
+          v: op ? String(v[op] ?? '') : (v == null ? '' : String(v)),
+        }
+      }),
       rules: [],
       advanced: false,
       raw: null,
@@ -2542,7 +2621,7 @@ function parseDfToRows() {
       }
       if (unsupported) { row.advanced = true; row.raw = spec; row.rules = [] }
     }
-    if (row.type === 'array_find' && !row.wheres.length) row.wheres = [{ k: '', v: '' }]
+    if (row.type === 'array_find' && !row.wheres.length) row.wheres = [{ k: '', op: 'eq', v: '' }]
     rows.push(row)
   }
   dfRows.value = rows
@@ -2560,11 +2639,16 @@ function commitDfRows() {
       const where = {}
       for (const w of (row.wheres || [])) {
         const k = (w.k || '').trim()
-        if (k) where[k] = String(w.v ?? '')
+        if (!k) continue
+        const op = DF_OPS.includes(w.op) ? w.op : 'eq'
+        where[k] = op === 'eq'
+          ? String(w.v ?? '')
+          : { [op]: _dfOperand(w.v) }
       }
       out[name] = {
         type: 'array_find',
         from: (row.from || '').trim(),
+        ...(row.match === 'any' ? { match: 'any' } : {}),
         ...(Object.keys(where).length ? { where } : {}),
       }
     } else if (row.type === 'sum') {
@@ -2604,7 +2688,7 @@ function dfNeedsFrom(row) {
 
 function addDfRow(kind) {
   const row = {
-    uid: ++_dfUid, name: '', from: '', sumFrom: [],
+    uid: ++_dfUid, name: '', from: '', sumFrom: [], match: 'all',
     wheres: [], rules: [], advanced: false, raw: null,
   }
   if (kind === 'judge') {
@@ -2616,7 +2700,7 @@ function addDfRow(kind) {
     dfRows.value.push(row)
   } else {
     row.type = 'array_find'
-    row.wheres = [{ k: '', v: '' }]
+    row.wheres = [{ k: '', op: 'eq', v: '' }]
     // 插到最后一条字段计算之后：界面分组顺序与数组顺序保持一致
     const lastCalc = dfRows.value.reduce((acc, r, i) => (r.type !== 'bucket' ? i : acc), -1)
     dfRows.value.splice(lastCalc + 1, 0, row)
@@ -2638,7 +2722,10 @@ function onDfRuleModeChange(r) {
 }
 /** 字段计算内换算子（数组选元素 ↔ 求和）时补齐子结构 */
 function onDfTypeChange(row) {
-  if (row.type === 'array_find' && !row.wheres.length) row.wheres = [{ k: '', v: '' }]
+  if (row.type === 'array_find' && !row.wheres.length) {
+    row.match = row.match || 'all'
+    row.wheres = [{ k: '', op: 'eq', v: '' }]
+  }
   commitDfRows()
 }
 // 高级 JSON → 表格：切回表格模式时同步（与 field_transform 的 ftVisualMode 同行为）
@@ -5832,8 +5919,8 @@ const strategy = reactive({
   top_n: 3,
   max_script_length: 150,
   max_parallel_scripts: 3,
-  // 话术生成采样温度：越低越稳定（相同入参趋近同一结果），越高越多样。默认 0.8。
-  script_temperature: 0.8,
+  // 话术生成后的表达改写温度：0 关闭改写；大于 0 时不参与模板事实填充，越高越随机。默认 0。
+  script_temperature: 0,
 })
 // 模板匹配取值配置（biz_config.template_match）：指定产品信息中哪个字段
 // （支持点路径、逗号分隔多候选）用于匹配话术模板维度。
@@ -6208,7 +6295,7 @@ function loadFromProps(val) {
   strategy.top_n               = s.top_n               ?? 3
   strategy.max_script_length   = s.max_script_length   ?? 150
   strategy.max_parallel_scripts = s.max_parallel_scripts ?? 3
-  strategy.script_temperature  = (s.script_temperature ?? 0.8)
+  strategy.script_temperature  = (s.script_temperature ?? 0)
 
   // 模板匹配取值配置（值可能是字符串或数组，UI 统一按逗号分隔字符串编辑）
   const tm = biz.template_match || {}
@@ -8373,6 +8460,10 @@ async function removeTemplate(idx) {
   display: flex; align-items: center; gap: 6px; margin-bottom: 5px;
 }
 .df-where-row .el-input { flex: 1; min-width: 0; }
+.df-where-row .df-field { flex: 1; min-width: 0; }
+.df-where-row .df-op { width: 106px; flex: 0 0 106px; }
+.df-match { width: 150px; flex: 0 0 150px; }
+.df-inline-hint { margin-left: 0; }
 .df-rule-row .df-op { width: 106px; flex-shrink: 0; }
 .df-rule-row .df-operand { width: 96px; flex-shrink: 0; }
 .df-rule-row > .el-input:last-of-type { flex: 1; min-width: 0; }
@@ -9017,9 +9108,4 @@ async function removeTemplate(idx) {
 }
 .dfm-v2-tpl-section-hd--unlinked { color: #e6a23c; border-bottom-color: #fdf3e3; }
 </style>
-
-
-
-
-
 

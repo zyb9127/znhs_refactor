@@ -25,6 +25,32 @@
       "template_id": "tpl_tianjin_yxhd_5g_recommend",
       "created_at": "2026-08-24 15:00:00",
       "updated_by": "local-test"
+    },
+    {
+      "province": "tianjin",
+      "intent": "营销活动",
+      "template_name": "营销活动",
+      "template_content": "场景一：我看您{超套月份名称}流量超出{超套月份数据[over_flow]}，超套费用{超套月份数据[over_flow_fee]}元。分钟超出{超套月份数据[over_voice]}，超套费用{超套月份数据[over_voice_fee]}元。现在有一个【5G安心月包-1元】（业务编码：2031912）每个月1元，包含100分钟+5GB流量，有效期24个月，到期自动取消，也可随时取消，非常方便。\n场景二：我看您{超套月份名称}流量超出{超套月份数据[over_flow]}，超套费用{超套月份数据[over_flow_fee]}元。分钟超出{超套月份数据[over_voice]}分钟，超套费用{超套月份数据[over_voice_fee]}元。现在有一个【5G安心月包-3元】（业务编码：2031913）每个月3元，包含500分钟+20GB流量，有效期24个月，到期自动取消，也可随时取消，非常方便。\n兜底场景：目前来看你的套餐一切正常，请继续保持哦。",
+      "product_id": "",
+      "scene": "流量超套",
+      "stage": "推荐环节",
+      "linked_vars": [
+        "超套月份数据",
+        "超套月份名称",
+        "超套费用合计",
+        "推荐场景",
+        "账单解释提示"
+      ],
+      "linked_apis": [
+        "新接口"
+      ],
+      "script_requirement": "严格按【推荐场景】只输出对应场景段落，不得输出另一段或另一业务编码；所有数值只使用上下文中的真实值。",
+      "prompt_template": "",
+      "status": "online",
+      "created_by": "admin",
+      "created_at": "2026-08-27 15:27:46",
+      "template_id": "tpl_tianjin_new_api_flow_overage",
+      "updated_by": "admin"
     }
   ],
   "template_match": {

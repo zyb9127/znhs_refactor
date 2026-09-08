@@ -59,8 +59,31 @@ from engine.template_selector import (
 # 并发度兜底（config/concurrency.json 与 config_loader 均不可用时）
 _DEFAULT_CONCURRENCY = 8
 
-# 话术生成默认采样温度（可由 biz_config.strategy.script_temperature 覆盖）
-_DEFAULT_SCRIPT_TEMPERATURE = 0.8
+# 二次表达改写默认采样温度（可由 biz_config.strategy.script_temperature 覆盖）。
+# 未显式配置时严格按模板原文输出，不做第二次模型改写。
+_DEFAULT_SCRIPT_TEMPERATURE = 0.0
+
+# 二次表达改写的保护标记：改写模型只能调整标记周围的表达，不能改动标记内容。
+_REWRITE_TOKEN_RE = re.compile(r"__ZNHS_(?:FACT|NUM)_[A-Z]+__")
+_REWRITE_NUMBER_RE = re.compile(
+    r"(?<![A-Za-z_])\d+(?:\.\d+)?(?:\s*(?:元|GB|G|MB|M|TB|分钟|个月|月|年|天|折|%))?"
+)
+# 模板内部场景分段：标签必须独占一行，标签值不做白名单限制；
+# 由派生字段“推荐场景”的实际值与标签做精确匹配。
+_INLINE_SCENE_RE = re.compile(
+    r"(?ms)(?:^|\n)[ \t]*(?P<label>[^:\n]{1,80}?)[：:]\s*"
+)
+
+
+def _rewrite_token_label(index: int) -> str:
+    """把整数编码成纯字母标签，避免改写模型截短/改动带数字的保护标记。"""
+    n = max(0, int(index))
+    chars: List[str] = []
+    while True:
+        chars.append(chr(ord("A") + (n % 26)))
+        n = n // 26 - 1
+        if n < 0:
+            return "".join(reversed(chars))
 
 # 繁→简转换器（懒加载，缓存）：模型（Qwen/DeepSeek）偶发输出繁体字，统一归一化为简体。
 # 优先 zhconv（纯 Python、无编译依赖）；未安装则降级为原样返回并告警一次，不影响主流程。
@@ -197,8 +220,7 @@ class ScriptStep:
         self._match_cfg: Dict[str, Any] = {}             # biz_config.template_match（模板匹配取值配置）
         # biz_config.slot_fallback（空槽位口径：删句 / 保留原句填占位符）
         self._slot_fallback: Dict[str, Any] = normalize_slot_fallback(None)
-        # 话术生成采样温度：默认 0.8（此前硬编码 0.3，接近贪婪解码导致同输入必得同输出、
-        # 连标点都不变；可由 biz_config.strategy.script_temperature 按省/意图覆盖）
+        # 二次表达改写采样温度：只作用于模板出稿后的自然化改写，不参与模板事实填充。
         self._script_temperature: float = _DEFAULT_SCRIPT_TEMPERATURE
         # 以下由 _load_biz() 每次请求解析注入
         self._templates_v2: List[Dict[str, Any]] = []
@@ -219,8 +241,8 @@ class ScriptStep:
 
         self.max_length  = strategy.get("max_script_length", self.max_length)
 
-        # 采样温度：strategy.script_temperature 优先，否则用默认 0.8（不再硬编码 0.3）。
-        # 温度过低会让同一入参每次生成完全相同（连标点都不变）；如需更稳定可按省调低。
+        # 二次表达改写采样温度：只有显式配置才启用，否则默认关闭（0）。
+        # 数值越高，改写随机性越强；它不参与第一次模板出稿。
         raw_temp = strategy.get("script_temperature")
         try:
             self._script_temperature = (
@@ -347,12 +369,13 @@ class ScriptStep:
         ctx: FlowContext,
         stage: str,
         sem: Optional[asyncio.Semaphore],
+        temperature: Optional[float] = None,
     ) -> str:
-        """调用 LLM 生成话术；sem 非 None 时信号量只包住 generate 调用段（不包模板准备）。"""
+        """调用 LLM；temperature 仅由调用方显式指定时才覆盖模型默认值。"""
         if sem is None:
             return await llm_service.generate(
                 prompt,
-                temperature=self._script_temperature,
+                temperature=temperature,
                 max_tokens=4080,
                 stage=stage,
                 provider="script_step",
@@ -361,12 +384,134 @@ class ScriptStep:
         async with sem:
             return await llm_service.generate(
                 prompt,
-                temperature=self._script_temperature,
+                temperature=temperature,
                 max_tokens=4080,
                 stage=stage,
                 provider="script_step",
                 province=ctx.province,
             )
+
+    @staticmethod
+    def _mask_rewrite_facts(
+        text: str,
+        slot_facts: Optional[Dict[str, str]] = None,
+        slot_fallback: Optional[Dict[str, Any]] = None,
+    ) -> tuple[str, Dict[str, str]]:
+        """遮蔽槽位事实、占位符和数字，避免二次改写越过模板边界。"""
+        masked = text or ""
+        protected: Dict[str, str] = {}
+        fallback_placeholder = normalize_slot_fallback(slot_fallback).get("placeholder", "**")
+        values = sorted(
+            {
+                str(value).strip()
+                for value in (slot_facts or {}).values()
+                if value is not None and str(value).strip()
+            },
+            key=len,
+            reverse=True,
+        )
+        values.extend(
+            placeholder
+            for placeholder in ("**", "＿＿", str(fallback_placeholder).strip())
+            if placeholder
+            and placeholder not in values
+        )
+        values.sort(key=len, reverse=True)
+
+        for value in values:
+            if value not in masked:
+                continue
+            token = f"__ZNHS_FACT_{_rewrite_token_label(len(protected))}__"
+            masked = masked.replace(value, token)
+            protected[token] = value
+
+        def _mask_number(match: re.Match[str]) -> str:
+            token = f"__ZNHS_NUM_{_rewrite_token_label(len(protected))}__"
+            protected[token] = match.group(0)
+            return token
+
+        masked = _REWRITE_NUMBER_RE.sub(_mask_number, masked)
+        return masked, protected
+
+    @staticmethod
+    def _rewrite_prompt(masked_text: str) -> str:
+        """构造只带基础话术的二次表达改写 Prompt，不注入用户上下文。"""
+        return (
+            "你是中文话术表达润色器。请只对下面的【基础话术】调整表达方式，"
+            "使其更自然、口语化，但不能改变原意。\n"
+            "严格遵守以下规则：\n"
+            "1. 只能调整措辞、语序、连接词和口语化表达；不得依据任何上下文补充信息。\n"
+            "2. 不得新增、删除或推断任何产品、价格、流量、权益、时间、办理方式或其他事实。\n"
+            "3. 所有 __ZNHS_FACT_A__ 和 __ZNHS_NUM_A__ 形式的标记必须原样保留，且出现次数完全一致；"
+            "标记代表的内容不可改写。\n"
+            "4. 只输出改写后的完整话术，不要解释、不要前缀、不要 Markdown。\n\n"
+            f"【基础话术】\n{masked_text}\n\n"
+            "【改写结果】"
+        )
+
+    @staticmethod
+    def _restore_rewrite_facts(
+        rewritten: str,
+        masked_text: str,
+        protected: Dict[str, str],
+    ) -> str:
+        """校验保护标记后还原事实；任一标记被改动则返回空串触发回退。"""
+        candidate = (rewritten or "").strip()
+        expected = sorted(_REWRITE_TOKEN_RE.findall(masked_text))
+        actual = sorted(_REWRITE_TOKEN_RE.findall(candidate))
+        if expected != actual:
+            logger.warning(
+                f"[ScriptStep] 二次表达改写保护标记不一致，expected={expected} actual={actual}"
+            )
+            return ""
+
+        # 标记之外不允许出现新的数字，防止模型凭空补充资费、流量等事实。
+        without_tokens = _REWRITE_TOKEN_RE.sub("", candidate)
+        if re.search(r"\d", without_tokens):
+            return ""
+
+        for token, value in protected.items():
+            candidate = candidate.replace(token, value)
+        if not candidate or not re.search(r"[\u4e00-\u9fff]", candidate):
+            return ""
+        return candidate
+
+    async def _rewrite_after_generation(
+        self,
+        text: str,
+        slot_facts: Optional[Dict[str, str]],
+        ctx: FlowContext,
+        sem: Optional[asyncio.Semaphore],
+        stage: str,
+    ) -> tuple[str, bool]:
+        """对已生成话术做二次表达改写；失败或越界时返回原文和 False。"""
+        base_text = (text or "").strip()
+        if not base_text:
+            return "", False
+        # 0 明确表示关闭二次改写，保证最终正文与模板/上一阶段结果完全一致。
+        if self._script_temperature <= 0:
+            return base_text, True
+
+        masked_text, protected = self._mask_rewrite_facts(
+            base_text, slot_facts, self._slot_fallback
+        )
+        try:
+            raw = await self._generate_llm(
+                self._rewrite_prompt(masked_text),
+                ctx,
+                stage,
+                sem,
+                temperature=self._script_temperature,
+            )
+        except Exception as exc:
+            logger.warning(f"[ScriptStep] 二次表达改写失败，回退基础话术: {exc}")
+            return base_text, False
+
+        rewritten = self._restore_rewrite_facts(raw, masked_text, protected)
+        if not rewritten:
+            logger.warning("[ScriptStep] 二次表达改写未通过事实保护校验，回退基础话术")
+            return base_text, False
+        return rewritten, True
 
     # ── 主入口 ────────────────────────────────────────────────────
 
@@ -432,23 +577,31 @@ class ScriptStep:
             )
             llm_success = True
             raw = ""
-            try:
-                raw = await self._generate_llm(
-                    prep["prompt"], ctx, "script_step.llm", sem
-                )
-            except Exception as exc:
-                logger.error(
-                    f"[ScriptStep] ❌ 产品[{prep.get('package_name', '')}]话术生成失败: {exc}"
-                )
-                llm_success = False
-                raw = ""
-            text = self._post_process(raw, prep.get("slot_facts"), self._slot_fallback)
-            # 严格模板模式：模板正文是最终骨架，模型不能把上下文里的资费/流量
-            # 自行插入到没有占位符的位置（例如把“更多的流量”扩成“更多的流量（20GB）”）。
             if prep.get("template_text"):
                 text = self._render_strict_template(
                     prep["template_text"], prep.get("slot_facts"), self._slot_fallback
                 )
+            else:
+                try:
+                    raw = await self._generate_llm(
+                        prep["prompt"], ctx, "script_step.llm", sem
+                    )
+                except Exception as exc:
+                    logger.error(
+                        f"[ScriptStep] ❌ 产品[{prep.get('package_name', '')}]话术生成失败: {exc}"
+                    )
+                    llm_success = False
+                    raw = ""
+                text = self._post_process(raw, prep.get("slot_facts"), self._slot_fallback)
+            if text and llm_success:
+                text, rewrite_success = await self._rewrite_after_generation(
+                    text,
+                    prep.get("slot_facts"),
+                    ctx,
+                    sem,
+                    "script_step.rewrite.llm",
+                )
+                llm_success = llm_success and rewrite_success
             if not text:
                 llm_success = False
                 text = self._fallback_text(prep["pkg"], prep["diff"])
@@ -592,21 +745,31 @@ class ScriptStep:
                     )
                     llm_success = True
                     raw = ""
-                    try:
-                        raw = await self._generate_llm(
-                            prep["prompt"], ctx, "script_step.batch.expand.llm", sem
-                        )
-                    except Exception as exc:
-                        logger.error(
-                            f"[ScriptStep.batch.expand] ❌ 产品[{prep.get('package_name', '')}]"
-                            f" stage={bc_stage!r} scene={tpl_scene!r} 话术生成失败: {exc}"
-                        )
-                        llm_success = False
-                    text = self._post_process(raw, prep.get("slot_facts"), self._slot_fallback)
                     if prep.get("template_text"):
                         text = self._render_strict_template(
                             prep["template_text"], prep.get("slot_facts"), self._slot_fallback
                         )
+                    else:
+                        try:
+                            raw = await self._generate_llm(
+                                prep["prompt"], ctx, "script_step.batch.expand.llm", sem
+                            )
+                        except Exception as exc:
+                            logger.error(
+                                f"[ScriptStep.batch.expand] ❌ 产品[{prep.get('package_name', '')}]"
+                                f" stage={bc_stage!r} scene={tpl_scene!r} 话术生成失败: {exc}"
+                            )
+                            llm_success = False
+                        text = self._post_process(raw, prep.get("slot_facts"), self._slot_fallback)
+                    if text and llm_success:
+                        text, rewrite_success = await self._rewrite_after_generation(
+                            text,
+                            prep.get("slot_facts"),
+                            ctx,
+                            sem,
+                            "script_step.batch.expand.rewrite.llm",
+                        )
+                        llm_success = llm_success and rewrite_success
                     if not text:
                         llm_success = False
                         text = self._fallback_text(prep["pkg"], prep["diff"])
@@ -691,22 +854,32 @@ class ScriptStep:
                 )
                 llm_success = True
                 raw = ""
-                try:
-                    raw = await self._generate_llm(
-                        prep["prompt"], ctx, "script_step.batch.llm", sem
-                    )
-                except Exception as exc:
-                    logger.error(
-                        f"[ScriptStep.batch] ❌ 产品[{prep.get('package_name', '')}]"
-                        f" stage={bc_stage!r} scene={bc_scene!r} 话术生成失败: {exc}"
-                    )
-                    llm_success = False
-                    raw = ""
-                text = self._post_process(raw, prep.get("slot_facts"), self._slot_fallback)
                 if prep.get("template_text"):
                     text = self._render_strict_template(
                         prep["template_text"], prep.get("slot_facts"), self._slot_fallback
                     )
+                else:
+                    try:
+                        raw = await self._generate_llm(
+                            prep["prompt"], ctx, "script_step.batch.llm", sem
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            f"[ScriptStep.batch] ❌ 产品[{prep.get('package_name', '')}]"
+                            f" stage={bc_stage!r} scene={bc_scene!r} 话术生成失败: {exc}"
+                        )
+                        llm_success = False
+                        raw = ""
+                    text = self._post_process(raw, prep.get("slot_facts"), self._slot_fallback)
+                if text and llm_success:
+                    text, rewrite_success = await self._rewrite_after_generation(
+                        text,
+                        prep.get("slot_facts"),
+                        ctx,
+                        sem,
+                        "script_step.batch.rewrite.llm",
+                    )
+                    llm_success = llm_success and rewrite_success
                 if not text:
                     llm_success = False
                     text = self._fallback_text(prep["pkg"], prep["diff"])
@@ -1077,13 +1250,44 @@ class ScriptStep:
     ) -> str:
         """按模板确定性出稿，禁止模型在无占位符处添加上下文事实。
 
-        LLM 仍会被调用用于保持现有链路、日志和失败统计，但最终正文只来自模板：
-        已有事实替换同名槽位，缺失槽位按 passthrough 填默认占位符；模板中的固定文字
-        不经过模型改写。drop 模式沿用旧语义，删除包含残留槽位的句子。
+        模板先确定性出稿：已有事实替换同名槽位，缺失槽位按 passthrough 填默认占位符；
+        模板中的固定文字不由上下文改写。drop 模式沿用旧语义，删除包含残留槽位的句子。
         """
         text = (template_text or "").strip()
         if not text:
             return ""
+        # 有些业务模板把多个业务场景写在同一条 template_content 中（例如天津：
+        # “场景一：...\n场景二：...”），此前由 LLM 根据 script_requirement 选择；
+        # 严格模板渲染后不能再把这个业务决策交给模型，必须在渲染前按已计算的派生值
+        # 确定性截取。没有推荐场景时返回空串，让上层走通用 fallback，避免把两套业务编码
+        # 一起输出或凭空挑一套。
+        scene_matches = list(_INLINE_SCENE_RE.finditer(text))
+        scene_value = str((slot_facts or {}).get("推荐场景") or "").strip()
+        # 只有模板确实包含多个行首标签时才按“多场景模板”处理，避免普通
+        # 话术中的单个“提示：...”被误判。标签本身可以是任意业务配置值。
+        is_multi_scene = len(scene_matches) >= 2
+        if is_multi_scene:
+            if not scene_value:
+                logger.warning(
+                    "[ScriptStep] 严格模板包含多场景分段，但缺少推荐场景，"
+                    "不输出任一场景业务编码"
+                )
+                return ""
+            selected = ""
+            for idx, match in enumerate(scene_matches):
+                start = match.end()
+                end = scene_matches[idx + 1].start() if idx + 1 < len(scene_matches) else len(text)
+                if match.group("label").strip() == scene_value:
+                    selected = text[start:end].strip()
+                    break
+            if not selected:
+                logger.warning(
+                    f"[ScriptStep] 严格模板未找到推荐场景 {scene_value!r}，"
+                    "不输出任一场景业务编码"
+                )
+                return ""
+            logger.info(f"[ScriptStep] ✅ 严格模板按推荐场景选择: {scene_value}")
+            text = selected
         out = _apply_slot_facts(text, slot_facts)
         sf = normalize_slot_fallback(slot_fallback)
         if sf["mode"] == SLOT_FALLBACK_DROP:

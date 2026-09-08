@@ -291,6 +291,14 @@ class TestPostProcessResidualPlaceholders(unittest.TestCase):
         out = ScriptStep._post_process("您当前套餐是{current_package[curOfferDesc]}，建议升级。")
         self.assertEqual(out, "您当前套餐是**，建议升级。")
 
+    def test_numeric_leading_placeholder_is_filled(self) -> None:
+        """占位符字段名可以数字开头，缺失时也必须统一替换为 **。"""
+        out = ScriptStep._post_process(
+            "我看您{lastedMonth}月流量用超{3MonthsOutFlowFee}元啦，超出后{flowStandard}元/G。"
+        )
+        self.assertEqual(out, "我看您**月流量用超**元啦，超出后**元/G。")
+        self.assertNotIn("{3MonthsOutFlowFee}", out)
+
     def test_real_facts_still_win_over_placeholder(self) -> None:
         """有映射事实的槽位必须填真值，不能被占位符兜底顶掉。"""
         out = ScriptStep._post_process(self.RAW, {"recommend_actual_price": "59"})

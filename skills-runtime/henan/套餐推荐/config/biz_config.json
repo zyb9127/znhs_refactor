@@ -1,0 +1,35 @@
+{
+  "script_templates_v2": [
+    {
+      "province": "henan",
+      "intent": "套餐推荐",
+      "template_name": "套餐推荐",
+      "template_content": "为您推荐{pkg_brief[productName]}，每月{pkg_brief[discount_price]}元，含{pkg_brief[Cmn_flow]}通用流量。活动额外赠送{pkg_brief[product_attr][voiceShareGift]}通话、连带开通{pkg_brief[product_attr][giftBusiMcdsName]}，还能享受{pkg_brief[product_attr][discountRate]}优惠，非常划算。{pkg_brief[product_attr][voiceShareGift]}",
+      "product_id": "2021999900002456",
+      "scene": "",
+      "stage": "推荐环节",
+      "linked_vars": [
+        "pkg_brief"
+      ],
+      "script_requirement": "严格以【上下文数据】里的真实值填写产品名、月费、流量、赠送语音、连带开通业务、折扣等字段，缺哪个就不提哪个，绝不编造数字或权益。以客户经理口吻口语化沟通，控制在 130 字以内，结尾带一句自然的办理引导。",
+      "prompt_template": "",
+      "linked_apis": [
+        "cc"
+      ],
+      "status": "online",
+      "created_by": "import",
+      "created_at": "2026-09-02 14:35:29",
+      "template_id": "tpl_henan_1788330929384_c335d7"
+    }
+  ],
+  "template_match": {
+    "product_id_from": "productId",
+    "business_type_from": "business_type"
+  },
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 10,
+    "max_script_length": 130,
+    "max_parallel_scripts": 5
+  }
+}

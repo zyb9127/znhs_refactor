@@ -126,6 +126,11 @@ class RedisConfigBus:
     def enabled(self) -> bool:
         return self._enabled and self._client is not None
 
+    @property
+    def client(self):
+        """只读暴露底层 Redis（Cluster）连接，供 llm_stats 等模块复用（不新建连接池）。"""
+        return self._client
+
     # ── 缓存操作 ──────────────────────────────────────────────────
 
     def _cache_key(self, province: str, intent: str, config_type: str) -> str:

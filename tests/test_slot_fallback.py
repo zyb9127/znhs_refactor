@@ -247,6 +247,24 @@ class TestBuildPromptMaskNormalization(unittest.TestCase):
         self.assertIn("一律不得删句", prompt)
         self.assertNotIn("<PH>", prompt)
 
+    def test_masked_direct_field_is_explicitly_listed_as_missing(self) -> None:
+        """直传自定义槽位被掩码后，也要进入缺失事实约束，不能静默消失。"""
+        ctx = FlowContext(
+            phone="13800000000", intent="套餐推荐", province="shandong",
+            current_package={}, usage={}, tags={}, user_info={},
+            user_profile={}, domain_ext={},
+            extra_info={"uniProdGrade": "**"}, extra_context={},
+        )
+        parts = {}
+        prompt = build_prompt(
+            user_prompt_tpl="", template_text="当前是{uniProdGrade}元套餐。",
+            ctx=ctx, pkg={}, diff=PackageDiff(ctx.current_package, {}),
+            linked_vars=[], parts_out=parts,
+        )
+        self.assertIn("【缺失事实】", prompt)
+        self.assertIn("{uniProdGrade}", prompt)
+        self.assertIn("把槽位本身写成 **", prompt)
+
 
 @unittest.skipUnless(_BASELINE_AVAILABLE, f"script_step 导入失败: {_BASELINE_IMPORT_ERROR}")
 class TestPostProcessResidualPlaceholders(unittest.TestCase):
@@ -288,6 +306,21 @@ class TestPostProcessResidualPlaceholders(unittest.TestCase):
     def test_no_placeholder_text_untouched(self) -> None:
         clean = "您好，推荐5G畅享套餐，月费59元。"
         self.assertEqual(ScriptStep._post_process(clean), clean)
+
+    def test_strict_template_does_not_insert_context_facts(self) -> None:
+        """模板没有槽位时，模型上下文里的资费/流量不能被自行插入正文。"""
+        template = "费用上没有增加太多，但有了更多的流量，以后出门更方便。"
+        out = ScriptStep._render_strict_template(
+            template, {"pkg_flow": "20", "recommend_actual_price": "128"})
+        self.assertEqual(out, template)
+        self.assertNotIn("20", out)
+        self.assertNotIn("128", out)
+
+    def test_strict_template_fills_only_named_slots(self) -> None:
+        template = "新套餐原价{origPrice}元，流量{flow}GB，网龄{internetAge}年。"
+        out = ScriptStep._render_strict_template(
+            template, {"origPrice": "99", "flow": "0"})
+        self.assertEqual(out, "新套餐原价99元，流量0GB，网龄**年。")
 
 
 if __name__ == "__main__":

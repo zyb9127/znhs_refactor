@@ -1,0 +1,103 @@
+{
+  "script_templates_v2": [
+    {
+      "province": "zhejiang",
+      "intent": "降档挽留",
+      "template_name": "降档挽留-现有资费太贵",
+      "template_content": "我查询了一下，您现在用的是{current_package[package_name]}，套餐包含的流量和语音其实挺实用的，看您近期用量（{usage_line}），这个容量还是有需要的，网络服务也挺稳定，建议您保留使用。",
+      "product_id": "现有资费太贵",
+      "scene": "",
+      "stage": "挽留",
+      "linked_vars": ["current_package", "usage"],
+      "linked_apis": ["cc"],
+      "script_requirement": "你是移动降档挽留客服，目标是通过话术挽留用户保持当前套餐、不降档。结合话术模板与【上下文数据】里的真实字段生成挽留话术：1）精简、口语化，字数不大于100字；2）话术中不含具体资费金额；3）缺失字段按 ** 保留、不要臆造；4）不要“您好我是xxx”这类欢迎语/介绍语；5）只围绕挽留展开，突出当前套餐对客户的价值。",
+      "prompt_template": "",
+      "status": "online",
+      "template_id": "tpl_zj_retain_price",
+      "created_by": "local-test",
+      "created_at": "2026-09-03 11:10:00",
+      "updated_by": "local-test"
+    },
+    {
+      "province": "zhejiang",
+      "intent": "降档挽留",
+      "template_name": "降档挽留-流量用不完",
+      "template_content": "看您常用的是{pkg_brief[top5Business]}这些应用，都挺费流量的，您现在{current_package[package_name]}的流量正好覆盖日常使用，近期用量{usage_line}也比较稳定，建议您保留，用起来更省心。",
+      "product_id": "流量用不完",
+      "scene": "",
+      "stage": "挽留",
+      "linked_vars": ["current_package", "usage"],
+      "linked_apis": ["cc"],
+      "script_requirement": "你是移动降档挽留客服，目标是挽留用户保持当前套餐、不降档。结合话术模板与【上下文数据】：1）精简口语化、字数不大于100字；2）不含具体资费金额；3）缺失字段按 ** 保留、不臆造；4）无欢迎语/介绍语；5）结合客户常用应用（top5Business）说明流量有需要，突出保留价值。",
+      "prompt_template": "",
+      "status": "online",
+      "template_id": "tpl_zj_retain_flow_unused",
+      "created_by": "local-test",
+      "created_at": "2026-09-03 11:10:00",
+      "updated_by": "local-test"
+    },
+    {
+      "province": "zhejiang",
+      "intent": "降档挽留",
+      "template_name": "降档挽留-已办理移动其他号码",
+      "template_content": "看您是{pkg_brief[netAge]}的老用户了，一直很信任我们，您现在这张卡的套餐用起来也顺手，建议保留作为主力号码，权益和网络都更有保障，不用特意降档。",
+      "product_id": "已办理移动其他号码",
+      "scene": "",
+      "stage": "挽留",
+      "linked_vars": ["current_package"],
+      "linked_apis": ["cc"],
+      "script_requirement": "你是移动降档挽留客服，目标是挽留用户保持当前套餐、不降档。结合话术模板与【上下文数据】：1）精简口语化、字数不大于100字；2）不含具体资费金额；3）缺失字段按 ** 保留、不臆造；4）无欢迎语/介绍语；5）结合网龄（netAge）强调老用户价值与保留意义。",
+      "prompt_template": "",
+      "status": "online",
+      "template_id": "tpl_zj_retain_othernum",
+      "created_by": "local-test",
+      "created_at": "2026-09-03 11:10:00",
+      "updated_by": "local-test"
+    },
+    {
+      "province": "zhejiang",
+      "intent": "降档挽留",
+      "template_name": "降档挽留-套餐比较口径",
+      "template_content": "您现在用的是{current_package[package_name]}，和您想办的{pkg_brief[offerName]}比一下：{diff_str}。虽然月费看着低一些，但优惠内容少了不少，综合下来还是现在的套餐更划算，建议您保留。",
+      "product_id": "套餐比较口径",
+      "scene": "",
+      "stage": "挽留",
+      "linked_vars": ["current_package", "pkg_brief", "diff_str"],
+      "linked_apis": ["cc"],
+      "script_requirement": "你是移动降档挽留客服，目标是挽留用户保持当前套餐、不降档。结合话术模板与【上下文数据】：1）精简口语化、字数不大于100字；2）差异按(目标-当前)口径解读——某资源减少了就明确指出“减少了X”以突出当前套餐优势，持平说明“无变化”，增加了则不强调该项；3）缺失字段按 ** 保留、不臆造；4）无欢迎语/介绍语；5）落脚到“建议保留当前套餐”。",
+      "prompt_template": "",
+      "status": "online",
+      "template_id": "tpl_zj_retain_compare",
+      "created_by": "local-test",
+      "created_at": "2026-09-03 11:10:00",
+      "updated_by": "local-test"
+    },
+    {
+      "province": "zhejiang",
+      "intent": "降档挽留",
+      "template_name": "降档挽留-通用兜底",
+      "template_content": "您现在的套餐整体用起来还是挺合适的，各项资源也基本够用，建议先保留一段时间看看，有需要我再随时帮您调整。",
+      "product_id": "",
+      "scene": "",
+      "stage": "挽留",
+      "linked_vars": [],
+      "linked_apis": ["cc"],
+      "script_requirement": "空参/未命中具体原因时的兜底挽留话术：口语化、≤80字、不含资费金额、不臆造用户数据，仅做温和挽留与后续跟进引导。",
+      "prompt_template": "",
+      "status": "online",
+      "template_id": "tpl_zj_retain_fallback",
+      "created_by": "local-test",
+      "created_at": "2026-09-03 11:10:00",
+      "updated_by": "local-test"
+    }
+  ],
+  "template_match": {
+    "product_id_from": "product_id"
+  },
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 10,
+    "max_script_length": 100,
+    "max_parallel_scripts": 5
+  }
+}

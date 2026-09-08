@@ -318,6 +318,109 @@
         ]
       },
       "updated_at": "2026-08-04 09:31:13"
+    },
+    {
+      "name": "【比赛】广东·豪爽型·多产品（千人千面×批量）",
+      "payload": {
+        "callId": "gd-demo-05-multi-bold",
+        "intent": "营销活动",
+        "phone": "15010470528",
+        "topN": 3,
+        "province": "guangdong",
+        "extra_data": {},
+        "extra_info": {
+          "current_package": {
+            "package_name": "全家享套餐（全国版）79档",
+            "actual_price": "79元",
+            "broadband": "无",
+            "voice_minutes": "150分钟",
+            "baseFlow": "30GB",
+            "equity": "无"
+          },
+          "usage": {
+            "data_usage": {
+              "近6月平均流量(GB)": "48"
+            },
+            "voice_usage": {
+              "近6月平均主叫时长": "420"
+            },
+            "consumption": {
+              "近6月平均月消费": "95"
+            }
+          },
+          "tags": {
+            "升档目标客户": "是",
+            "流量大户": "是",
+            "决策果断": "是"
+          },
+          "user_profile": {
+            "关注点": "流量管够、一步到位",
+            "使用习惯": "直播+ hotspot 重度使用"
+          },
+          "portrait_style": {
+            "communication_style": "豪爽型",
+            "business_conte": "流量重度用户常年超套，决策果断，看重一步到位"
+          },
+          "recommended_packages": [
+            {
+              "offerId": "2026070113291445801035520",
+              "offerName": "【东莞】裸升99元套餐-2607-东莞中心",
+              "recommend_package_name": "【东莞】裸升99元套餐-2607-东莞中心",
+              "recommend_original_price": "99元",
+              "recommend_actual_price": "99元",
+              "recommend_discount_amount": "0元",
+              "recommend_base_flow": "40GB/月",
+              "recommend_bonus_flow": "10GB/月",
+              "recommend_total_flow": "50",
+              "recommend_voice_minutes": "200分钟/月",
+              "recommend_preferential_period": "6个月",
+              "recommend_broadband": "无",
+              "recommend_equity": "无",
+              "rank": 1
+            },
+            {
+              "offerId": "2026073016465704601073059",
+              "offerName": "【裸升】升99元套餐_202608_东莞",
+              "recommend_package_name": "【裸升】升99元套餐_202608_东莞",
+              "recommend_original_price": "99元",
+              "recommend_actual_price": "99元",
+              "recommend_discount_amount": "0元",
+              "recommend_base_flow": "20GB/月",
+              "recommend_bonus_flow": "20GB/月",
+              "recommend_total_flow": "40",
+              "recommend_voice_minutes": "200分钟/月",
+              "recommend_preferential_period": "6个月",
+              "recommend_broadband": "无",
+              "recommend_equity": "无",
+              "rank": 2
+            },
+            {
+              "offerId": "2026062509282235101021920",
+              "offerName": "【省统升级3季度推】13、升99送10元6个月+20GB扩容",
+              "recommend_package_name": "【省统升级3季度推】13、升99送10元6个月+20GB扩容",
+              "recommend_original_price": "99元",
+              "recommend_actual_price": "89元",
+              "recommend_discount_amount": "10元",
+              "recommend_base_flow": "30GB/月",
+              "recommend_bonus_flow": "20GB/月",
+              "recommend_total_flow": "50",
+              "recommend_voice_minutes": "200分钟/月",
+              "recommend_preferential_period": "6个月",
+              "recommend_broadband": "无",
+              "recommend_equity": "无",
+              "rank": 3
+            }
+          ]
+        },
+        "batch_contexts": [
+          {
+            "product_id": "升",
+            "stage": "个人市场",
+            "scence": "开口话术"
+          }
+        ]
+      },
+      "updated_at": "2026-09-01 10:30"
     }
   ]
 }

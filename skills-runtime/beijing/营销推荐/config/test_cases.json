@@ -63,6 +63,33 @@
         ]
       },
       "updated_at": "2026-08-04 09:22:44"
+    },
+    {
+      "name": "【比赛】北京·营销推荐·多产品（云宽带+网龄回馈）",
+      "payload": {
+        "callId": "bj-yx-demo-multi-01",
+        "intent": "营销推荐",
+        "phone": "13910018888",
+        "topN": 2,
+        "province": "beijing",
+        "extra_data": {
+          "currentMainOffer": {
+            "curOfferName": "128元5G畅享套餐",
+            "curOfferId": "111601000461",
+            "curOfferFee": "128"
+          },
+          "ioId": "demo-io-003"
+        },
+        "extra_info": {},
+        "batch_contexts": [
+          {
+            "product_id": "",
+            "stage": "外呼营销话术",
+            "scence": "意图1-营销活动推荐"
+          }
+        ]
+      },
+      "updated_at": "2026-09-01 10:30"
     }
   ]
 }

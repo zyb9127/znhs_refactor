@@ -59,6 +59,46 @@ from engine.template_selector import (
 # 并发度兜底（config/concurrency.json 与 config_loader 均不可用时）
 _DEFAULT_CONCURRENCY = 8
 
+# 话术生成默认采样温度（可由 biz_config.strategy.script_temperature 覆盖）
+_DEFAULT_SCRIPT_TEMPERATURE = 0.8
+
+# 繁→简转换器（懒加载，缓存）：模型（Qwen/DeepSeek）偶发输出繁体字，统一归一化为简体。
+# 优先 zhconv（纯 Python、无编译依赖）；未安装则降级为原样返回并告警一次，不影响主流程。
+_T2S_CONVERTER: Optional[Any] = None
+_T2S_INIT_DONE = False
+
+
+def _to_simplified(text: str) -> str:
+    """将文本中的繁体字统一转换为简体字；转换器不可用时原样返回（不抛异常）。"""
+    global _T2S_CONVERTER, _T2S_INIT_DONE
+    if not text:
+        return text
+    if not _T2S_INIT_DONE:
+        _T2S_INIT_DONE = True
+        try:
+            import zhconv  # type: ignore
+
+            _T2S_CONVERTER = lambda s: zhconv.convert(s, "zh-hans")  # noqa: E731
+        except Exception:
+            try:
+                from opencc import OpenCC  # type: ignore
+
+                _cc = OpenCC("t2s")
+                _T2S_CONVERTER = _cc.convert
+            except Exception:
+                _T2S_CONVERTER = None
+                logger.warning(
+                    "[ScriptStep] 未安装 zhconv/opencc，话术繁→简转换已跳过；"
+                    "如需去除繁体字请 `pip install zhconv`"
+                )
+    if _T2S_CONVERTER is None:
+        return text
+    try:
+        return _T2S_CONVERTER(text)
+    except Exception as e:  # 单条转换异常不影响话术返回
+        logger.warning(f"[ScriptStep] 繁→简转换异常，返回原文：{e}")
+        return text
+
 # 内置默认字段别名（biz_config 未配置时的兜底）
 # 末位的 productId / Cmn_flow 是营销助手统一接口（灵运交叉营销）产品字段名，
 # 追加在链尾：仅当前面各别名都取不到值时才生效，已上线省份取值完全不变。
@@ -157,6 +197,9 @@ class ScriptStep:
         self._match_cfg: Dict[str, Any] = {}             # biz_config.template_match（模板匹配取值配置）
         # biz_config.slot_fallback（空槽位口径：删句 / 保留原句填占位符）
         self._slot_fallback: Dict[str, Any] = normalize_slot_fallback(None)
+        # 话术生成采样温度：默认 0.8（此前硬编码 0.3，接近贪婪解码导致同输入必得同输出、
+        # 连标点都不变；可由 biz_config.strategy.script_temperature 按省/意图覆盖）
+        self._script_temperature: float = _DEFAULT_SCRIPT_TEMPERATURE
         # 以下由 _load_biz() 每次请求解析注入
         self._templates_v2: List[Dict[str, Any]] = []
         self._fallback_prompt_tpl: str = ""
@@ -175,6 +218,17 @@ class ScriptStep:
         prompts  = biz_config.get("prompts", {})
 
         self.max_length  = strategy.get("max_script_length", self.max_length)
+
+        # 采样温度：strategy.script_temperature 优先，否则用默认 0.8（不再硬编码 0.3）。
+        # 温度过低会让同一入参每次生成完全相同（连标点都不变）；如需更稳定可按省调低。
+        raw_temp = strategy.get("script_temperature")
+        try:
+            self._script_temperature = (
+                float(raw_temp) if raw_temp is not None and str(raw_temp).strip() != ""
+                else _DEFAULT_SCRIPT_TEMPERATURE
+            )
+        except (TypeError, ValueError):
+            self._script_temperature = _DEFAULT_SCRIPT_TEMPERATURE
         # 全局默认并发来自 config/concurrency.json（默认 8）
         # 注：旧键 strategy.max_parallel_scripts 已废弃不再生效（历史遗留，多个技能包里仍写着 3），
         # 并发上限统一由 strategy.llm_max_concurrency / 环境变量 / concurrency.json 决定。
@@ -298,7 +352,7 @@ class ScriptStep:
         if sem is None:
             return await llm_service.generate(
                 prompt,
-                temperature=0.3,
+                temperature=self._script_temperature,
                 max_tokens=4080,
                 stage=stage,
                 provider="script_step",
@@ -307,7 +361,7 @@ class ScriptStep:
         async with sem:
             return await llm_service.generate(
                 prompt,
-                temperature=0.3,
+                temperature=self._script_temperature,
                 max_tokens=4080,
                 stage=stage,
                 provider="script_step",
@@ -389,6 +443,12 @@ class ScriptStep:
                 llm_success = False
                 raw = ""
             text = self._post_process(raw, prep.get("slot_facts"), self._slot_fallback)
+            # 严格模板模式：模板正文是最终骨架，模型不能把上下文里的资费/流量
+            # 自行插入到没有占位符的位置（例如把“更多的流量”扩成“更多的流量（20GB）”）。
+            if prep.get("template_text"):
+                text = self._render_strict_template(
+                    prep["template_text"], prep.get("slot_facts"), self._slot_fallback
+                )
             if not text:
                 llm_success = False
                 text = self._fallback_text(prep["pkg"], prep["diff"])
@@ -543,6 +603,10 @@ class ScriptStep:
                         )
                         llm_success = False
                     text = self._post_process(raw, prep.get("slot_facts"), self._slot_fallback)
+                    if prep.get("template_text"):
+                        text = self._render_strict_template(
+                            prep["template_text"], prep.get("slot_facts"), self._slot_fallback
+                        )
                     if not text:
                         llm_success = False
                         text = self._fallback_text(prep["pkg"], prep["diff"])
@@ -639,6 +703,10 @@ class ScriptStep:
                     llm_success = False
                     raw = ""
                 text = self._post_process(raw, prep.get("slot_facts"), self._slot_fallback)
+                if prep.get("template_text"):
+                    text = self._render_strict_template(
+                        prep["template_text"], prep.get("slot_facts"), self._slot_fallback
+                    )
                 if not text:
                     llm_success = False
                     text = self._fallback_text(prep["pkg"], prep["diff"])
@@ -793,6 +861,7 @@ class ScriptStep:
             "diff":            diff,
             "linked_vars":     tpl_linked_vars,
             "user_prompt_tpl": tpl_prompt,
+            "template_text":  tpl_content,
             "product_id":      product_id,
             "offerId":         offer_id,
             "package_name":    package_name,
@@ -994,9 +1063,32 @@ class ScriptStep:
             text = _strip_residual_placeholders(text)
         else:
             text = _fill_residual_placeholders(text, sf["placeholder"])
+        # 3) 繁→简归一化：模型偶发输出繁体字，统一转简体（全省通用兜底）
+        text = _to_simplified(text)
         if text and not re.search(r"[\u4e00-\u9fff]", text):
             return ""
         return text
+
+    @staticmethod
+    def _render_strict_template(
+        template_text: str,
+        slot_facts: Optional[Dict[str, str]] = None,
+        slot_fallback: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """按模板确定性出稿，禁止模型在无占位符处添加上下文事实。
+
+        LLM 仍会被调用用于保持现有链路、日志和失败统计，但最终正文只来自模板：
+        已有事实替换同名槽位，缺失槽位按 passthrough 填默认占位符；模板中的固定文字
+        不经过模型改写。drop 模式沿用旧语义，删除包含残留槽位的句子。
+        """
+        text = (template_text or "").strip()
+        if not text:
+            return ""
+        out = _apply_slot_facts(text, slot_facts)
+        sf = normalize_slot_fallback(slot_fallback)
+        if sf["mode"] == SLOT_FALLBACK_DROP:
+            return _strip_residual_placeholders(out)
+        return _fill_residual_placeholders(out, sf["placeholder"])
 
     def _fallback_text(self, pkg: Dict[str, Any], diff: Any) -> str:
         """LLM 降级兜底话术（字段名由 field_aliases / 默认别名解析）"""

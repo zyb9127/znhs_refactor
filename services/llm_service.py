@@ -13,6 +13,7 @@ from loguru import logger
 from utils.config_loader import config_loader
 from utils.observability import add_degrade_flag, record_stage, get_request_context, get_trace_id
 from utils import province_logger
+from services.llm_stats import llm_stats
 
 
 class LLMService:
@@ -157,6 +158,8 @@ class LLMService:
         env = self._get_environment()
         headers = self._build_headers(province=province)
         # DeepSeek / DashScope 支持标准 messages 格式，保留 /no_think 前缀以抑制思考
+        # DeepSeek / DashScope 均支持标准 messages 格式；关闭思考统一通过下方
+        # chat_template_kwargs / thinking_off 处理（详见下文），此处不再拼接 /no_think 前缀
         messages = [{"role": "user", "content": prompt}]
         logger.info(
             f"[LLM] 准备请求 env={env} stage={stage} prompt={prompt} "
@@ -179,17 +182,25 @@ class LLMService:
             data["model"] = model_id
         # gray 环境：不带 model 字段，网关根据 host 路由到对应模型
 
-        # 关闭思考模式：不同模型厂商参数不同
-        # - Qwen3/DashScope: chat_template_kwargs.enable_thinking=false
-        # - DeepSeek: reasoning_effort="none" 或 thinking={"type":"disabled"}（部分版本支持）
+        # 关闭思考模式：不同模型厂商参数不同，统一支持 config 覆盖（agents_config.dashscope.thinking_off）。
+        # thinking_off 为 dict 时直接并入请求体，供网关差异时零改代码切换；缺省按模型类型给默认：
+        # - DeepSeek(含 deepseek-v4-flash 等混合推理模型): chat_template_kwargs.thinking=false（V3.1+ 关闭思考链）
+        # - Qwen3/DashScope: chat_template_kwargs.enable_thinking=false（+ /no_think 前缀双保险）
         url_str = str(self.llm_config.get("url", ""))
         model_str = str(self.llm_config.get("model", "") or self.llm_config.get("model_id", ""))
-        if "deepseek" in url_str.lower() or "deepseek" in model_str.lower():
-            # DeepSeek 推理模型无法完全关闭思考，reasoning_effort 合法值仅 high/low/medium/max/xhigh，
-            # 取 low 以最小化思考链 token 占用（none 会 400）
-            data["reasoning_effort"] = "low"
+        is_deepseek = "deepseek" in url_str.lower() or "deepseek" in model_str.lower()
+        thinking_off = self.llm_config.get("thinking_off")
+        if isinstance(thinking_off, dict):
+            # 运维显式指定关闭思考的请求参数（如 {"chat_template_kwargs":{"thinking":false}}
+            # 或 {"reasoning_effort":"none"} / {"thinking":{"type":"disabled"}}），原样并入
+            data.update(thinking_off)
+        elif is_deepseek:
+            # deepseek-v4-flash 混合推理模型（dev 直连）：同时下发两家关闭思考的模板参数，
+            # 模板引擎(vLLM/SGLang)会忽略不认识的 kwargs，故 DeepSeek(thinking) 与
+            # 底座若为 Qwen3(enable_thinking) 都能命中，最大化"关掉思考"成功率。
+            data["chat_template_kwargs"] = {"thinking": False, "enable_thinking": False}
         else:
-            # Qwen3 / DashScope 系列
+            # 生产/灰度内网代理（qwen-plus 等）：保持既有单参数，行为不变
             data["chat_template_kwargs"] = {"enable_thinking": False}
 
         last_error = None
@@ -240,6 +251,14 @@ class LLMService:
                         province, stage, prompt, raw_content, _llm_elapsed,
                         success=True,
                     )
+                    # 分省调用量统计：补采 usage 的 token 用量（纯内存计数，零 I/O）
+                    _usage = output.get("usage") if isinstance(output, dict) else None
+                    _usage = _usage if isinstance(_usage, dict) else {}
+                    self._record_llm_stats(
+                        province, success=True, elapsed_ms=_llm_elapsed,
+                        prompt_tokens=_usage.get("prompt_tokens", 0),
+                        completion_tokens=_usage.get("completion_tokens", 0),
+                    )
                     return content
                 else:
                     logger.error(f"大模型返回格式异常: {output}")
@@ -274,6 +293,8 @@ class LLMService:
             province, stage, prompt, "", _llm_elapsed,
             success=False, error=str(last_error),
         )
+        # 分省调用量统计：最终失败记 1 次 fail（重试中间态不计数）
+        self._record_llm_stats(province, success=False, elapsed_ms=_llm_elapsed)
         return ""
 
     def _log_province_llm(
@@ -305,6 +326,36 @@ class LLMService:
         except Exception:
             pass
 
+    def _record_llm_stats(
+        self,
+        province: str,
+        *,
+        success: bool,
+        elapsed_ms: float,
+        prompt_tokens: Any = 0,
+        completion_tokens: Any = 0,
+    ) -> None:
+        """分省调用量统计：province 缺省时回退请求上下文；intent 从上下文取。
+
+        record() 本身是纯内存操作且不抛异常，这里再用 try/except 包一层双保险，
+        主链路绝不因统计受影响。空省份由 llm_stats 归入 ``unknown``，
+        ``province=test`` 由其剔除（测试页双写不计入）。
+        """
+        try:
+            rc = get_request_context()
+            prov = province or rc.get("province") or ""
+            model = str(
+                self.llm_config.get("model")
+                or self.llm_config.get("model_id")
+                or "default"
+            )
+            llm_stats.record(
+                prov, rc.get("intent", ""), model, success, elapsed_ms,
+                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+            )
+        except Exception:
+            pass
+
     @staticmethod
     def _clean_llm_output(raw: str) -> str:
         """清洗模型输出，只保留正式话术正文。
@@ -321,8 +372,18 @@ class LLMService:
         if not text:
             return ""
 
-        # 去 Markdown 格式符号（加粗/标题）
-        text = re.sub(r"\*{1,2}([^*]+)\*{1,2}", r"\1", text)
+        # 去 Markdown 格式符号（加粗/标题）。
+        #
+        # ``**`` 同时是话术空槽位的默认占位符。旧正则会把一条话术里
+        # 两个独立的空槽位跨整段配成一对，例如：
+        #   "您现在是**元套餐……您是18年**星级客户"
+        # 结果把两个占位符一起删掉。只在同一小段、且不跨中文标点时
+        # 清理真正的 Markdown 加粗标记，避免误伤空槽位。
+        text = re.sub(
+            r"(?<!\*)\*{1,2}([^*\n，。！？；：、]{1,80})\*{1,2}(?!\*)",
+            r"\1",
+            text,
+        )
         text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
 
         # 去「话术：」前缀

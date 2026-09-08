@@ -1,0 +1,89 @@
+{
+  "cc": {
+    "_comment": "河南·营销助手统一接口（直传透传）·套餐推荐。演示 0902 新增 products.product_attr（嵌套自定义扩展属性）随产品整块透传，并可用 {pkg_brief[product_attr][子键]} 精确引用。mock_response 带 product_attr，供配置页调色板展开子键。",
+    "url": "",
+    "method": "POST",
+    "enabled": true,
+    "source_type": "direct",
+    "request_template": {},
+    "response_extract": {},
+    "field_transform": {},
+    "mock_mode": false,
+    "mock_response": {
+      "params": {
+        "optType": "0",
+        "systemId": "NGRC",
+        "inputs": {
+          "sequenceNo": "91579d34-1ea8-4635-90d7-76700281a64e",
+          "servNumber": "150****0511",
+          "provinceCode": "371",
+          "callId": "",
+          "staffId": "HE06209",
+          "staffNo": "6209",
+          "touchNumber": "20260902000123456",
+          "userinfo": {
+            "currentPackageProductName": "159元5G畅享套餐",
+            "currPrice": "159元/月",
+            "currDomesticTraffic": "30GB",
+            "currDomesticVoice": "500分钟"
+          },
+          "products": [
+            {
+              "activityId": "20230424511581",
+              "productId": "jtppv.2021999900002456",
+              "price": "39.00",
+              "discount_price": "19.00",
+              "Cmn_flow": "10GB",
+              "voice": "100",
+              "direct_flow": "30GB",
+              "business_type": "流量包",
+              "gift_cmn_flow": "5GB",
+              "product_desc": "19元10GB通用流量月包，赠送语音与视频会员",
+              "product_attr": {
+                "voiceShareGift": "50分钟",
+                "giftBusiMcdsName": "视频会员",
+                "discountRate": "5折"
+              },
+              "marketingProductFlag": "1",
+              "marketingActivityFlag": "1",
+              "productName": "19元10G流量包",
+              "activityTypeCode": "1",
+              "activityTypeName": "套餐推荐"
+            }
+          ]
+        }
+      }
+    },
+    "direct_mode": "passthrough",
+    "passthrough_fields": [
+      "userinfo",
+      "userinfo.currentPackageProductName",
+      "userinfo.currPrice",
+      "userinfo.currDomesticTraffic",
+      "userinfo.currDomesticVoice",
+      "products",
+      "products.productId",
+      "products.business_type",
+      "products.activityTypeCode",
+      "products.price",
+      "products.discount_price",
+      "products.Cmn_flow",
+      "products.voice",
+      "products.direct_flow",
+      "products.gift_cmn_flow",
+      "products.product_desc",
+      "products.marketingProductFlag",
+      "products.activityId",
+      "products.activityTypeName",
+      "products.marketingActivityFlag",
+      "products.productName",
+      "products.product_attr"
+    ],
+    "request_variant": "marketing_assistant",
+    "created_by": "local-test",
+    "created_at": "2026-09-02 14:20:00",
+    "updated_by": "admin",
+    "updated_at": "2026-09-02 14:31:37",
+    "derived_fields": {}
+  }
+}

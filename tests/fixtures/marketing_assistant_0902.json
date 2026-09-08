@@ -1,0 +1,109 @@
+{
+  "_note": "《灵运平台交叉营销接口规范-new 0902.docx》入参样例，用于 test_marketing_assistant_0902.py 全字段透传/回调/占位符验证。含 0902 新增：products.product_attr(嵌套Map)、userinfo_json 超套字段、ordered/cancel_3m/end_6m 三个数组、userinfo.currBroadband/is_sub_card。产品A(河南,双标志=1可营销)，产品B(活动标志=0应被挡)。",
+  "params": {
+    "systemId": "NGRC",
+    "optType": "0,1,2",
+    "inputs": {
+      "sequenceNo": "91579d34-1ea8-4635-90d7-76700281a64e",
+      "servNumber": "150****0511",
+      "provinceCode": "371",
+      "callId": "call-0902-0001",
+      "staffId": "HE06209",
+      "staffNo": "6209",
+      "touchNumber": "20260902000123456",
+      "userinfo": {
+        "currentPackageProductId": "112312",
+        "currentPackageProductName": "159元5G畅享套餐",
+        "currPrice": "159元/月",
+        "currDomesticTraffic": "30GB",
+        "currDescribe": "10元5GB流量月包",
+        "currDirectedTraffic": "10GB",
+        "currDomesticVoice": "500分钟",
+        "currBroadband": "500M",
+        "is_sub_card": "0"
+      },
+      "products": [
+        {
+          "activityId": "20230424511581",
+          "productId": "jtppv.2021999900002456",
+          "price": "39.00",
+          "discount_price": "19.00",
+          "Cmn_flow": "10GB",
+          "voice": "100",
+          "direct_flow": "30GB",
+          "business_type": "流量包",
+          "gift_cmn_flow": "5GB",
+          "product_desc": "19元10GB通用流量月包，赠送语音与视频会员",
+          "product_attr": {
+            "voiceShareGift": "50分钟",
+            "giftBusiMcdsName": "视频会员",
+            "discountRate": "5折"
+          },
+          "marketingProductFlag": "1",
+          "marketingActivityFlag": "1",
+          "productName": "19元10G流量包",
+          "activityTypeCode": "1",
+          "activityTypeName": "套餐推荐",
+          "broadband": ""
+        },
+        {
+          "activityId": "20230424511999",
+          "productId": "jtppv.2021999900009999",
+          "price": "59.00",
+          "discount_price": "49.00",
+          "Cmn_flow": "30GB",
+          "voice": "300",
+          "direct_flow": "0",
+          "business_type": "月租卡",
+          "gift_cmn_flow": "0GB",
+          "product_desc": "49元30GB大流量卡",
+          "product_attr": {
+            "discountRate": "8折"
+          },
+          "marketingProductFlag": "1",
+          "marketingActivityFlag": "0",
+          "productName": "49元30G大流量卡",
+          "activityTypeCode": "1",
+          "activityTypeName": "套餐推荐",
+          "broadband": ""
+        }
+      ],
+      "userinfo_json": [
+        {
+          "timeType": "0",
+          "total_flow": "",
+          "used_flow": "",
+          "remain_flow": "",
+          "over_flow": "3",
+          "total_cmn_flow": "",
+          "used_cmn_flow": "",
+          "remain_cmn_flow": "",
+          "over_cmn_flow": "",
+          "total_voice": "",
+          "used_voice": "",
+          "remain_voice": "",
+          "over_voice": "0",
+          "user_consume": "",
+          "over_flow_fee": "1.5",
+          "over_voice_fee": "2.0"
+        },
+        {
+          "timeType": "1",
+          "over_flow": "0",
+          "over_voice": "10",
+          "over_flow_fee": "0",
+          "over_voice_fee": "5.0"
+        }
+      ],
+      "ordered_activity_list": [
+        { "package_id": "PK001", "package_name": "宽带提速包" }
+      ],
+      "cancel_activity_3m_list": [
+        { "package_id": "PK900", "package_name": "视频会员月包" }
+      ],
+      "end_activity_6m_list": [
+        { "package_id": "PK800", "package_name": "定向流量包" }
+      ]
+    }
+  }
+}

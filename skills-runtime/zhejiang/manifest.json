@@ -1,0 +1,14 @@
+{
+  "province_code": "zhejiang",
+  "province_name": "浙江",
+  "enabled": true,
+  "version": "1.0.0",
+  "intents": {
+    "降档挽留": {
+      "name": "降档挽留",
+      "version": "1.0.0",
+      "enabled": true,
+      "description": "浙江降档挽留话术（透传模式）· 承接小挽机器人降档挽留能力：逐降档原因各生成一条挽留话术，支持套餐对比 diff"
+    }
+  }
+}

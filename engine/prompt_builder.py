@@ -818,8 +818,13 @@ def build_prompt(
         # 套餐的 128 元/30GB/200 分钟当成月均消费/流量/通话播报）。除了告警定位，
         # 还把缺口显式列进 Prompt——负向约束比让模型自行推断"哪些信息不存在"可靠得多。
         _missing_slots: List[str] = []
+        # 模板中的裸占位符本身就是事实槽位，即使它不是标准域变量（例如
+        # 直传 extra_info 里的 uniProdGrade / telNumStar），也必须显式列入
+        #「缺失事实」。否则掩码值 ** 被清掉后，模型只看到模板里一个没有
+        # 任何负向约束的陌生占位符，容易直接把整处内容改写或删掉。
+        _non_fact_tokens = {"template", "template_content", "max_length", "intent"}
         for token in sorted(tpl_token_set):
-            if token in emitted or token not in _INJECTABLE_KNOWN:
+            if token in emitted or token in _non_fact_tokens:
                 continue
             _missing_slots.append(token)
         if template_text and "[" in template_text:
@@ -879,7 +884,8 @@ def build_prompt(
         lines.append(length_line)
         other_parts.append(length_line)
         rule_no += 1
-        # 个性化润色规则：上下文含用户标签/画像/性格类信息时自动追加（编号顺延）
+        # 个性化约束：上下文含用户标签/画像/性格类信息时自动追加（编号顺延）；
+        # 这里只允许核对事实，不能再给模型任何改写模板的自由度。
         if _has_persona_context(emitted, passthrough_ctx):
             persona_line = f"{rule_no}. {SCRIPT_PERSONA_RULE}"
             lines.append(persona_line)

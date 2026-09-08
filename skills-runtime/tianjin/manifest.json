@@ -1,0 +1,14 @@
+{
+  "province_code": "tianjin",
+  "province_name": "天津",
+  "enabled": true,
+  "version": "1.0.0",
+  "intents": {
+    "营销活动": {
+      "name": "营销活动",
+      "version": "1.0.0",
+      "enabled": true,
+      "description": "天津营销助手统一接口（直传透传+派生字段分档）·5G安心月包推荐"
+    }
+  }
+}

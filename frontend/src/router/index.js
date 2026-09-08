@@ -38,6 +38,8 @@ const router = createRouter({
     { path: '/interface-mapper', redirect: '/InterfaceMapper' },
     // 与 main.py 灰度/运营入口 /agent_test 对齐（页面实现为 pages/TestConsole）
     { path: '/agent_test', redirect: '/TestConsole' },
+    // 模型调用量统计页友好路径（页面实现为 pages/LlmStats）
+    { path: '/stats', redirect: '/LlmStats' },
     // ── AutoConfig 子模块友好路径别名 ──────────────────────────────
     // glob 路由生成规则：取文件夹最末级名称作为 path，即 /SkillManager、/Import
     { path: '/skill-config',  redirect: '/SkillManager' },

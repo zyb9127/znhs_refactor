@@ -1,11 +1,23 @@
+# 营销话术推荐智能体（主服务）运行时依赖
+# 说明：Elasticsearch / Redis / Kafka 为按需懒加载依赖，仅在启用对应配置时才会导入。
+
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
 httpx>=0.27.0
-python-multipart>=0.0.9
-pydantic>=2.7.0
-openpyxl>=3.1.0
-loguru>=0.7.0
 requests>=2.31.0
+pydantic>=2.7.0
+python-multipart>=0.0.9
+loguru>=0.7.0
+openpyxl>=3.1.0
+
+# 繁体→简体归一化：话术后处理统一转简体，去除大模型偶发输出的繁体字
+zhconv>=1.4.3
+
+# ── 配置存储 / 热更新 / 消息（按部署环境启用）──
+# elasticsearch 客户端版本不敏感：services/es_config_store.py 内置了版本兼容层——
+#   装 <=7.x  → 走官方客户端（http_auth / body / doc_type / ignore 老式用法）
+#   未装或 >=8.x → 自动改走内置 REST 适配器（直连 ES HTTP，兼容 ES 5.x~8.x 服务端）
+# 因此无需为了适配线上 ES 而锁定客户端大版本。
 elasticsearch>=7.0.0
-redis>=5.0.0
-kafka-python>=2.0.0
+redis>=4.1.0,<6.0.0
+kafka-python>=2.0.2,<3.0.0

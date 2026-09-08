@@ -1,0 +1,19 @@
+{
+  "name": "tianjin-marketing-activity",
+  "description": "天津营销活动话术生成 Skill（营销助手统一接口 · 派生字段分档选品）",
+  "version": "1.0.0",
+  "type": "scenario",
+  "province": "天津",
+  "scenario_id": "营销活动",
+  "config_files": [
+    "api_nodes.json",
+    "biz_config.json"
+  ],
+  "required_plugins": [
+    "plugins.derived_fields"
+  ],
+  "author": "local-test",
+  "openclaw_compatible": true,
+  "status": "published",
+  "published_at": "2026-08-24 15:00"
+}

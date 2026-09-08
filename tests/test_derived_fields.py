@@ -141,31 +141,6 @@ class TestArrayFind(unittest.TestCase):
     def test_empty_where_takes_first_element(self):
         self.assertEqual(self._find({})["v"], "current")
 
-    def test_any_comparison_takes_first_element_matching_one_condition(self):
-        """任一条件命中时，返回数组中第一条命中的完整对象。"""
-        raw = {"arr": [
-            {"timeType": "2", "over_flow": "0", "over_voice": "3"},
-            {"timeType": "0", "over_flow": "0", "over_voice": "0"},
-            {"timeType": "1", "over_flow": "2", "over_voice": "0"},
-        ]}
-        cfg = {"x": {"type": "array_find", "from": "arr", "match": "any",
-                      "where": {
-                          "over_flow": {"gt": 0},
-                          "over_voice": {"gt": 0},
-                      }}}
-        out = compute_derived_fields(raw, cfg)
-        self.assertEqual(out["x"]["timeType"], "1")
-        self.assertEqual(out["x"]["over_flow"], "2")
-
-    def test_all_comparison_requires_every_condition(self):
-        raw = {"arr": [
-            {"a": "1", "b": "0"},
-            {"a": "2", "b": "3"},
-        ]}
-        cfg = {"x": {"type": "array_find", "from": "arr",
-                      "where": {"a": {"gt": 0}, "b": {"gt": 0}}}}
-        self.assertEqual(compute_derived_fields(raw, cfg)["x"]["a"], "2")
-
     def test_non_list_source_produces_nothing(self):
         out = compute_derived_fields(
             {"arr": {"timeType": "0"}},

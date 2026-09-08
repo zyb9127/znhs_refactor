@@ -1,16 +1,14 @@
 {
   "province_code": "henan",
-  "province_name": "henan",
+  "province_name": "河南",
   "enabled": true,
   "version": "1.0.0",
   "intents": {
-    "套升推荐": {
-      "name": "套升推荐",
+    "套餐推荐": {
+      "name": "套餐推荐",
       "version": "1.0.0",
       "enabled": true,
-      "description": "套升推荐",
-      "created_by": "auto_config_agent",
-      "created_at": "2026-08-07 10:25"
+      "description": "河南营销助手统一接口（直传透传）· 演示 product_attr 嵌套扩展属性子字段引用"
     }
   }
 }

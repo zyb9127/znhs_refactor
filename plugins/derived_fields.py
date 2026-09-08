@@ -156,44 +156,16 @@ Resolver = Callable[[Any], Any]
 
 
 def _op_array_find(spec: Dict[str, Any], resolve: Resolver) -> Any:
-    """数组按条件选出**第一个**匹配元素（整个 dict）。
-
-    ``where`` 的旧写法 ``{"timeType": "0"}`` 继续按字符串精确比较；
-    新写法允许比较算子，例如 ``{"over_flow": {"gt": 0}}``，并可通过
-    ``match: "any"`` 表示多个条件任一满足（默认仍为 ``all``）。
-    若数组元素带有 ``timeType``，先按其数值升序排序（0/1/2 = 当月/上月/上上月），
-    再取第一条命中元素；排序使用副本，不改动原始报文。
-    """
+    """数组按条件选出**第一个**匹配元素（整个 dict）。where 按字符串比，兼容 "0" 与 0。"""
     src = resolve(spec.get("from"))
     if not isinstance(src, list):
         return None
-    if any(isinstance(item, dict) and "timeType" in item for item in src):
-        def _time_type_key(item: Any) -> tuple:
-            number = _parse_number(item.get("timeType")) if isinstance(item, dict) else None
-            # 无法解析的 timeType 放在末尾；sorted 稳定，保持同值元素原顺序。
-            return (number is None, number if number is not None else 0)
-
-        src = sorted(src, key=_time_type_key)
     where = spec.get("where")
     where = where if isinstance(where, dict) else {}
-    match = _s(spec.get("match") or "all").lower()
-    use_any = match == "any"
     for item in src:
         if not isinstance(item, dict):
             continue
-        if not where:
-            return item
-
-        def _match_condition(key: Any, condition: Any) -> bool:
-            # 兼容旧配置：裸值仍是字符串精确匹配，尤其保留空串匹配行为。
-            if not isinstance(condition, dict) or not any(
-                op in _ALL_OPS for op in condition
-            ):
-                return _s(item.get(key)) == _s(condition)
-            return _cmp_all(item.get(key), condition)
-
-        checks = [_match_condition(k, v) for k, v in where.items()]
-        if (any(checks) if use_any else all(checks)):
+        if all(_s(item.get(k)) == _s(v) for k, v in where.items()):
             return item
     return None
 

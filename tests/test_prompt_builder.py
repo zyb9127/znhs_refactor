@@ -637,7 +637,7 @@ class TestNewFormatLinkedVars(EquivalenceBase):
         self.assertIn("推荐套餐语音(分钟) {pkg_voice}：1000", out)
 
     def test_persona_rule_injection_and_numbering(self) -> None:
-        """规则 5 恒为字数规则；含用户标签/画像上下文时追加「个性化润色」为第 6 条、
+        """规则 5 恒为字数规则；含用户标签/画像上下文时追加「个性化约束」为第 6 条、
         话术要求顺延为第 7 条；无标签/画像则不追加、话术要求为第 6 条。"""
         pkg = dict(_SAMPLE_PKG)
         # ① 有 tags：追加润色规则
@@ -650,7 +650,9 @@ class TestNewFormatLinkedVars(EquivalenceBase):
             field_aliases=_FIELD_ALIASES,
         )
         self.assertIn("5. 字数控制", out)
-        self.assertIn("6. 个性化润色", out)
+        self.assertIn("6. 个性化约束", out)
+        self.assertIn("不得据此调整【话术模板】的文字、句式、句序", out)
+        self.assertNotIn("调整称呼、语气与卖点顺序", out)
         self.assertIn("7. 话术要求：150字以内", out)
         # ② 无标签/画像：不追加
         ctx2 = make_ctx(tags={}, user_profile={}, extra_info={}, extra_context={})
@@ -662,16 +664,15 @@ class TestNewFormatLinkedVars(EquivalenceBase):
             script_requirement="简洁",
             field_aliases=_FIELD_ALIASES,
         )
-        self.assertNotIn("个性化润色", out2)
+        self.assertNotIn("个性化约束", out2)
         self.assertIn("5. 字数控制", out2)
         self.assertIn("6. 话术要求：简洁", out2)
-        # ③ 多指标提炼规则文案存在
-        self.assertIn("提炼其中最能支撑推荐理由的 1-3 个要点", out)
+        # ③ 多指标事实也必须按同名槽位原样填入，不允许模型自行提炼或扩写
+        self.assertIn("仍须按模板中的同名槽位原样填入", out)
+        self.assertIn("不得自行提炼、摘要、扩写", out)
 
     def test_template_is_the_backbone_rule(self) -> None:
-        """规则 4：以话术模板为「内容蓝本」——环节/卖点/事实必须全覆盖且不新增，
-        但允许用自己的口语重新表达（换措辞/句式/语序）以获得每次生成的泛化差异，
-        同时事实值（数字/金额/套餐名/方括号数值）须严格照第 2、3 条原样填入。"""
+        """规则 4 必须锁定模板原文，只允许填槽和修复填槽后的语法。"""
         out = self.assert_same_prompt(
             ctx=make_ctx(),
             pkg=_SAMPLE_PKG,
@@ -679,14 +680,12 @@ class TestNewFormatLinkedVars(EquivalenceBase):
             linked_vars=["cur_brief", "pkg_brief"],
             field_aliases=_FIELD_ALIASES,
         )
-        self.assertIn("4. 以【话术模板】为内容蓝本", out)
-        # 必须完整覆盖模板环节/要点、不得新增模板没有的卖点
-        self.assertIn("逐一覆盖、不遗漏也不新增", out)
-        # 允许换措辞/句式/语序以产生泛化差异（不再逐字复述）
-        self.assertIn("不要逐字复述模板", out)
-        self.assertIn("适度调整句子顺序", out)
-        # 但事实值须严格原样填入
-        self.assertIn("须严格照第 2、3 条原样填入、不得改动", out)
+        self.assertIn("4. 以【话术模板】为话术主体框架", out)
+        self.assertIn("沿用它的句子顺序", out)
+        self.assertIn("不得改写成自己的行文", out)
+        self.assertIn("不得调整句序", out)
+        self.assertNotIn("不要逐字复述模板", out)
+        self.assertNotIn("适度调整句子顺序", out)
 
     def test_length_rule_uses_max_length_and_defers_to_requirement(self) -> None:
         """字数规则按 max_length 实时渲染，并显式让位于运营写的「话术要求」。"""
@@ -753,8 +752,8 @@ class TestNewFormatLinkedVars(EquivalenceBase):
             linked_vars=[], field_aliases=_FIELD_ALIASES,
         )
         self.assertIn("{usage[近6月平均流量(GB)]}：25", out2)
-        # tags 子字段触发个性化润色规则
-        self.assertIn("个性化润色", out)
+        # tags 子字段触发个性化约束规则
+        self.assertIn("个性化约束", out)
 
     def test_subfield_bracket_fuzzy_match(self) -> None:
         """回归（北京「用户消费信息未生效」）：映射 field_rename 产出畸形键名

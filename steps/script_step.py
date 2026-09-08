@@ -443,6 +443,12 @@ class ScriptStep:
                 llm_success = False
                 raw = ""
             text = self._post_process(raw, prep.get("slot_facts"), self._slot_fallback)
+            # 严格模板模式：模板正文是最终骨架，模型不能把上下文里的资费/流量
+            # 自行插入到没有占位符的位置（例如把“更多的流量”扩成“更多的流量（20GB）”）。
+            if prep.get("template_text"):
+                text = self._render_strict_template(
+                    prep["template_text"], prep.get("slot_facts"), self._slot_fallback
+                )
             if not text:
                 llm_success = False
                 text = self._fallback_text(prep["pkg"], prep["diff"])
@@ -597,6 +603,10 @@ class ScriptStep:
                         )
                         llm_success = False
                     text = self._post_process(raw, prep.get("slot_facts"), self._slot_fallback)
+                    if prep.get("template_text"):
+                        text = self._render_strict_template(
+                            prep["template_text"], prep.get("slot_facts"), self._slot_fallback
+                        )
                     if not text:
                         llm_success = False
                         text = self._fallback_text(prep["pkg"], prep["diff"])
@@ -693,6 +703,10 @@ class ScriptStep:
                     llm_success = False
                     raw = ""
                 text = self._post_process(raw, prep.get("slot_facts"), self._slot_fallback)
+                if prep.get("template_text"):
+                    text = self._render_strict_template(
+                        prep["template_text"], prep.get("slot_facts"), self._slot_fallback
+                    )
                 if not text:
                     llm_success = False
                     text = self._fallback_text(prep["pkg"], prep["diff"])
@@ -847,6 +861,7 @@ class ScriptStep:
             "diff":            diff,
             "linked_vars":     tpl_linked_vars,
             "user_prompt_tpl": tpl_prompt,
+            "template_text":  tpl_content,
             "product_id":      product_id,
             "offerId":         offer_id,
             "package_name":    package_name,
@@ -1053,6 +1068,27 @@ class ScriptStep:
         if text and not re.search(r"[\u4e00-\u9fff]", text):
             return ""
         return text
+
+    @staticmethod
+    def _render_strict_template(
+        template_text: str,
+        slot_facts: Optional[Dict[str, str]] = None,
+        slot_fallback: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """按模板确定性出稿，禁止模型在无占位符处添加上下文事实。
+
+        LLM 仍会被调用用于保持现有链路、日志和失败统计，但最终正文只来自模板：
+        已有事实替换同名槽位，缺失槽位按 passthrough 填默认占位符；模板中的固定文字
+        不经过模型改写。drop 模式沿用旧语义，删除包含残留槽位的句子。
+        """
+        text = (template_text or "").strip()
+        if not text:
+            return ""
+        out = _apply_slot_facts(text, slot_facts)
+        sf = normalize_slot_fallback(slot_fallback)
+        if sf["mode"] == SLOT_FALLBACK_DROP:
+            return _strip_residual_placeholders(out)
+        return _fill_residual_placeholders(out, sf["placeholder"])
 
     def _fallback_text(self, pkg: Dict[str, Any], diff: Any) -> str:
         """LLM 降级兜底话术（字段名由 field_aliases / 默认别名解析）"""

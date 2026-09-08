@@ -136,9 +136,9 @@ _DEFAULT_FIELD_ALIASES: Dict[str, List[str]] = {
     "pkg_biz_type": ["business_type", "businessType"],
 }
 
-# LLM 未填充的残留占位符：{var} 或 {域[子键]}。
-# 根名与 prompt_builder 的 \w 规则保持一致，允许数字开头（例如 {3MonthsOutFlowFee}）。
-_RESIDUAL_PLACEHOLDER_RE = re.compile(r"\{\w+(?:\[[^\[\]{}]+\])*\}")
+# LLM 未填充的残留占位符：只要是单层花括号包裹的内容，就按占位符处理。
+# 不对变量名首字符或字符集做业务假设，避免漏掉数字开头、带点号等合法配置变量。
+_RESIDUAL_PLACEHOLDER_RE = re.compile(r"\{[^{}\r\n]+\}")
 
 
 def _apply_slot_facts(text: str, slot_facts: Optional[Dict[str, str]]) -> str:

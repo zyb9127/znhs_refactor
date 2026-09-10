@@ -194,7 +194,7 @@
           ],
           "products": [
             {
-              "productId": "2028009",
+              "productId": "",
               "productName": "5G安心月包",
               "activityId": "2090717239001427971",
               "businessType": "自有业务",
@@ -209,12 +209,12 @@
         "batch_contexts": [
           {
             "product_id": "2028009",
-            "stage": "推荐",
+            "stage": "推荐环节",
             "scence": ""
           }
         ]
       },
-      "updated_at": "2026-09-01 09:30"
+      "updated_at": "2026-09-09T02:55:52.082Z"
     },
     {
       "name": "兜底场景",

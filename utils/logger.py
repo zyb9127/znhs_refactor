@@ -37,7 +37,7 @@ class LoggerManager:
         """
         logger.remove()
 
-        # 控制台输出
+        # 控制台输出（始终保留：容器云通过 stdout 采集日志，与本地文件留存开关无关）
         logger.add(
             sys.stdout,
             format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
@@ -45,29 +45,41 @@ class LoggerManager:
             colorize=True,
         )
 
-        # 普通日志文件
-        log_dir = Path(__file__).parent.parent / "logs"
-        log_dir.mkdir(exist_ok=True)
+        # 本地日志文件：受 logging.local_file_enabled / 环境变量 ZNHS_LOCAL_LOG 控制。
+        # 关闭后完全不落本地文件（仅保留上面的 stdout），降低敏感信息本地留存风险。
+        if self._local_file_enabled():
+            log_dir = Path(__file__).parent.parent / "logs"
+            log_dir.mkdir(exist_ok=True)
 
-        logger.add(
-            log_dir / "app_{time:YYYY-MM-DD}.log",
-            rotation="00:00",
-            retention="30 days",
-            level="INFO",
-            encoding="utf-8",
-            format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
-        )
+            # 普通日志文件
+            logger.add(
+                log_dir / "app_{time:YYYY-MM-DD}.log",
+                rotation="00:00",
+                retention="30 days",
+                level="INFO",
+                encoding="utf-8",
+                format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
+            )
 
-        # 错误日志文件
-        logger.add(
-            log_dir / "error_{time:YYYY-MM-DD}.log",
-            rotation="00:00",
-            retention="30 days",
-            level="ERROR",
-            encoding="utf-8",
-            format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
-        )
+            # 错误日志文件
+            logger.add(
+                log_dir / "error_{time:YYYY-MM-DD}.log",
+                rotation="00:00",
+                retention="30 days",
+                level="ERROR",
+                encoding="utf-8",
+                format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
+            )
         # ⚠️ 不在此处打 INFO — lifespan 统一打印
+
+    @staticmethod
+    def _local_file_enabled() -> bool:
+        """本地日志文件留存开关；读取失败一律回退 True（不因配置异常丢日志）。"""
+        try:
+            from utils.config_loader import local_log_enabled
+            return local_log_enabled()
+        except Exception:
+            return True
 
     def get_logger(self):
         return logger

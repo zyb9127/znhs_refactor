@@ -37,6 +37,7 @@ from core.context import FlowContext
 from services.llm_service import llm_service
 from utils.config_loader import config_loader
 from utils.observability import record_stage
+from plugins.derived_fields import VERBATIM_SLOTS_KEY
 from plugins.package_diff import PackageDiff
 from engine.prompt_builder import (
     SLOT_FALLBACK_DROP,
@@ -61,6 +62,15 @@ _DEFAULT_CONCURRENCY = 8
 
 # 话术生成默认采样温度（可由 biz_config.strategy.script_temperature 覆盖）
 _DEFAULT_SCRIPT_TEMPERATURE = 0.8
+
+# 单条话术 LLM 调用的总时长预算（秒，含全部重试与退避；可由
+# biz_config.strategy.llm_budget_s 按省/意图覆盖，<=0 表示不限）。
+# 定这个值的依据是**调用方的超时**而非我们自己的耐心：灵运 20s 就会断开连接，
+# 而单次尝试的读超时是 200s —— 不设预算时最坏要跑 3×200s+退避，超出部分的重试
+# 没有任何人在等结果，只是占着 worker、占着连接、给正在故障的网关继续加压。
+# 默认 18s 给响应组装留 2s 余量；山东单次生成均耗时约 10.6s，所以实际效果是
+# 「快速失败（如秒级 502）才重试，慢速失败直接回退模板」，这正是期望的取舍。
+_DEFAULT_SCRIPT_LLM_BUDGET_S = 18.0
 
 # 繁→简转换器（懒加载，缓存）：模型（Qwen/DeepSeek）偶发输出繁体字，统一归一化为简体。
 # 优先 zhconv（纯 Python、无编译依赖）；未安装则降级为原样返回并告警一次，不影响主流程。
@@ -113,16 +123,31 @@ _DEFAULT_FIELD_ALIASES: Dict[str, List[str]] = {
     "pkg_biz_type": ["business_type", "businessType"],
 }
 
-# LLM 未填充的残留占位符：{var} 或 {域[子键]}（根名为 ASCII 变量名，子键允许中文）
-_RESIDUAL_PLACEHOLDER_RE = re.compile(r"\{[A-Za-z_]\w*(?:\[[^\[\]{}]+\])*\}")
+# LLM 未填充的残留占位符：{var} 或 {域[子键]}。根名放宽为「字母/数字/下划线/中文/点」，
+# 覆盖数字开头（{3MonthsOutFlowFee}）、中文名（{用户标签}）、点路径（{用户标签.星级}）等配置写法，
+# 避免这类残留 token 泄漏到成品话术；仍限定字符集（不吞空格/中文标点），不会误删正文里的普通花括号。
+_RESIDUAL_PLACEHOLDER_RE = re.compile(r"\{[\w.]+(?:\[[^\[\]{}]+\])*\}")
 
 
-def _apply_slot_facts(text: str, slot_facts: Optional[Dict[str, str]]) -> str:
+def _apply_slot_facts(
+    text: str,
+    slot_facts: Optional[Dict[str, str]],
+    verbatim: Optional[List[str]] = None,
+) -> str:
     """确定性填槽：用【上下文数据】中已注入的事实值替换 LLM 输出里同名占位符。
 
     优先于残留清理——映射域/子域有值时保证填入准确（不依赖模型是否听话）；
     长 token 优先（``current_package[curOfferDesc]`` 先于 ``current_package``）。
+
+    verbatim：成品块槽位名（派生字段 verbatim:true）。模型被要求原样保留其占位符；若输出里
+    已找不到该占位符，说明成品块被模型丢弃——只报错不补救（不静默回退，便于排查模型/模板）。
     """
+    if text:
+        for name in (verbatim or ()):
+            if ("{" + name + "}") not in text:
+                logger.error(
+                    f"[ScriptStep] ❌ 成品明细占位符 {{{name}}} 被模型丢弃，话术缺该块（未回退）"
+                )
     if not text or not slot_facts or "{" not in text:
         return text
     out = text
@@ -200,6 +225,8 @@ class ScriptStep:
         # 话术生成采样温度：默认 0.8（此前硬编码 0.3，接近贪婪解码导致同输入必得同输出、
         # 连标点都不变；可由 biz_config.strategy.script_temperature 按省/意图覆盖）
         self._script_temperature: float = _DEFAULT_SCRIPT_TEMPERATURE
+        # 单条话术 LLM 调用总预算（秒），None = 不限；见 _DEFAULT_SCRIPT_LLM_BUDGET_S
+        self._llm_budget_s: Optional[float] = _DEFAULT_SCRIPT_LLM_BUDGET_S
         # 以下由 _load_biz() 每次请求解析注入
         self._templates_v2: List[Dict[str, Any]] = []
         self._fallback_prompt_tpl: str = ""
@@ -229,6 +256,18 @@ class ScriptStep:
             )
         except (TypeError, ValueError):
             self._script_temperature = _DEFAULT_SCRIPT_TEMPERATURE
+
+        # LLM 调用总预算：strategy.llm_budget_s 优先，<=0 视为不限（给离线/压测留口子）
+        raw_budget = strategy.get("llm_budget_s")
+        try:
+            budget = (
+                float(raw_budget) if raw_budget is not None and str(raw_budget).strip() != ""
+                else _DEFAULT_SCRIPT_LLM_BUDGET_S
+            )
+        except (TypeError, ValueError):
+            budget = _DEFAULT_SCRIPT_LLM_BUDGET_S
+        self._llm_budget_s = budget if budget > 0 else None
+
         # 全局默认并发来自 config/concurrency.json（默认 8）
         # 注：旧键 strategy.max_parallel_scripts 已废弃不再生效（历史遗留，多个技能包里仍写着 3），
         # 并发上限统一由 strategy.llm_max_concurrency / 环境变量 / concurrency.json 决定。
@@ -348,7 +387,12 @@ class ScriptStep:
         stage: str,
         sem: Optional[asyncio.Semaphore],
     ) -> str:
-        """调用 LLM 生成话术；sem 非 None 时信号量只包住 generate 调用段（不包模板准备）。"""
+        """调用 LLM 生成话术；sem 非 None 时信号量只包住 generate 调用段（不包模板准备）。
+
+        preserve_slot_placeholder：话术里的 `**` 是空槽位占位符（也是山东等省模板正文
+        自带的「此处填数值」记号），不能被去 Markdown 加粗逻辑成对吃掉，否则数值会
+        静默消失、只剩「元 / GB」这类单位（详见 llm_service._clean_llm_output）。
+        """
         if sem is None:
             return await llm_service.generate(
                 prompt,
@@ -357,6 +401,8 @@ class ScriptStep:
                 stage=stage,
                 provider="script_step",
                 province=ctx.province,
+                preserve_slot_placeholder=True,
+                budget_s=self._llm_budget_s,
             )
         async with sem:
             return await llm_service.generate(
@@ -366,6 +412,8 @@ class ScriptStep:
                 stage=stage,
                 provider="script_step",
                 province=ctx.province,
+                preserve_slot_placeholder=True,
+                budget_s=self._llm_budget_s,
             )
 
     # ── 主入口 ────────────────────────────────────────────────────
@@ -442,13 +490,10 @@ class ScriptStep:
                 )
                 llm_success = False
                 raw = ""
-            text = self._post_process(raw, prep.get("slot_facts"), self._slot_fallback)
-            # 严格模板模式：模板正文是最终骨架，模型不能把上下文里的资费/流量
-            # 自行插入到没有占位符的位置（例如把“更多的流量”扩成“更多的流量（20GB）”）。
-            if prep.get("template_text"):
-                text = self._render_strict_template(
-                    prep["template_text"], prep.get("slot_facts"), self._slot_fallback
-                )
+            text = self._post_process(
+                        raw, prep.get("slot_facts"), self._slot_fallback,
+                        prep.get("verbatim_slots"),
+                    )
             if not text:
                 llm_success = False
                 text = self._fallback_text(prep["pkg"], prep["diff"])
@@ -602,11 +647,10 @@ class ScriptStep:
                             f" stage={bc_stage!r} scene={tpl_scene!r} 话术生成失败: {exc}"
                         )
                         llm_success = False
-                    text = self._post_process(raw, prep.get("slot_facts"), self._slot_fallback)
-                    if prep.get("template_text"):
-                        text = self._render_strict_template(
-                            prep["template_text"], prep.get("slot_facts"), self._slot_fallback
-                        )
+                    text = self._post_process(
+                        raw, prep.get("slot_facts"), self._slot_fallback,
+                        prep.get("verbatim_slots"),
+                    )
                     if not text:
                         llm_success = False
                         text = self._fallback_text(prep["pkg"], prep["diff"])
@@ -702,10 +746,9 @@ class ScriptStep:
                     )
                     llm_success = False
                     raw = ""
-                text = self._post_process(raw, prep.get("slot_facts"), self._slot_fallback)
-                if prep.get("template_text"):
-                    text = self._render_strict_template(
-                        prep["template_text"], prep.get("slot_facts"), self._slot_fallback
+                text = self._post_process(
+                        raw, prep.get("slot_facts"), self._slot_fallback,
+                        prep.get("verbatim_slots"),
                     )
                 if not text:
                     llm_success = False
@@ -861,13 +904,18 @@ class ScriptStep:
             "diff":            diff,
             "linked_vars":     tpl_linked_vars,
             "user_prompt_tpl": tpl_prompt,
-            "template_text":  tpl_content,
             "product_id":      product_id,
             "offerId":         offer_id,
             "package_name":    package_name,
             "prompt":          prompt,
             "prompt_parts":    prompt_parts,
             "slot_facts":      slot_facts,
+            # 成品块槽位（模板确实引用的）：生成后确定性替换，并据此检测模型是否丢了占位符
+            "verbatim_slots": [
+                n for n in (getattr(ctx, "passthrough_context", None) or {}).get(
+                    VERBATIM_SLOTS_KEY) or []
+                if ("{" + n + "}") in (tpl_content or "")
+            ],
             "match_stage":     match_stage,
             "match_scene":     match_scene,
         }
@@ -1040,6 +1088,7 @@ class ScriptStep:
         text: str,
         slot_facts: Optional[Dict[str, str]] = None,
         slot_fallback: Optional[Dict[str, Any]] = None,
+        verbatim_slots: Optional[List[str]] = None,
     ) -> str:
         """对 LLM 输出做最终整形（Markdown/前缀清洗已在 llm_service._clean_llm_output 完成）
 
@@ -1055,7 +1104,7 @@ class ScriptStep:
             text = " ".join(parts)
         text = text.strip().strip('"""\'')
         # 1) 有映射事实的占位符（含 {域[子键]}）确定性填入，不依赖 LLM
-        text = _apply_slot_facts(text, slot_facts)
+        text = _apply_slot_facts(text, slot_facts, verbatim_slots)
         # 2) 仍残留的占位符（映射域运行态为空）：默认保留句子、只把占位符换成 **，
         #    保证总部与分中心模板的槽位结构对称；drop 口径才整句清理
         sf = normalize_slot_fallback(slot_fallback)
@@ -1068,27 +1117,6 @@ class ScriptStep:
         if text and not re.search(r"[\u4e00-\u9fff]", text):
             return ""
         return text
-
-    @staticmethod
-    def _render_strict_template(
-        template_text: str,
-        slot_facts: Optional[Dict[str, str]] = None,
-        slot_fallback: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        """按模板确定性出稿，禁止模型在无占位符处添加上下文事实。
-
-        LLM 仍会被调用用于保持现有链路、日志和失败统计，但最终正文只来自模板：
-        已有事实替换同名槽位，缺失槽位按 passthrough 填默认占位符；模板中的固定文字
-        不经过模型改写。drop 模式沿用旧语义，删除包含残留槽位的句子。
-        """
-        text = (template_text or "").strip()
-        if not text:
-            return ""
-        out = _apply_slot_facts(text, slot_facts)
-        sf = normalize_slot_fallback(slot_fallback)
-        if sf["mode"] == SLOT_FALLBACK_DROP:
-            return _strip_residual_placeholders(out)
-        return _fill_residual_placeholders(out, sf["placeholder"])
 
     def _fallback_text(self, pkg: Dict[str, Any], diff: Any) -> str:
         """LLM 降级兜底话术（字段名由 field_aliases / 默认别名解析）"""

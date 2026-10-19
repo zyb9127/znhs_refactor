@@ -1,0 +1,80 @@
+{
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 3,
+    "intent_strategies": {},
+    "max_script_length": 150,
+    "max_parallel_scripts": 3
+  },
+  "field_aliases": {
+    "_comment": "套餐字段别名（按优先级从高到低列出），ScriptStep 按此映射取值，无需硬编码字段名",
+    "pkg_name": [
+      "offerName",
+      "package_name",
+      "productName",
+      "name"
+    ],
+    "pkg_fee": [
+      "initFee",
+      "monthly_fee",
+      "price",
+      "fee"
+    ],
+    "pkg_flow": [
+      "offerFlow",
+      "data_quota",
+      "dataGB",
+      "flow"
+    ],
+    "pkg_voice": [
+      "offerVoice",
+      "voice_quota",
+      "voiceMinutes",
+      "voice"
+    ]
+  },
+  "script_templates_v2": [
+    {
+      "province": "hubei",
+      "intent": "流量超套营销话术生成_zxy测试",
+      "template_name": "流量超套营销话术生成_zxy测试",
+      "template_content": "您好，您使用移动{params[currentMainOffer][userbegintime]}   {current_package[userbegintime]}，看到您上个月流量用了{params[currentMainOffer][threemonthflow]}多G，总消费为{params[currentMainOffer][threemonthfee]}，，平时上网多吗？\n营销推荐话术：近期您的费用增长{params[currentMainOffer][feechange]}，有点压力，主要是流量超了{params[currentMainOffer][overflow]}G，合计{params[currentMainOffer][overfee]}元。升级我们现在的新套餐{pkg_brief}，次月生效，每月总费用变动不多{params[currentMainOffer][feechange]}，直接送60个月16G全国流量很划算。\n客户犹豫时话术：这个套餐下月1号才生效，您先放心用。合约期60个月不能降档，但能一直享受这个套餐里的{pkg_brief}大流量，用完套内再按标准计费，基本不存在超套可能。\n温馨提醒：办理后次月生效，合约期内需保持号码正常使用，不可降档，祝您生活愉快",
+      "product_id": "20240529081730",
+      "scene": "流量超套",
+      "stage": "切入环节",
+      "linked_vars": [
+        "current_package",
+        "params",
+        "pkg_flow",
+        "pkg_fee",
+        "diff_str",
+        "pkg_voice",
+        "pkg_brief",
+        "usage"
+      ],
+      "script_requirement": "结合【上下文数据】中的当前套餐、历史用量与用户标签，先点出最突出的用户痛点，再用推荐套餐对应字段的真实值说明如何解决；只讲有数据支撑的卖点，口语化、可直接对客播报，150字以内，结尾自然引导办理。",
+      "prompt_template": "",
+      "linked_apis": [
+        "extra_info",
+        "testapi"
+      ],
+      "status": "online",
+      "created_by": "13554543174",
+      "template_id": "tpl_hubei_1785485862073_048684",
+      "created_at": "2026-07-31 16:17:42"
+    }
+  ],
+  "template_match": {
+    "product_id_from": "curOfferId",
+    "stage_from": [
+      "curOfferName",
+      "curOfferFee",
+      "userbegintime",
+      "threemonthfee",
+      "threemonthflow",
+      "threemonthcommunication",
+      "feechange",
+      "dataflow"
+    ]
+  }
+}

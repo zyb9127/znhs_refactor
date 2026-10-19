@@ -1,167 +1,162 @@
 {
-  "北京营销推荐接口_api": {
-    "_comment": "营销推荐意图下话术调用接口",
+  "营销推荐接口": {
+    "_comment": "营销推荐接口",
     "url": "http://restapi.ngcrmpfcore-bj.cs.bj.cmos:8080/ngcrmpfcore_bj/csf/business/productRecommend",
     "method": "POST",
     "enabled": true,
-    "created_by": "admin",
+    "source_type": "api",
     "request_template": {
-      "ioId": "{{extra_data.ioId}}",
-      "intent": "{{INTENT}}",
-      "phone": "{{PHONE}}",
-      "currentMainOffer": {
-        "curOfferName": "{{extra_data.currentMainOffer.curOfferName}}",
-        "curOfferId": "{{extra_data.currentMainOffer.curOfferId}}",
-        "curOfferFee": "{{extra_data.currentMainOffer.curOfferFee}}"
-      },
-      "iop_products": "{{extra_data.iop_products}}"
+      "params": {
+        "phone": "{{PHONE}}",
+        "ioId": "{{extra_data.ioId}}",
+        "intent": "{{INTENT}}",
+        "currentMainOffer": {
+          "curOfferName": "{{extra_data.currentMainOffer.curOfferName}}",
+          "curOfferId": "{{extra_data.currentMainOffer.curOfferId}}",
+          "curOfferFee": "{{extra_data.currentMainOffer.curOfferFee}}"
+        },
+        "iop_products": "{{extra_data.iop_products}}"
+      }
     },
     "response_extract": {
-      "current_package": "bean.mainoffer",
-      "recommended_packages": "bean.recommend_results"
+      "recommended_packages": "bean.recommend_results",
+      "usage": "bean.tags"
     },
     "field_transform": {
+      "usage.consumption": {
+        "from": "bean.tags",
+        "type": "filter_include",
+        "include_keys": [
+          "实际近3月平均消费",
+          "实际近6月平均消费"
+        ],
+        "field_rename": {
+          "实际近3月平均消费": "近3月平均月消费",
+          "实际近6月平均消费": "近6月平均月消费"
+        }
+      },
       "usage.data_usage": {
         "from": "bean.tags",
         "type": "filter_include",
         "include_keys": [
-          "实际近3月平均流量（GB）",
-          "实际近6月平均流量（GB）"
+          "实际近3月平均流量",
+          "实际近6月平均流量"
         ],
         "field_rename": {
-          "实际近3月平均流量（GB）": "近3月平均流量(GB)",
-          "实际近6月平均流量（GB）": "近6月平均流量(GB)"
+          "实际近3月平均流量": "近3月平均流量(GB)",
+          "实际近6月平均流量": "近6月平均流量(GB)"
         }
       },
       "usage.voice_usage": {
         "from": "bean.tags",
         "type": "filter_include",
         "include_keys": [
-          "实际近3月平均语音（分钟）",
-          "实际近6月平均语音（分钟）"
+          "实际近3月平均语音",
+          "实际近6月平均语音"
         ],
         "field_rename": {
-          "实际近3月平均语音（分钟）": "近3月平均主叫时长",
-          "实际近6月平均语音（分钟）": "近6月平均主叫时长"
-        }
-      },
-      "usage.consumption": {
-        "from": "bean.tags",
-        "type": "filter_include",
-        "include_keys": [
-          "实际近3月平均消费（元）",
-          "实际近6月平均消费（元）"
-        ],
-        "field_rename": {
-          "实际近3月平均消费（元）": "近3月平均月消费",
-          "实际近6月平均消费（元）": "近6月平均月消费"
+          "实际近3月平均语音": "近3月平均主叫时长(分钟)",
+          "实际近6月平均语音": "近6月平均主叫时长(分钟)"
         }
       },
       "tags": {
         "from": "bean.tags",
         "type": "filter_exclude",
         "exclude_keys": [
-          "实际近3月平均流量（GB）",
-          "实际近6月平均流量（GB）",
-          "实际近3月平均语音（分钟）",
-          "实际近6月平均语音（分钟）",
-          "实际近3月平均消费（元）",
-          "实际近6月平均消费（元）",
-          "超套流量",
-          "套外语音（分钟）"
-        ]
-      }
-    },
-    "mock_mode": true,
-    "mock_response": {
-      "rtnCode": "0",
-      "rtnMsg": "成功",
-      "bean": {
-        "phone": "13910018888",
-        "ioId": "123456789",
-        "tags": {
-          "实际近3月平均流量（GB）": 38.5,
-          "实际近6月平均流量（GB）": 42.0,
-          "实际近3月平均语音（分钟）": 180,
-          "实际近6月平均语音（分钟）": 195,
-          "实际近3月平均消费（元）": 132,
-          "实际近6月平均消费（元）": 135.5,
-          "超套流量": {},
-          "套外语音（分钟）": "202607:0,202606:0",
-          "融合状态": "合约融合",
-          "分公司": "朝阳分公司",
-          "双卡槽状态": "双移动卡",
-          "是否老旧套餐": "0",
-          "高频高额超套客户": "0",
-          "低频低额超套或非超套客户": "0",
-          "品牌": "全球通",
-          "全球通等级": "金卡客户",
-          "网龄（年）": "10",
-          "消费档位": "100-150元档"
-        },
-        "mainoffer": {
-          "offerId": "111601000461",
-          "offerName": "128元5G畅享套餐",
-          "initFee": 128,
-          "offerType": [],
-          "offerFlow": "30",
-          "offerVoice": "200",
-          "offerPlus": "",
-          "bandWidth": "",
-          "suppCard": "1",
-          "otherRight": [
-            "来电显示"
-          ],
-          "offerDesc": "5G畅享主套餐，含30GB国内流量、200分钟国内通话",
-          "tags": []
-        },
-        "recommend_results": [
-          {
-            "offerId": "111602052881",
-            "offerName": "云宽带129元档合约方案",
-            "initFee": 129,
-            "offerType": [],
-            "offerFlow": "50",
-            "offerVoice": "170",
-            "offerPlus": "1个",
-            "bandWidth": "500M",
-            "suppCard": "1",
-            "otherRight": [
-              "IPTV基础会员/移动高清基础会员"
-            ],
-            "offerDesc": "每月仅多1元，流量升至50GB，另享500M宽带+IPTV，主套餐资源可全家共享",
-            "tags": [],
-            "rank": 1
-          },
-          {
-            "offerId": "111602052740",
-            "offerName": "网龄回馈倍享礼-20GB",
-            "initFee": 0,
-            "offerType": [],
-            "offerFlow": "20",
-            "offerVoice": "0",
-            "offerPlus": "PLUS灵活会员",
-            "bandWidth": "",
-            "suppCard": "",
-            "otherRight": [
-              "每月1张灵活权益兑换券"
-            ],
-            "offerDesc": "老用户网龄回馈：合约期承诺消费，每月到账20GB国内流量+会员权益",
-            "tags": [],
-            "rank": 2
-          }
+          "实际近3月平均消费",
+          "实际近6月平均消费",
+          "实际近3月平均流量",
+          "实际近6月平均流量",
+          "实际近6月平均语音",
+          "实际近3月平均语音"
         ]
       },
-      "beans": [],
-      "object": null
+      "_unit_conversions": []
     },
-    "created_at": "2026-06-03 23:24:13",
-    "source_type": "api",
-    "updated_by": "admin",
-    "updated_at": "2026-07-30 15:10:45",
+    "mock_mode": false,
+    "mock_response": {
+      "rtnCode": "0",
+      "rtnMsg": "success",
+      "bean": {
+        "phone": "15811038117",
+        "ioId": "",
+        "recommend_results": [
+          {
+            "offerId": "111601000468",
+            "offerName": "5G畅享套餐158元档（动感地带）",
+            "initFee": 158,
+            "offerType": [
+              "基本策划"
+            ],
+            "offerFlow": "40.00",
+            "offerVoice": "300",
+            "offerPlus": "",
+            "bandWidth": "",
+            "suppCard": "",
+            "otherRight": [],
+            "offerDesc": "",
+            "tags": []
+          },
+          {
+            "offerId": "111601000323",
+            "offerName": "5G智享套餐（家庭版）169档(动感地带)",
+            "initFee": 169,
+            "offerType": [
+              "基本策划"
+            ],
+            "offerFlow": "30.00",
+            "offerVoice": "500",
+            "offerPlus": "",
+            "bandWidth": "100M",
+            "suppCard": "",
+            "otherRight": [
+              "来电显示、视频彩铃、咪咕5G畅玩包，5G优享服务，移动高清机顶盒1个，互打免费成员2人，通话、流量共享成员数量2人"
+            ],
+            "offerDesc": "",
+            "tags": []
+          },
+          {
+            "offerId": "111601000474",
+            "offerName": "5G畅享套餐198元档（动感地带）",
+            "initFee": 198,
+            "offerType": [
+              "基本策划"
+            ],
+            "offerFlow": "60.00",
+            "offerVoice": "500",
+            "offerPlus": "",
+            "bandWidth": "",
+            "suppCard": "",
+            "otherRight": [],
+            "offerDesc": "",
+            "tags": []
+          }
+        ],
+        "tags": {
+          "实际近3月平均消费": 145,
+          "实际近6月平均消费": 145,
+          "实际近3月平均流量": "91.70",
+          "实际近6月平均流量": "89.01",
+          "实际近6月平均语音": "174.17",
+          "实际近3月平均语音": "174.33",
+          "超套流量": {
+            "202511": "20.00",
+            "202602": "30.00"
+          },
+          "超套语音": {
+            "202511": "20",
+            "202602": "30"
+          }
+        }
+      }
+    },
     "headers": {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      "x-Channel-ID": "AIASSISTANT"
     },
-    "_comment_demo": "比赛演示·北京营销推荐（接口查询+mock，本地演示与生产无关）"
+    "created_by": "13811601301",
+    "created_at": "2026-07-29 09:46:09",
+    "updated_by": "13811601301",
+    "updated_at": "2026-07-31 15:46:01"
   }
 }

@@ -31,8 +31,25 @@
 
 算子
 ----
-``array_find``  数组按条件选元素 → dict
+``array_find``  数组按条件选元素 → dict（where 支持比较算子/裸值精确相等；match=all|any；
+                可选 sort_by+order 先排序再取第一个，如按 timeType 升序取最近账期）
     ``{"type": "array_find", "from": "userinfo_json", "where": {"timeType": "0"}}``
+    ``{"type": "array_find", "from": "userinfo_json", "match": "any",
+       "where": {"over_flow_fee": {"gt": 0}, "over_voice_fee": {"gt": 0}},
+       "sort_by": "timeType", "order": "asc"}``
+``array_render`` 数组逐元素套 item_template 渲染再拼接 → 一段多行文本（变长块）。
+                过滤/排序口径与 array_find 相同（where/match/sort_by/order），命中几条就渲几行，
+                用于「有多少个月超套就展示多少个月」这类行数不定的分月明细。
+    ``{"type": "array_render", "from": "userinfo_json", "match": "any",
+       "where": {"over_flow": {"gt": 0}, "over_voice": {"gt": 0},
+                 "over_flow_fee": {"ne": 0}, "over_voice_fee": {"ne": 0}},
+       "sort_by": "timeType", "order": "asc",
+       "label_field": "timeType", "label_map": {"0": "本月", "1": "上月"},
+       "hint_field": "账单提示",
+       "hint_rules": [{"when": {"over_flow_fee": {"ne": 0}, "over_flow": {"eq": 0}},
+                       "value": "【请结合账单解释】"}, {"value": ""}],
+       "item_template": "{label}流量超出{over_flow}，超套费用{over_flow_fee}元，{账单提示}",
+       "join": "\n"}``
 ``sum``         多路径求和 → 数值
     ``{"type": "sum", "from": ["usage_current.over_flow_fee", "usage_current.over_voice_fee"]}``
 ``bucket``      按阈值 / 多字段条件分档 → 字符串
@@ -41,6 +58,12 @@
 
 求值按声明顺序进行，后面的字段可引用前面已算出的派生名（JSON 对象保序）。
 派生结果为 None 或空串时**不产出**该字段（兜底档写 ``"value": ""`` 即表示「不追加」）。
+
+成品块后填（``"verbatim": true``，任意算子可配，典型用于 array_render）
+--------------------------------------------------------------------
+派生值本身已是定稿文案（如逐月明细），交给 LLM「原样填入」仍有被改写/合并/漏行的风险。
+配 ``verbatim: true`` 后：上下文里该槽位只给占位符本身，模型只负责在话术中保留 ``{派生名}``，
+生成后由 ScriptStep._apply_slot_facts 确定性替换为成品文本（见 prompt_builder / script_step）。
 """
 import operator
 import re
@@ -155,19 +178,101 @@ def _cmp_all(value: Any, cond: Any) -> bool:
 Resolver = Callable[[Any], Any]
 
 
-def _op_array_find(spec: Dict[str, Any], resolve: Resolver) -> Any:
-    """数组按条件选出**第一个**匹配元素（整个 dict）。where 按字符串比，兼容 "0" 与 0。"""
+def _matching_items(spec: Dict[str, Any], resolve: Resolver) -> List[Dict[str, Any]]:
+    """数组按 where/match 过滤 + 可选 sort_by/order 排序，返回命中元素列表（保序）。
+
+    array_find 取其第一个、array_render 遍历全部，共用同一套过滤排序口径。
+    where 每项：裸值=精确相等（兼容 "0" 与 0），或 {op: 操作数}（eq/ne/gt/gte/lt/lte）。
+    match：``all``（默认，全部满足）/ ``any``（任一满足）。
+    sort_by + order：按该键数值排序（order 缺省 ``asc``），缺失/非数值排到最后；不配保持原序。
+    取不到值不伪造：where 遇空值判否（_cmp_one 内保证），不会把「没数据」当成命中。
+    """
     src = resolve(spec.get("from"))
     if not isinstance(src, list):
-        return None
+        return []
     where = spec.get("where")
     where = where if isinstance(where, dict) else {}
-    for item in src:
-        if not isinstance(item, dict):
+    reducer = any if str(spec.get("match") or "all").strip().lower() == "any" else all
+
+    items = [it for it in src if isinstance(it, dict)]
+    sort_by = spec.get("sort_by")
+    if sort_by:
+        reverse = str(spec.get("order") or "asc").strip().lower() == "desc"
+        # 缺失/非数值排最后（升序时给 +inf、降序时给 -inf），sorted 稳定保留同值原序
+        _miss = float("-inf") if reverse else float("inf")
+
+        def _sort_key(it: Dict[str, Any]) -> float:
+            n = _parse_number(it.get(sort_by))
+            return _miss if n is None else n
+
+        items = sorted(items, key=_sort_key, reverse=reverse)
+
+    if not where:
+        return items             # 无条件 → 排序后（或原序）全部元素
+    return [it for it in items
+            if reducer(_cmp_all(it.get(k), cond) for k, cond in where.items())]
+
+
+def _op_array_find(spec: Dict[str, Any], resolve: Resolver) -> Any:
+    """数组按条件选出**第一个**匹配元素（整个 dict）。过滤/排序口径见 _matching_items。"""
+    items = _matching_items(spec, resolve)
+    return items[0] if items else None
+
+
+def _fill_item(tpl: str, scope: Dict[str, Any]) -> str:
+    """按元素字段填 {token}；缺失/空值填空串，不残留占位符（\\w 含中文，支持 {账单提示}）。"""
+    return re.sub(r"\{(\w+)\}", lambda m: _s(scope.get(m.group(1))), tpl)
+
+
+def _eval_rules(rules: Any, scope: Dict[str, Any]) -> str:
+    """bucket-when 口径按单个元素就地求值，返回第一个命中档的 value（用于逐月提示）。"""
+    for rule in (rules or []):
+        if not isinstance(rule, dict):
             continue
-        if all(_s(item.get(k)) == _s(v) for k, v in where.items()):
-            return item
-    return None
+        when = rule.get("when")
+        if isinstance(when, dict) and when:
+            if all(_cmp_all(scope.get(k), cond) for k, cond in when.items()):
+                return _s(rule.get("value"))
+            continue
+        return _s(rule.get("value"))          # 兜底档
+    return ""
+
+
+def _op_array_render(spec: Dict[str, Any], resolve: Resolver) -> Any:
+    """数组逐元素套 item_template 渲染再拼接 → 一段多行文本（变长块）。
+
+    过滤/排序复用 array_find 口径（where/match/sort_by/order）；命中几条就渲几行。
+    每个元素：
+      · label_field + label_map：把某字段值映射成可读标签供 {label} 引用（如 timeType→本月/上月），
+        未命中映射时回退原值；
+      · hint_field + hint_rules：按该元素就地判 bucket-when，结果供 {hint_field} 引用
+        （逐月提示，仅在当月成立时追加）；
+      · item_template 里 {字段名} 用元素自身字段填充，缺失/空值填空串。
+    join 连接各行（默认换行）。无命中元素 / 无 item_template / 结果全空 → None（不产出）。
+    """
+    items = _matching_items(spec, resolve)
+    tpl = _s(spec.get("item_template"))
+    if not items or not tpl:
+        return None
+    label_field = _s(spec.get("label_field"))
+    label_map = spec.get("label_map") if isinstance(spec.get("label_map"), dict) else {}
+    hint_field = _s(spec.get("hint_field"))
+    hint_rules = spec.get("hint_rules")
+    join = spec.get("join")
+    sep = "\n" if join is None else str(join)
+
+    lines: List[str] = []
+    for it in items:
+        scope = dict(it)
+        if label_field:
+            raw_label = _s(it.get(label_field))
+            scope["label"] = _s(label_map.get(raw_label, raw_label))
+        if hint_field:
+            scope[hint_field] = _eval_rules(hint_rules, it)
+        line = _fill_item(tpl, scope).strip()
+        if line:
+            lines.append(line)
+    return sep.join(lines) or None
 
 
 def _op_sum(spec: Dict[str, Any], resolve: Resolver) -> Any:
@@ -216,6 +321,7 @@ def _op_bucket(spec: Dict[str, Any], resolve: Resolver) -> Any:
 
 _OPS: Dict[str, Callable[[Dict[str, Any], Resolver], Any]] = {
     "array_find": _op_array_find,
+    "array_render": _op_array_render,
     "sum": _op_sum,
     "bucket": _op_bucket,
 }
@@ -257,3 +363,19 @@ def compute_derived_fields(raw: Any, cfg: Any) -> Dict[str, Any]:
     if derived:
         logger.info(f"[derived_fields] 已派生 {len(derived)} 个字段：{list(derived)}")
     return derived
+
+
+# 随 passthrough 一起流转（可被 Redis 缓存）的「需后填槽位名」列表键；
+# 下划线开头 = 内部键，不会被当成事实行注入【上下文数据】。
+VERBATIM_SLOTS_KEY = "_verbatim_slots"
+
+
+def verbatim_derived_names(cfg: Any) -> List[str]:
+    """配置里声明了 ``verbatim: true`` 的派生名（保持声明顺序）。"""
+    if not isinstance(cfg, dict):
+        return []
+    return [
+        name for name, spec in cfg.items()
+        if isinstance(name, str) and name and not name.startswith("_")
+        and isinstance(spec, dict) and spec.get("verbatim") is True
+    ]

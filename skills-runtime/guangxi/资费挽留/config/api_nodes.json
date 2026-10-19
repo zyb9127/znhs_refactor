@@ -1,0 +1,31 @@
+{
+  "降档原因": {
+    "_comment": "降档原因相关",
+    "url": "",
+    "method": "POST",
+    "enabled": true,
+    "source_type": "direct",
+    "request_template": {},
+    "response_extract": {},
+    "field_transform": {},
+    "mock_mode": false,
+    "mock_response": {
+      "current_package": {
+        "packageData": "5G智享套餐99元档",
+        "packageVoice": "99"
+      }
+    },
+    "direct_mode": "passthrough",
+    "passthrough_fields": [
+      "current_package",
+      "current_package.packageData",
+      "current_package.packageVoice"
+    ],
+    "request_variant": "standard",
+    "derived_fields": {},
+    "created_by": "13737075864",
+    "created_at": "2026-09-14 16:18:52",
+    "updated_by": "13737075864",
+    "updated_at": "2026-09-14 16:35:24"
+  }
+}

@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from utils import province_logger as pl
 
@@ -13,8 +14,18 @@ class TestLogApiCall(unittest.TestCase):
         self._orig_root = pl._LOG_ROOT
         pl._LOG_ROOT = Path(self._tmp.name)
         pl._cleaned.clear()
+        # 本用例断言 jsonl 已落盘，故强制打开本地留存开关：
+        # 否则 config.json → logging.local_file_enabled=false（或 ZNHS_LOCAL_LOG=0）时
+        # _write 会直接短路不写文件，测试结果随部署配置漂移。开关本身由
+        # test_local_log_toggle.py 专门覆盖。
+        self._toggle = mock.patch.object(pl, "_local_file_enabled", return_value=True)
+        self._toggle.start()
+        self._enabled = mock.patch.object(pl, "_ENABLED", True)
+        self._enabled.start()
 
     def tearDown(self):
+        self._enabled.stop()
+        self._toggle.stop()
         pl._LOG_ROOT = self._orig_root
         self._tmp.cleanup()
 

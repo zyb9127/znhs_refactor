@@ -189,5 +189,22 @@ class ConfigLoader:
         logger.info("✅ 配置已热重载")
 
 
+def local_log_enabled() -> bool:
+    """本地日志文件留存总开关（单一真源，logger 与 province_logger 共用）。
+
+    解析优先级：环境变量 ``ZNHS_LOCAL_LOG``（1/true/yes/on = 开；0/false/no/off = 关）
+    > ``config.json → logging.local_file_enabled`` > 默认 True（保持既有行为）。
+
+    关闭后：不落任何本地日志文件（app_*.log / error_*.log / 分省 *.jsonl），
+    仅保留 stdout（供容器云采集），以降低提示词、出参等敏感信息在容器本地磁盘的留存风险。
+    """
+    import os
+
+    raw = os.environ.get("ZNHS_LOCAL_LOG")
+    if raw is not None and raw.strip() != "":
+        return raw.strip().lower() not in ("0", "false", "no", "off")
+    return config_loader.get("logging.local_file_enabled", True) is not False
+
+
 # 全局单例
 config_loader = ConfigLoader()

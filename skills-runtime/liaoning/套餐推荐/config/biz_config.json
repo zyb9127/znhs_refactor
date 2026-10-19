@@ -1,0 +1,63 @@
+{
+  "script_templates_v2": [
+    {
+      "province": "liaoning",
+      "intent": "套餐推荐",
+      "template_name": "套餐推荐",
+      "template_content": "您好，您当前套餐为信息为{current_package[curOfferDesc]}，给您介绍一下我们近期的专属套餐优惠，有兴趣简单了解一下吗？",
+      "product_id": "",
+      "scene": "",
+      "stage": "",
+      "linked_vars": [
+        "pkg_brief",
+        "diff_str",
+        "current_package"
+      ],
+      "script_requirement": "结合【上下文数据】中的当前套餐、历史用量与用户标签，先点出最突出的用户痛点，再用推荐套餐对应字段的真实值说明如何解决；只讲有数据支撑的卖点，口语化、可直接对客播报，150字以内，结尾自然引导办理。",
+      "prompt_template": "",
+      "linked_apis": [
+        "api_nodes",
+        "cc"
+      ],
+      "status": "online",
+      "created_by": "13811601301",
+      "created_at": "2026-07-29 09:03:07",
+      "template_id": "tpl_liaoning_1785286987075_81009f"
+    },
+    {
+      "province": "liaoning",
+      "intent": "套餐推荐",
+      "template_name": "套餐推荐",
+      "template_content": "话术内容：顺便跟您讲一下，我们特地推出了一款优惠，现在只需要保持当前消费，可享受100GB国内流量，另享受千兆宽带服务，我看您当前套餐为{current_package}，这款产品比较适合您，现在给您办理使用好吗？",
+      "product_id": "600000454578",
+      "scene": "套餐升级",
+      "stage": "推荐环节",
+      "linked_vars": [
+        "pkg_brief",
+        "diff_str",
+        "current_package"
+      ],
+      "script_requirement": "结合【上下文数据】中的当前套餐，先点出最突出的用户痛点，再用推荐套餐对应字段的真实值说明如何解决；只讲有数据支撑的卖点，口语化、可直接对客播报，150字以内，结尾自然引导办理。",
+      "prompt_template": "",
+      "linked_apis": [
+        "cc"
+      ],
+      "status": "online",
+      "created_by": "15140120600",
+      "created_at": "2026-07-30 16:08:01",
+      "template_id": "tpl_liaoning_1785398881112_8053ec"
+    }
+  ],
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 3,
+    "max_script_length": 150,
+    "max_parallel_scripts": 3
+  },
+  "template_match": {
+    "product_id_from": [
+      "curOfferId",
+      "nextOfferId"
+    ]
+  }
+}

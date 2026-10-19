@@ -3995,3 +3995,112 @@ skill测试页面，如果是营销助手接口模式的，测试页面也需要
 验证：全量 578 项测试通过（同步更新 test_prompt_builder.test_template_is_the_backbone_rule
       断言为新语义：内容蓝本+全覆盖不新增+允许换措辞/句序+事实值原样填）；前端 dev/gray/prod/
       默认 dist 四套产物重构建，旧文案零残留。
+
+────────────────────────────────────────────────────────
+【排查 · 2026-09-07】生产配了采样温度 1.10，山东话术仍无多样性（shandong/套餐升档）
+────────────────────────────────────────────────────────
+一、代码链路结论：温度**可以**生效，链路本身无 bug（逐环节已核）
+  1) 前端「保存设置」saveMatchSettings：GET 现配 → biz.strategy = {...旧, ...strategy}
+     （整体 spread，script_temperature 必被带上）→ PUT /api/skills/{省}/{意图}/biz_config；
+  2) schemas/biz_config.schema.json 已声明 strategy.script_temperature，不会被校验剔除；
+  3) steps/script_step.py `_load_biz()` **每次请求**重读 strategy.script_temperature
+     （非法/缺省回退 0.8）→ 注入 self._script_temperature；
+  4) `_generate_llm` 以 temperature=self._script_temperature 调 llm_service.generate；
+  5) services/llm_service.py generate()：仅当入参 temperature 为 None 才回退
+     agents_config，显式传值优先，直接写入请求体 data["temperature"]。
+  => 结论：配置→ES→运行期→网关请求体这条路是通的，不存在"被代码吃掉"的环节。
+
+二、那生产为何仍无变化——4 个候选卡点（按可能性排序）与判定方法
+  ① 配置存了但**没重新发布**（页面顶部黄条已提示：已发布状态下保存会转「编辑中」，
+     需重新发布才在线上生效）。运行期读的是「已发布」版本，编辑中的温度不生效。
+     判定：确认该技能包状态是否回到「已发布」；未发布则点发布后再试。
+  ② **后端未部署**温度可配置的代码（2026-08-31 改动）。若线上仍是旧包，_generate_llm
+     还是硬编码 0.3，ES 里配多少都被忽略。判定见第三节日志法（记到 0.3 即属此类）。
+  ③ **意图对不上**：截图配的是 shandong/套餐升档，本地仅有 套餐推荐/营销推荐。
+     若生产请求实际路由到别的意图，改「套餐升档」自然无效。
+     判定：查 logs/provinces/shandong/llm_*.jsonl 的 intent 字段是哪个意图在被调用。
+  ④ **灵运平台「换一换」侧结果缓存**：若平台按 touchNumber+productId 缓存话术，
+     点「换一换」根本不会再调本服务，必然返回同一条。
+     判定：点一次「换一换」，看本服务是否新增一条 LLM 调用记录；没有新增即属平台缓存。
+  ⑤ 网关**忽略采样参数**：部分 vLLM/TGI/transformers 系网关未显式开采样时按贪婪解码，
+     只给 temperature 无效（表现为温度 1.1 仍每次一模一样）。
+     判定：日志记到 temperature=1.1 但输出仍完全固定 → 属此类，按第四节开 sampling_extra。
+
+三、可用「立即执行」的判定法（无需等新版本）——app 日志文本行已含温度
+  services/llm_service.py 请求前打印：`[LLM] 准备请求 env=... temperature=...`
+    grep "\[LLM\] 准备请求" logs/app_$(date +%F).log | grep -o "temperature=[0-9.]*" | sort | uniq -c
+  读数解释：
+    记到 0.3  → 卡点②后端旧包（温度还硬编码），需发版；
+    记到 0.8  → 卡点①/③配置没生效（走了默认值），查发布状态与意图；
+    记到 1.1  → 配置已生效，问题在卡点④平台缓存或⑤网关忽略采样。
+
+四、本次配套改动（消除排查盲区 + 给网关侧运维开关）
+  1) utils/province_logger.py log_llm() 增记 temperature / max_tokens；
+     services/llm_service.py 两处 _log_province_llm 调用把实际下发值透传进去。
+     => 此前分省 llm_*.jsonl 只有 model/耗时/prompt/output，**不含温度**，导致"温度到底
+        生效没"只能翻 app 文本日志；现在一条结构化日志即可判定。
+  2) services/llm_service.py 新增 agents_config.<provider>.sampling_extra 透传位：
+     配 {"do_sample": true, "top_p": 0.95} 之类即并入请求体，**缺省不下发、行为零变化**。
+     不硬编码 do_sample/top_p 的原因：严格网关对未知参数会直接 400，故设计为按需开启。
+  验证：全量 578 项测试通过；log_llm 落盘确认含 temperature=1.1/max_tokens=4000；
+        sampling_extra 未配时请求体不含额外键，配置后正确并入。
+
+五、提醒：即使温度生效，若该模板自己的【话术要求】仍写"照模板逐字/严禁改写行文"
+      （rule 6 最高优先级，存在 ES），仍会压制多样性；且基础提示词第 4 条的放开需
+      后端发版重启才生效（见上一条 2026-09-07 记录）。三者需同时到位。
+
+────────────────────────────────────────────────────────────────────
+【2026-09-07】采纳 yabo 改造建议中的低风险两项 + 本地日志留存开关（敏感信息治理）
+────────────────────────────────────────────────────────────────────
+背景：评审「话术生成改造参考by yabo.md」，方向（确定性/防幻觉）认可，但反对把
+  script_temperature=0 设为全局默认（会回退北京/广东/辽宁的个性化话术）。仅先落地
+  两项零回归的低风险增强，并按运维诉求增加本地日志留存的配置开关。
+
+一、残留占位符正则放宽（steps/script_step.py:_RESIDUAL_PLACEHOLDER_RE）
+    旧：\{[A-Za-z_]\w*(?:\[[^\[\]{}]+\])*\}  —— 根名限 ASCII 且不能数字开头，
+        {3MonthsOutFlowFee}/{用户标签}/{用户标签.星级} 这类会原样残留、泄漏进成品。
+    新：\{[\w.]+(?:\[[^\[\]{}]+\])*\}       —— 根名放宽为「字/数/下划线/中文/点」，
+        覆盖数字开头、中文名、点路径；仍限定字符集（不吞空格/中文标点），
+        正文里 {100 元, 减 20} 这类不会被误删。补 3 条回归测试。
+
+二、array_find 增强（plugins/derived_fields.py:_op_array_find）——全部向后兼容：
+    · where 每项支持 {op:操作数}（eq/ne/gt/gte/lt/lte，复用既有 _cmp_all，空值判否），
+      裸值仍是精确相等（"0"↔0 兼容）；
+    · match=all(默认)/any 控制多条件组合；
+    · 可选 sort_by+order(asc默认/desc)：先按该键数值排序再取第一个匹配（如 timeType
+      升序取最近账期），缺失/非数值排最后；不配 sort_by 保持数组原序（旧配置零回归）。
+    同步更新 schemas/api_nodes.schema.json 与模块 docstring；补 8 条回归测试。
+    未采纳项：确定性两段式出稿（_render_strict_template/_mask_rewrite_facts）在当前
+    工作副本并不存在；且不应重载 script_temperature 语义，宜作为 per-skill opt-in
+    （biz_config.strategy.generation_mode）另行评估，本次不动。
+
+三、本地日志留存开关（降低敏感信息在容器本地磁盘的留存风险）
+    诉求：可通过配置控制——yes 本地存放、no 不落本地日志。stdout 始终保留（容器云采集）。
+    单一真源：utils/config_loader.local_log_enabled()
+      优先级 = 环境变量 ZNHS_LOCAL_LOG(1/true/yes/on 开；0/false/no/off 关)
+             > config.json → logging.local_file_enabled > 默认 True（保持既有行为）。
+    落点：
+      · utils/logger.py：stdout 恒定；app_*.log / error_*.log 两个文件 sink 仅在开关开时添加。
+      · utils/province_logger.py：_write 增加 _local_file_enabled() 门禁，关闭后不落
+        logs/provinces/*.jsonl（含提示词/出参等最敏感信息）；ZNHS_PROVINCE_LOG 仍为分省
+        粒度独立开关，两者取与。
+    关闭后本地零文件、仅 stdout；读取异常一律回退 True，绝不因配置问题静默丢排查日志。
+    验证：全量 596 项测试通过（+18 新增）；ZNHS_LOCAL_LOG=0 时 local_log_enabled()=False。
+
+
+
+
+天津的要求：
+
+
+分月展示 全量展示  有多少个月超套就展示多少个月
+
+我看您
+{XX}月份流量超出{超额量}，超套费用{套餐外上网费}元。分钟超出{超套分钟数}，超套费用{套餐外通话费}元，
+{XX}月份流量超出{超额量}，超套费用{套餐外上网费}元。分钟超出{超套分钟数}，超套费用{套餐外通话费}元，
+{XX}月份流量超出{超额量}，超套费用{套餐外上网费}元。分钟超出{超套分钟数}，超套费用{套餐外通话费}元，
+{XX}月份流量超出{超额量}，超套费用{套餐外上网费}元。分钟超出{超套分钟数}，超套费用{套餐外通话费}元，
+现在有一个【5G安心月包-1元】（业务编码：2031912）每个月1元，包含100分钟+5GB流量，有效期24个月，到期自动取消，也可随时取消，非常方便。
+
+
+如果{XX}月出现了：{套餐外上网费}≠0且{超额量}=0则添加提示【请结合账单与资源使用情况为客户解释】；如果{套餐外通话费}}≠0且{超套分钟数}=0则添加提示【请结合账单与资源使用情况为客户解释】（仅在该月提示）

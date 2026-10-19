@@ -1,0 +1,61 @@
+{
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 3,
+    "intent_strategies": {},
+    "max_script_length": 150,
+    "max_parallel_scripts": 3,
+    "script_temperature": 0.8
+  },
+  "field_aliases": {
+    "_comment": "套餐字段别名（按优先级从高到低列出），ScriptStep 按此映射取值，无需硬编码字段名",
+    "pkg_name": [
+      "offerName",
+      "package_name",
+      "productName",
+      "name"
+    ],
+    "pkg_fee": [
+      "initFee",
+      "monthly_fee",
+      "price",
+      "fee"
+    ],
+    "pkg_flow": [
+      "offerFlow",
+      "data_quota",
+      "dataGB",
+      "flow"
+    ],
+    "pkg_voice": [
+      "offerVoice",
+      "voice_quota",
+      "voiceMinutes",
+      "voice"
+    ]
+  },
+  "script_templates_v2": [
+    {
+      "province": "guangxi",
+      "intent": "切入话术",
+      "template_name": "切入话术",
+      "template_content": "{流量超套}\n本月流量饱和度：{thisMonthFlowSaturation}%\n近三个月（不含当月）流量超套：{last3mFlowOverNum}次\n{当前在用低价套餐}\n{上月有低消未达}",
+      "product_id": "生活权益包",
+      "scene": "流量超套",
+      "stage": "切入环节",
+      "linked_vars": [
+        "pkg_brief",
+        "diff_str"
+      ],
+      "script_requirement": "你是电信套餐营销坐席。请把【话术模板】中所有 {变量名} 用【上下文数据】里 userinfo下的同名字段值精确替换后，按以下规则判断：\n1、thisMonthFlowSaturation若小于50，则不展示“本月流量饱和度：{thisMonthFlowSaturation}%”\n2、last3mFlowOverNum若等于0，则不展示“近三个月（不含当月）流量超套：{last3mFlowOverNum}次”\n判断完成后按【话术模板】输出话术。\n严格遵守：\n占位符：{xxx} 必须全部替换为真实数值；话术禁止出现 *、**、x、xx、XX、字段英文名，以及「0 个月 / 0GB/0 元 / 0 分钟」。\n空值 / 零值：字段为空、缺失或为 0 时 ——recommend_preferential_period 改说「连续包月」（禁止「连续 0 个月」）；其它数值字段（流量 / 语音 / 赠送）删除包含它的整个分句，不保留占位、不编造。",
+      "prompt_template": "",
+      "linked_apis": [
+        "marketing_recommend_api"
+      ],
+      "status": "online",
+      "created_by": "15723805881",
+      "created_at": "2026-09-08 11:44:12",
+      "template_id": "tpl_guangxi_1788839052548_f7c031"
+    }
+  ]
+}

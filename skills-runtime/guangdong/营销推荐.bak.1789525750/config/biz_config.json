@@ -1,0 +1,21 @@
+{
+  "script_templates_v2": [
+    {
+      "template_id": "tpl_verify_001",
+      "template_name": "营销推荐",
+      "template_content": "Hello, this is a test script for ES read/write verification.\nliweizhong",
+      "scene": "test",
+      "stage": "verify",
+      "status": "online",
+      "product_id": "",
+      "linked_vars": [],
+      "script_requirement": "",
+      "linked_apis": [],
+      "updated_by": "admin"
+    }
+  ],
+  "strategy": {
+    "expose_raw_bean": false
+  },
+  "_verify": true
+}

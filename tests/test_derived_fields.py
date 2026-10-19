@@ -158,6 +158,192 @@ class TestArrayFind(unittest.TestCase):
         self.assertEqual(out["x"], "命中")
 
 
+class TestArrayFindEnhanced(unittest.TestCase):
+    """array_find 增强：where 比较算子、match=all/any、sort_by+order（低风险采纳项）。"""
+
+    def _find(self, spec: Dict[str, Any], arr: Any) -> Any:
+        return compute_derived_fields(
+            {"arr": arr}, {"x": dict(spec, type="array_find", **{"from": "arr"})}
+        ).get("x")
+
+    def test_where_comparator_gt(self):
+        """where 支持 {gt:0} 选出第一条超套费>0 的账期（原来只能精确相等）。"""
+        arr = [
+            {"timeType": "0", "over_flow_fee": "0"},
+            {"timeType": "1", "over_flow_fee": "1.5"},
+        ]
+        self.assertEqual(self._find({"where": {"over_flow_fee": {"gt": 0}}}, arr)["timeType"], "1")
+
+    def test_where_blank_value_not_matched(self):
+        """比较遇空值判否：over_flow_fee 为空串不算 >0（不把没数据当命中）。"""
+        arr = [{"timeType": "0", "over_flow_fee": ""}, {"timeType": "1", "over_flow_fee": "2"}]
+        self.assertEqual(self._find({"where": {"over_flow_fee": {"gt": 0}}}, arr)["timeType"], "1")
+
+    def test_match_all_requires_both(self):
+        arr = [
+            {"timeType": "0", "f": "1", "v": "0"},
+            {"timeType": "1", "f": "1", "v": "3"},
+        ]
+        spec = {"match": "all", "where": {"f": {"gt": 0}, "v": {"gt": 0}}}
+        self.assertEqual(self._find(spec, arr)["timeType"], "1")
+
+    def test_match_any_hits_either(self):
+        arr = [
+            {"timeType": "0", "f": "0", "v": "0"},
+            {"timeType": "1", "f": "0", "v": "3"},
+        ]
+        spec = {"match": "any", "where": {"f": {"gt": 0}, "v": {"gt": 0}}}
+        self.assertEqual(self._find(spec, arr)["timeType"], "1")
+
+    def test_sort_by_asc_takes_earliest_period(self):
+        """乱序数组按 timeType 升序后取第一个符合条件的：应拿到 timeType 最小的那条。"""
+        arr = [
+            {"timeType": "2", "over_flow_fee": "5"},
+            {"timeType": "0", "over_flow_fee": "1"},
+            {"timeType": "1", "over_flow_fee": "3"},
+        ]
+        spec = {"where": {"over_flow_fee": {"gt": 0}}, "sort_by": "timeType", "order": "asc"}
+        self.assertEqual(self._find(spec, arr)["timeType"], "0")
+
+    def test_sort_by_desc(self):
+        arr = [
+            {"timeType": "0", "over_flow_fee": "1"},
+            {"timeType": "2", "over_flow_fee": "5"},
+            {"timeType": "1", "over_flow_fee": "3"},
+        ]
+        spec = {"where": {"over_flow_fee": {"gt": 0}}, "sort_by": "timeType", "order": "desc"}
+        self.assertEqual(self._find(spec, arr)["timeType"], "2")
+
+    def test_sort_by_missing_key_sinks_last(self):
+        """排序键缺失/非数值的元素排到最后，不干扰有效元素被选中。"""
+        arr = [
+            {"timeType": "", "over_flow_fee": "9"},
+            {"timeType": "1", "over_flow_fee": "3"},
+        ]
+        spec = {"where": {"over_flow_fee": {"gt": 0}}, "sort_by": "timeType", "order": "asc"}
+        self.assertEqual(self._find(spec, arr)["timeType"], "1")
+
+    def test_bare_value_backward_compatible(self):
+        """裸值仍是精确相等，"0" 与 0 兼容（旧配置零回归）。"""
+        arr = [{"timeType": 0, "v": "cur"}, {"timeType": 1, "v": "last"}]
+        self.assertEqual(self._find({"where": {"timeType": "0"}}, arr)["v"], "cur")
+
+
+class TestArrayRender(unittest.TestCase):
+    """array_render：变长分月明细 —— 命中几条渲几行，逐月提示、标签映射、排序。"""
+
+    # 天津分月明细配置：量或费任一不为空即视为超套月，逐月追加账单异常提示
+    _SPEC: Dict[str, Any] = {
+        "type": "array_render",
+        "from": "arr",
+        "match": "any",
+        "where": {"over_flow": {"gt": 0}, "over_voice": {"gt": 0},
+                  "over_flow_fee": {"ne": 0}, "over_voice_fee": {"ne": 0}},
+        "sort_by": "timeType", "order": "asc",
+        "label_field": "timeType",
+        "label_map": {"0": "本月", "1": "上月", "2": "上上月", "3": "上上上月"},
+        "hint_field": "账单提示",
+        "hint_rules": [
+            {"when": {"over_flow_fee": {"ne": 0}, "over_flow": {"eq": 0}},
+             "value": "【请结合账单与资源使用情况为客户解释】"},
+            {"when": {"over_voice_fee": {"ne": 0}, "over_voice": {"eq": 0}},
+             "value": "【请结合账单与资源使用情况为客户解释】"},
+            {"value": ""},
+        ],
+        "item_template": "{label}流量超出{over_flow}，超套费用{over_flow_fee}元。分钟超出{over_voice}，超套费用{over_voice_fee}元，{账单提示}",
+        "join": "\n",
+    }
+
+    def _render(self, arr: Any, spec: Dict[str, Any] = None) -> Any:
+        return compute_derived_fields({"arr": arr}, {"x": spec or self._SPEC}).get("x")
+
+    def test_renders_only_over_quota_months_in_order(self):
+        """4 条账期里 2 条超套 → 只渲这 2 行，并按 timeType 升序（当月在前）。"""
+        arr = [
+            {"timeType": "3", "over_flow": "0", "over_flow_fee": "",
+             "over_voice": "0", "over_voice_fee": ""},
+            {"timeType": "1", "over_flow": "0", "over_flow_fee": "0.2",
+             "over_voice": "0", "over_voice_fee": "0.3"},
+            {"timeType": "0", "over_flow": "3", "over_flow_fee": "1.5",
+             "over_voice": "0", "over_voice_fee": "2"},
+            {"timeType": "2", "over_flow": "0", "over_flow_fee": "",
+             "over_voice": "0", "over_voice_fee": ""},
+        ]
+        out = self._render(arr)
+        lines = out.split("\n")
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(lines[0].startswith("本月流量超出3，超套费用1.5元"))
+        self.assertTrue(lines[1].startswith("上月流量超出0，超套费用0.2元"))
+
+    def test_per_month_hint_only_on_matching_month(self):
+        """当月：通话费 2≠0 但超套分钟 0 → 追加提示；数据一致的月份不追加。"""
+        arr = [
+            {"timeType": "0", "over_flow": "3", "over_flow_fee": "1.5",
+             "over_voice": "0", "over_voice_fee": "2"},
+            {"timeType": "1", "over_flow": "5", "over_flow_fee": "1",
+             "over_voice": "10", "over_voice_fee": "2"},
+        ]
+        lines = self._render(arr).split("\n")
+        self.assertTrue(lines[0].endswith("【请结合账单与资源使用情况为客户解释】"))
+        self.assertTrue(lines[1].endswith("元，"))  # hint 为空，仅留模板尾部逗号
+
+    def test_label_falls_back_to_raw_when_unmapped(self):
+        arr = [{"timeType": "9", "over_flow": "3", "over_flow_fee": "1",
+                "over_voice": "0", "over_voice_fee": "0"}]
+        self.assertTrue(self._render(arr).startswith("9流量超出3"))
+
+    def test_no_over_quota_month_yields_nothing(self):
+        """全部账期量、费都为 0/空 → 不产出该字段（不落空块）。"""
+        arr = [
+            {"timeType": "0", "over_flow": "0", "over_flow_fee": "",
+             "over_voice": "0", "over_voice_fee": ""},
+            {"timeType": "1", "over_flow": "0", "over_flow_fee": "0",
+             "over_voice": "0", "over_voice_fee": "0"},
+        ]
+        self.assertIsNone(self._render(arr))
+
+    def test_missing_field_fills_blank_no_placeholder_leak(self):
+        """元素缺字段 → {token} 填空串，不把 {over_voice_fee} 残留进成品。"""
+        spec = dict(self._SPEC, where={"over_flow": {"gt": 0}},
+                    hint_field="", label_field="")
+        arr = [{"over_flow": "3", "over_flow_fee": "1", "over_voice": "0"}]
+        out = self._render(arr, spec)
+        self.assertNotIn("{", out)
+
+    def test_no_item_template_yields_nothing(self):
+        spec = {k: v for k, v in self._SPEC.items() if k != "item_template"}
+        arr = [{"timeType": "0", "over_flow": "3", "over_flow_fee": "1",
+                "over_voice": "0", "over_voice_fee": "0"}]
+        self.assertIsNone(self._render(arr, spec))
+
+    def test_non_list_source_yields_nothing(self):
+        self.assertIsNone(compute_derived_fields(
+            {"arr": {"timeType": "0"}}, {"x": self._SPEC}).get("x"))
+
+    def test_custom_join_separator(self):
+        spec = dict(self._SPEC, join="；", hint_field="", label_field="",
+                    where={"over_flow": {"gt": 0}},
+                    item_template="流量超{over_flow}")
+        arr = [{"over_flow": "3"}, {"over_flow": "5"}]
+        self.assertEqual(self._render(arr, spec), "流量超3；流量超5")
+
+
+class TestArrayFindUnaffectedByRefactor(unittest.TestCase):
+    """array_find 抽出 _matching_items 后行为零回归（护栏）。"""
+
+    def _find(self, spec: Dict[str, Any], arr: Any) -> Any:
+        return compute_derived_fields(
+            {"arr": arr}, {"x": dict(spec, type="array_find", **{"from": "arr"})}).get("x")
+
+    def test_empty_where_still_first_after_sort(self):
+        arr = [{"timeType": "2", "v": "a"}, {"timeType": "0", "v": "b"}]
+        self.assertEqual(self._find({"sort_by": "timeType"}, arr)["v"], "b")
+
+    def test_first_match_in_original_order_without_sort(self):
+        arr = [{"t": "1", "f": "0"}, {"t": "2", "f": "5"}, {"t": "3", "f": "9"}]
+        self.assertEqual(self._find({"where": {"f": {"gt": 0}}}, arr)["t"], "2")
+
+
 class TestSum(unittest.TestCase):
     def _sum(self, raw: Dict[str, Any], paths: Any) -> Any:
         return compute_derived_fields(
@@ -459,6 +645,168 @@ class TestDerivedFieldsInPrompt(unittest.TestCase):
         """超套分钟 0 必须照实出现在上下文，配合坐席提示才说得通。"""
         prompt = self._build("分钟超出{当月资源[over_voice]}分钟。")
         self.assertIn("{当月资源[over_voice]}：0", prompt)
+
+    def test_monthly_detail_block_fills_as_single_slot(self):
+        """array_render 产出的变长分月块，经确定性填槽整段进 {超套分月明细}。
+
+        天津报文命中本月(flow 超套)、上月(flow 费超套)两条，各带逐月账单提示；
+        timeType 2/3 空月不渲染 —— 验证「有几个月超套就展示几行」。
+        """
+        from engine.prompt_builder import build_prompt
+        from plugins.package_diff import PackageDiff
+        detail_spec = {
+            "超套分月明细": {
+                "type": "array_render", "from": "userinfo_json", "match": "any",
+                "where": {"over_flow": {"gt": 0}, "over_voice": {"gt": 0},
+                          "over_flow_fee": {"ne": 0}, "over_voice_fee": {"ne": 0}},
+                "sort_by": "timeType", "order": "asc",
+                "label_field": "timeType",
+                "label_map": {"0": "本月", "1": "上月", "2": "上上月", "3": "上上上月"},
+                "hint_field": "账单提示",
+                "hint_rules": [
+                    {"when": {"over_flow_fee": {"ne": 0}, "over_flow": {"eq": 0}},
+                     "value": "【请结合账单与资源使用情况为客户解释】"},
+                    {"when": {"over_voice_fee": {"ne": 0}, "over_voice": {"eq": 0}},
+                     "value": "【请结合账单与资源使用情况为客户解释】"},
+                    {"value": ""},
+                ],
+                "item_template": "{label}流量超出{over_flow}，超套费用{over_flow_fee}元。分钟超出{over_voice}，超套费用{over_voice_fee}元，{账单提示}",
+                "join": "\n",
+            },
+        }
+        ctx = FlowContext(phone="1", intent="营销活动", province="tianjin")
+        ctx.passthrough_context.update(compute_derived_fields(
+            ma.parse(_tj_payload()).extra_info, detail_spec))
+        prompt = build_prompt(
+            user_prompt_tpl="", template_text="我看您\n{超套分月明细}\n现在有一个套餐。",
+            ctx=ctx, pkg={}, diff=PackageDiff(ctx.current_package, {}), linked_vars=[],
+        )
+        self.assertIn("本月流量超出3，超套费用1.5元。分钟超出0，超套费用2元，"
+                      "【请结合账单与资源使用情况为客户解释】", prompt)
+        self.assertIn("上月流量超出0，超套费用0.2元。分钟超出0，超套费用0.3元，"
+                      "【请结合账单与资源使用情况为客户解释】", prompt)
+        self.assertNotIn("上上月", prompt)  # 空月不渲染
+
+
+class TestVerbatimBlock(unittest.TestCase):
+    """verbatim:true 的成品块：上下文只给占位符，模型保留占位符，生成后确定性替换。"""
+
+    _BLOCK_CFG: Dict[str, Any] = {
+        "超套分月明细": {
+            "type": "array_render", "verbatim": True,
+            "from": "userinfo_json", "match": "any",
+            "where": {"over_flow": {"gt": 0}, "over_voice": {"gt": 0},
+                      "over_flow_fee": {"ne": 0}, "over_voice_fee": {"ne": 0}},
+            "sort_by": "timeType", "order": "asc",
+            "label_field": "timeType",
+            "label_map": {"0": "本月", "1": "上月"},
+            "item_template": "{label}流量超出{over_flow}，超套费用{over_flow_fee}元",
+            "join": "\n",
+        },
+    }
+
+    def _passthrough(self, payload: Dict[str, Any] = None) -> Dict[str, Any]:
+        ei = ma.parse(payload or _tj_payload()).extra_info
+        ctx = FlowContext(phone="1", intent="营销活动", province="tianjin", extra_info=ei)
+        out = asyncio.run(DataStep("tianjin")._call_one("cc", {
+            "source_type": "direct", "direct_mode": "passthrough",
+            ma.REQUEST_VARIANT_KEY: ma.VARIANT_MARKETING_ASSISTANT,
+            "derived_fields": copy.deepcopy(self._BLOCK_CFG),
+        }, ctx))
+        return out["passthrough"]
+
+    def _build(self, template_text: str):
+        from engine.prompt_builder import build_prompt
+        from plugins.package_diff import PackageDiff
+        ctx = FlowContext(phone="1", intent="营销活动", province="tianjin")
+        ctx.passthrough_context.update(self._passthrough())
+        facts: Dict[str, str] = {}
+        prompt = build_prompt(
+            user_prompt_tpl="", template_text=template_text, ctx=ctx, pkg={},
+            diff=PackageDiff(ctx.current_package, {}), linked_vars=[],
+            slot_facts_out=facts,
+        )
+        return prompt, facts
+
+    def test_names_listed_in_declaration_order(self):
+        from plugins.derived_fields import verbatim_derived_names
+        cfg = {"a": {"type": "sum", "verbatim": True}, "b": {"type": "sum"},
+               "c": {"type": "sum", "verbatim": "yes"}, "_d": {"verbatim": True},
+               "e": {"type": "sum", "verbatim": True}}
+        self.assertEqual(verbatim_derived_names(cfg), ["a", "e"])
+        self.assertEqual(verbatim_derived_names(None), [])
+
+    def test_datastep_carries_verbatim_names_with_passthrough(self):
+        """名单随 passthrough 走（缓存命中时同样可用）；只记实际产出的块。"""
+        pt = self._passthrough()
+        self.assertEqual(pt["_verbatim_slots"], ["超套分月明细"])
+
+    def test_no_verbatim_key_when_block_not_produced(self):
+        payload = _tj_payload()
+        for row in payload["params"]["inputs"]["userinfo_json"]:
+            row.update({"over_flow": "0", "over_voice": "0",
+                        "over_flow_fee": "", "over_voice_fee": ""})
+        self.assertNotIn("_verbatim_slots", self._passthrough(payload))
+
+    def test_context_row_is_placeholder_and_real_text_goes_to_slot_facts(self):
+        prompt, facts = self._build("我看您\n{超套分月明细}\n现在有一个套餐。")
+        self.assertIn("{超套分月明细}：{超套分月明细}", prompt)
+        self.assertIn("本月流量超出3，超套费用1.5元", facts["超套分月明细"])
+        self.assertIn("上月流量超出0，超套费用0.2元", facts["超套分月明细"])
+        # 模型看不到成品文本，也就没有改写的素材
+        self.assertNotIn("本月流量超出3", prompt)
+
+    def test_prompt_pins_keep_placeholder_rule(self):
+        prompt, _ = self._build("我看您\n{超套分月明细}\n现在有一个套餐。")
+        self.assertIn("原样保留这些占位符", prompt)
+        self.assertIn("{超套分月明细}", prompt.split("原样保留这些占位符")[1])
+
+    def test_block_not_in_context_when_template_does_not_reference_it(self):
+        """模板没用到该块（如季度包模板）：块不进上下文，内部键也不泄漏成事实行。"""
+        prompt, facts = self._build("您可以办一个季度流量包。")
+        self.assertNotIn("超套分月明细", prompt)
+        self.assertNotIn("_verbatim_slots", prompt)
+        self.assertNotIn("超套分月明细", facts)
+        self.assertNotIn("原样保留这些占位符", prompt)
+
+    def test_non_verbatim_derived_unchanged(self):
+        """没配 verbatim 的派生字段行为不变：值仍直接进上下文（零回归）。"""
+        from engine.prompt_builder import build_prompt
+        from plugins.package_diff import PackageDiff
+        cfg = copy.deepcopy(self._BLOCK_CFG)
+        cfg["超套分月明细"].pop("verbatim")
+        ctx = FlowContext(phone="1", intent="营销活动", province="tianjin")
+        ctx.passthrough_context.update(compute_derived_fields(
+            ma.parse(_tj_payload()).extra_info, cfg))
+        prompt = build_prompt(
+            user_prompt_tpl="", template_text="我看您\n{超套分月明细}\n", ctx=ctx, pkg={},
+            diff=PackageDiff(ctx.current_package, {}), linked_vars=[],
+        )
+        self.assertIn("本月流量超出3，超套费用1.5元", prompt)
+        self.assertNotIn("原样保留这些占位符", prompt)
+
+    def test_post_process_replaces_placeholder_and_keeps_block_newlines(self):
+        from steps.script_step import ScriptStep
+        _, facts = self._build("我看您\n{超套分月明细}\n现在有一个套餐。")
+        out = ScriptStep._post_process(
+            "我看您\n{超套分月明细}\n现在有一个套餐。", facts, None, ["超套分月明细"])
+        self.assertIn("本月流量超出3，超套费用1.5元\n上月流量超出0，超套费用0.2元", out)
+        self.assertNotIn("{", out)
+
+    def test_dropped_placeholder_is_reported_not_silently_patched(self):
+        """模型把占位符丢了：只报 error，不偷偷补块（不静默回退）。"""
+        from loguru import logger
+        from steps.script_step import ScriptStep
+        logs = []
+        sink = logger.add(lambda m: logs.append(str(m)), level="ERROR")
+        try:
+            out = ScriptStep._post_process(
+                "我看您本月超套了，现在有一个套餐。", {"超套分月明细": "X"}, None,
+                ["超套分月明细"])
+        finally:
+            logger.remove(sink)
+        self.assertNotIn("X", out)
+        self.assertTrue(any("被模型丢弃" in m for m in logs))
 
 
 if __name__ == "__main__":

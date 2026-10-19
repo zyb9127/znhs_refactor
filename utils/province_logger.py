@@ -167,8 +167,21 @@ def _write_one(province: str, filename: str, record: Dict[str, Any]) -> None:
         logger.warning(f"[province_logger] 写入失败 province={province} file={filename}: {e}")
 
 
+def _local_file_enabled() -> bool:
+    """本地日志文件留存开关（config.logging.local_file_enabled / 环境变量 ZNHS_LOCAL_LOG）。
+
+    分省 jsonl 本身就是本地文件，且含提示词/出参等敏感信息，故与 app/error 文件同受此开关控制；
+    读取失败一律回退 True，绝不因配置异常静默丢排查日志。ZNHS_PROVINCE_LOG 仍作分省粒度独立开关。
+    """
+    try:
+        from utils.config_loader import local_log_enabled
+        return local_log_enabled()
+    except Exception:
+        return True
+
+
 def _write(province: str, filename: str, record: Dict[str, Any]) -> None:
-    if not _ENABLED:
+    if not _ENABLED or not _local_file_enabled():
         return
     _write_one(province, filename, record)
     # 测试页双写：真实省份保留一份，同时写入 logs/provinces/test/
@@ -318,8 +331,15 @@ def log_llm(
     model: str = "",
     success: bool = True,
     error: Optional[str] = None,
+    temperature: Optional[float] = None,
+    max_tokens: Optional[int] = None,
 ) -> None:
-    """记录一次大模型调用的 prompt / 原始输出（细粒度排查）。"""
+    """记录一次大模型调用的 prompt / 原始输出（细粒度排查）。
+
+    temperature/max_tokens 为本次实际下发给网关的采样参数：生产上"配了采样温度但话术仍
+    无变化"时，靠它一条日志即可判定是配置没生效（记到的仍是旧值/默认值）还是网关侧忽略了
+    采样参数（记到新值但输出依旧固定），无需再去翻 app 日志的文本行。
+    """
     _write(province, f"llm_{_day()}.jsonl", {
         "ts": _now(),
         "trace_id": trace_id,
@@ -328,6 +348,8 @@ def log_llm(
         "stage": stage,
         "model": model,
         "success": success,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
         "elapsed_ms": round(float(elapsed_ms), 1),
         "prompt_len": len(prompt or ""),
         "output_len": len(output or ""),

@@ -1,0 +1,23 @@
+{
+  "main_api": {
+    "enabled": true,
+    "_comment": "福建套餐推荐接口",
+    "url": "",
+    "method": "POST",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "timeout": 30,
+    "max_retries": 2,
+    "mock_mode": false,
+    "created_by": "auto_config_agent",
+    "created_at": "2026-07-28 17:01",
+    "source_type": "direct",
+    "direct_mode": "passthrough",
+    "passthrough_fields": [],
+    "request_template": {
+      "phone": "{{PHONE}}",
+      "province": "{{PROVINCE}}"
+    }
+  }
+}

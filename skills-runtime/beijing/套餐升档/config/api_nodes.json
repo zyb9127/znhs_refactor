@@ -70,31 +70,41 @@
           "用户价值等级": "高价值",
           "是否5G用户": "是",
           "是否有宽带": "否",
-          "网龄（年）": "8",
-          "品牌": "全球通",
-          "全球通等级": "银卡客户",
-          "消费档位": "100-150元档"
+          "网龄（年）": "5"
         }
       }
     },
     "response_extract": {
       "current_package": "bean.mainoffer",
-      "recommended_packages": "bean.recommend_results"
+      "recommended_packages": "bean.recommend_results",
+      "usage": "bean.tags",
+      "user_info": "bean.tags"
     },
     "field_transform": {
+      "current_package": {
+        "from": "current_package",
+        "type": "passthrough"
+      },
+      "recommended_packages": {
+        "from": "recommended_packages",
+        "type": "passthrough"
+      },
       "usage.data_usage": {
-        "from": "bean.tags",
+        "unit_convert": {
+          "近3月平均流量(MB）": "mb_to_gb"
+        },
+        "field_rename": {
+          "近3月平均流量(MB）": "近3月平均流量(GB)"
+        },
+        "from": "usage",
         "type": "filter_include",
         "include_keys": [
           "近3月平均流量(MB）",
           "流量饱和度"
-        ],
-        "unit_convert": {
-          "近3月平均流量(MB）": "mb_to_gb"
-        }
+        ]
       },
       "usage.voice_usage": {
-        "from": "bean.tags",
+        "from": "usage",
         "type": "filter_include",
         "include_keys": [
           "近3月平均主叫时长(分钟)",
@@ -102,30 +112,64 @@
         ]
       },
       "usage.consumption": {
-        "from": "bean.tags",
+        "unit_convert": {
+          "月均折后收入（分）": "fen_to_yuan",
+          "近3月月均消费（分）": "fen_to_yuan"
+        },
+        "field_rename": {
+          "月均折后收入（分）": "月均折后收入(元)",
+          "近3月月均消费（分）": "近3月月均消费(元)"
+        },
+        "from": "usage",
         "type": "filter_include",
         "include_keys": [
           "月均折后收入（分）",
           "近3月月均消费（分）"
-        ],
-        "unit_convert": {
-          "月均折后收入（分）": "fen_to_yuan",
-          "近3月月均消费（分）": "fen_to_yuan"
-        }
+        ]
+      },
+      "user_info": {
+        "from": "usage",
+        "type": "filter_include",
+        "include_keys": [
+          "网龄（年）"
+        ]
       },
       "tags": {
-        "from": "bean.tags",
-        "type": "filter_exclude",
-        "exclude_keys": [
-          "近3月平均流量(MB）",
-          "流量饱和度",
-          "近3月平均主叫时长(分钟)",
-          "语音饱和度",
-          "月均折后收入（分）",
-          "近3月月均消费（分）"
+        "from": "usage",
+        "type": "filter_include",
+        "include_keys": [
+          "用户价值等级",
+          "是否5G用户",
+          "是否有宽带"
         ]
-      }
+      },
+      "_unit_conversions": [
+        {
+          "target_path": "usage.data_usage",
+          "field": "近3月平均流量(MB）",
+          "new_field": "近3月平均流量(GB)",
+          "converter": "mb_to_gb",
+          "desc": ""
+        },
+        {
+          "target_path": "usage.consumption",
+          "field": "月均折后收入（分）",
+          "new_field": "月均折后收入(元)",
+          "converter": "fen_to_yuan",
+          "desc": ""
+        },
+        {
+          "target_path": "usage.consumption",
+          "field": "近3月月均消费（分）",
+          "new_field": "近3月月均消费(元)",
+          "converter": "fen_to_yuan",
+          "desc": ""
+        }
+      ]
     },
-    "created_by": "admin"
+    "created_by": "admin",
+    "source_type": "api",
+    "updated_by": "13811601301",
+    "updated_at": "2026-07-16 22:59:51"
   }
 }

@@ -1,21 +1,16 @@
 {
-  "crm": {
-    "enabled": true,
-    "_comment": "查询用户当前及下周期主商品信息",
+  "cc": {
+    "_comment": "cc",
     "url": "http://restapi.ngcrmpfcore-ln.cs.ln.cmos:8080/ngcrmpfcore_ln/csf/crm/userMainOfferService/",
     "method": "GET",
-    "headers": {
-      "Content-Type": "application/json",
-      "X-Channel-Id": "ngbusi_ln"
-    },
-    "timeout": 30,
-    "max_retries": 2,
-    "mock_mode": false,
-    "request_body_wrapper": "params",
+    "enabled": true,
+    "source_type": "api",
     "request_template": {
-      "userMobile": "{{PHONE}}",
-      "crmpfPubInfo": {
-        "staffId": "{{extra_data.crmpfPubInfo.staffId}}"
+      "params": {
+        "userMobile": "{{PHONE}}",
+        "crmpfPubInfo": {
+          "staffId": "{{extra_data.staffId}}"
+        }
       }
     },
     "response_extract": {
@@ -26,15 +21,11 @@
         "from": "current_package",
         "type": "filter_include",
         "include_keys": [
-          "curOfferName",
-          "curOfferId",
           "curOfferDesc"
         ]
-      },
-      "_unit_conversions": []
+      }
     },
-    "created_by": "interface_mapper_agent",
-    "created_at": "2026-06-17 10:16",
+    "mock_mode": false,
     "mock_response": {
       "rtnCode": "0",
       "rtnMsg": "成功!",
@@ -64,6 +55,14 @@
         "respCode": "0",
         "resultRows": "1"
       }
-    }
+    },
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Channel-Id": "ngbusi_ln"
+    },
+    "created_by": "13811601301",
+    "created_at": "2026-07-29 14:25:05",
+    "updated_by": "15140120600",
+    "updated_at": "2026-07-30 16:00:10"
   }
 }

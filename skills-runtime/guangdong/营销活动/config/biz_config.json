@@ -4,182 +4,192 @@
       "province": "guangdong",
       "intent": "营销活动",
       "template_name": "营销活动",
-      "template_content": "顺便跟您讲一下，我们特地推出了一款优惠，现在连续**（recommend_preferential_period）个月每月只需要**（recommend_actual_price）元，可享受套内**GB（recommend_base_flow）国内流量，另**（recommend_preferential_period）月内每月多享受xxGB（recommend_bonus_flow）国内流量，相当于**(recommend_preferential_period)个月内每月共**（recommend_total_flow)GB流量，现在给您办理使用好吗？\n",
-      "product_id": "流量",
+      "template_content": "顺便跟您讲一下，我们特地推出了一款流量优惠：连续 {recommend_preferential_period} 个月，每月只需 {recommend_actual_price} 元，可享套内 {recommend_base_flow}GB 国内流量；另在优惠期内每月再送 {recommend_bonus_flow}GB 流量，相当于每月共 {recommend_total_flow}GB。现在给您办理使用好吗？",
+      "product_id": "流量扩容",
       "scene": "开口话术",
       "stage": "个人市场",
       "linked_vars": [
         "current_package",
-        "usage",
-        "tags",
-        "user_profile",
-        "recommend_package_name",
-        "recommend_actual_price",
-        "recommend_original_price",
-        "recommend_discount_amount",
-        "recommend_preferential_period",
-        "recommend_base_flow",
-        "recommend_bonus_flow",
-        "recommend_total_flow",
-        "recommend_voice_minutes",
-        "recommend_equity"
+        "recommended_packages",
+        "domain_ext"
       ],
-      "script_requirement": "你是广东移动营销坐席，把【话术模板】改写成贴合这位客户的开口话术，可直接对客播报。\n① 数据准确（填槽）：话术里的价格、优惠期、流量、语音等数字，必须来自【上下文数据】中以 recommend_ 开头的产品字段真实值；缺失或为 0 的字段所在表述整句跳过，严禁编造或用当前套餐数值顶替。\n② 千人千面（按沟通风格改写语气与详略）：\n   · 细致型 → 条理清晰、把原价→现价、优惠期、流量构成一项项讲透，语气稳妥可信；\n   · 豪爽型 → 直奔核心优惠（每月省多少、流量翻多少），短句、干脆、有行动号召；\n   · 长辈耐心型 → 语速慢、称呼亲切、用大白话打比方，避免专业术语，多给安全感；\n   · 活泼型 → 轻松热情，可用适度语气词，突出“划算/超值”的惊喜感。\n   未标注风格时用自然亲切的默认语气。风格名/字段名一律不得出现在话术里。\n③ 结合用户真实用量与标签选择卖点侧重：流量偏高/月底限速→强调流量升级与够用；语音偏高→强调通话；价格敏感→强调省钱与性价比；只借用来定卖点顺序，不得把用量数字之外的标签原文念出。\n④ 口语化、无前缀、无占位符残留；全文 120 字以内。",
+      "script_requirement": "你是电信套餐营销坐席。请把【话术模板】中所有{变量名}用【上下文数据】里的同名字段值精确替换后，仅做口语化润色，输出一句可直接对客播报的话术。\n\n严格遵守：\n1. 占位符：{xxx}必须全部替换为真实数值；话术禁止出现 *、**、x、xx、XX、字段英文名，以及「0个月/0GB/0元/0分钟」。\n2. 空值/零值：字段为空、缺失或为0时——recommend_preferential_period 改说「连续包月」（禁止「连续0个月」）；其它数值字段（流量/语音/赠送）删除包含它的整个分句，不保留占位、不编造。\n3. 计算：recommend_total_flow 缺失时用 recommend_base_flow + recommend_bonus_flow；结果为0或空则省略「再送/共」表述。\n4. 数字规范：金额带「元」、流量带「GB」、优惠期带「个月」，不改变数值大小。\n5. 个性化（按上下文 communication_style，缺省按平和型；business_conte 为商机总结，用于一句点痛点，为空则跳过，不编造）：\n   效率型：直奔优惠与办理，砍铺垫，≤90字。\n   直接型：卖点清晰不绕弯，先价格再权益，≤110字。\n   平和型：礼貌自然、软引导，≤120字。\n   谨慎型：强调「可先了解、无压力」，少催办，突出划算，≤130字。\n   细致型：把流量/语音/优惠期讲清再引导，结构完整，≤140字。\n   敏感型：先认同再推荐，语气更柔、避免施压，≤120字。\n6. 忠实：只用给定字段值，不虚构套餐名、价格或权益；结尾自然引导办理（效率型可更简短）。",
       "prompt_template": "",
-      "linked_apis": [],
+      "linked_apis": [
+        "ceshi"
+      ],
       "status": "online",
       "created_by": "admin",
       "template_id": "tpl_guangdong_1782093485147_93bfa1",
       "created_at": "2026-06-22 09:58:05",
-      "updated_by": "demo"
+      "updated_by": "admin"
     },
     {
       "province": "guangdong",
       "intent": "营销活动",
       "template_name": "营销活动",
-      "template_content": "为了感谢您的支持，目前我们推出一个大礼包，您可保持使用29元及以上套餐，办理首条宽带的全家享礼包30元/月（含畅看版或咪咕版），即可享受一条300M宽带、电视、电视会员等服务。现在登记办理，更可以 享前**个月每月返还**元话费，最高返还**元话费。相当于前**年宽带月租仅需**元/月，单办全家享礼包即可享优惠（如客户有路由器需求可在下单时勾选同装），非常划算，现在就为您下单办理好吗？",
+      "template_content": "为了感谢您的支持，目前我们推出一个大礼包，您可保持使用29元及以上套餐，办理首条宽带的全家享礼包30元/月（含畅看版或咪咕版），即可享受一条300M宽带、电视、电视会员等服务。现在登记办理，更可享前{rebate_months}个月每月返还{monthly_rebate}元话费，最高返还{max_rebate}元话费；相当于前{effective_years}年宽带月租仅需{effective_monthly_fee}元/月，单办全家享礼包即可享优惠（如有路由器需求可在下单时勾选同装），非常划算，现在就为您下单办理好吗？",
       "product_id": "全家享",
       "scene": "开口话术",
       "stage": "家庭市场",
       "linked_vars": [
         "current_package",
-        "tags",
-        "user_profile"
+        "recommended_packages",
+        "domain_ext"
       ],
-      "script_requirement": "你是广东移动家庭市场坐席。按【话术模板】播报全家享礼包卖点，结合客户当前套餐是否已有宽带做切入。\n① 数字（返还/月租/优惠期）缺失或为 0 时整句跳过，不得编造。\n② 未开通宽带的客户强调“一号搞定宽带+电视+会员、全家共享”；语气亲切口语化。\n③ 无前缀、无占位符残留，全文 120 字以内。",
+      "script_requirement": "你是电信套餐营销坐席。请把【话术模板】中所有{变量名}用【上下文数据】里的同名字段值精确替换后，仅做口语化润色，输出一句可直接对客播报的话术。严格遵守：\n1. 占位符：模板中{xxx}必须全部替换为真实数值；最终话术禁止出现 *、**、x、xx、XX、{、} 或任何字段英文名。\n2. 空值/零值：字段为空、缺失或为0时，不得直接说\"0元/0个月/0年\"；应删除包含该字段的整个分句，不保留占位、不编造数字（如\"最高返还\"缺失则不提该句）。\n3. 保值：礼包固定条款（29元及以上套餐、全家享礼包30元/月、300M宽带、含畅看/咪咕版）及给定字段数值原样使用，不得放大/缩小/凑整或替换、不得删改固定权益。\n4. 数字规范：金额带\"元\"、月数带\"个月\"、年限带\"年\"、月租带\"元/月\"，不改变给定数值大小。\n5. 个性化（按上下文 communication_style 调整语气与字数，缺省按\"平和型\"；business_conte 为商机总结，用于一句自然引入用户痛点，为空则直接从模板内容开始，不编造）：\n   - 效率型：直奔礼包利益与办理，砍掉客套铺垫，≤90字。\n   - 直接型：先说返费力度再说礼包内容，逻辑清楚不绕弯，≤110字。\n   - 平和型：礼貌自然，稳步引导，≤130字。\n   - 谨慎型：强调\"可先了解、无压力\"，突出划算与返费保障，语气不催，≤140字。\n   - 细致型：把礼包内容、返费月数/金额、折算月租逐项说清，再引导办理，≤150字。\n   - 敏感型：先认同用户，再轻柔带出礼包优惠，完全不施压，≤130字。\n6. 语气：口语化、礼貌、贴合用户痛点，结尾带办理引导（效率型可更简短）。\n7. 忠实：只使用给定字段值与模板固定条款，不虚构任何套餐名称、价格、权益或返费。",
       "prompt_template": "",
-      "linked_apis": [],
+      "linked_apis": [
+        "ceshi"
+      ],
       "status": "online",
       "created_by": "admin",
       "template_id": "tpl_guangdong_1782094120854_05fbd1",
       "created_at": "2026-06-22 10:08:40",
-      "updated_by": "demo"
+      "updated_by": "admin"
     },
     {
       "province": "guangdong",
       "intent": "营销活动",
       "template_name": "营销活动",
-      "template_content": "根据您的套餐推荐您办理**元及以上套餐享**个月千兆宽带提速减免至每月**元，优惠期**个月，期间需保持使用**元及以上主套餐，可享一宽提速至**M。",
+      "template_content": "根据您的套餐情况，我们为您推荐办理{broadband_package_fee}元及以上套餐，可享{broadband_preferential_period}个月千兆宽带提速优惠，减免至每月仅{broadband_monthly_fee}元；优惠期共{broadband_preferential_period}个月，期间需保持使用{broadband_package_fee}元及以上主套餐，即可将一宽提速至{broadband_speed}M。现在给您办理使用好吗？",
       "product_id": "提速",
       "scene": "开口话术",
       "stage": "家庭市场",
       "linked_vars": [
         "current_package",
-        "tags"
+        "recommended_packages",
+        "domain_ext"
       ],
-      "script_requirement": "你是广东移动家庭市场坐席。按【话术模板】播报宽带提速优惠，结合当前套餐档位切入。\n缺失或为 0 的数字整句跳过；口语化、无前缀、无占位符残留，全文 100 字以内。",
+      "script_requirement": "你是电信套餐营销坐席。请把【话术模板】中所有{变量名}用【上下文数据】里的同名字段值精确替换后，仅做口语化润色，输出一句可直接对客播报的话术。严格遵守：\n1. 占位符：模板中{xxx}必须全部替换为真实数值；最终话术禁止出现 *、**、x、xx、XX、{、} 或任何字段英文名。\n2. 空值/零值：字段为空、缺失或为0时，不得直接说\"0元/0个月/0M\"；应删除包含该字段的整个分句，不保留占位、不编造数字（如提速带宽缺失则不提\"提速至xxM\"）。\n3. 保值：给定字段的数值原样使用，不得放大/缩小/凑整或替换。\n4. 数字规范：金额带\"元\"、带宽带\"M\"、优惠期带\"个月\"，不改变给定数值大小。\n5. 个性化（按上下文 communication_style 调整语气与字数，缺省按\"平和型\"；business_conte 为商机总结，用于一句自然引入用户痛点，为空则直接从模板内容开始，不编造）：\n   - 效率型：直奔活动利益与办理，砍掉客套铺垫，≤80字。\n   - 直接型：先说优惠力度再说使用条件，逻辑清楚不绕弯，≤100字。\n   - 平和型：礼貌自然，稳步引导，≤120字。\n   - 谨慎型：强调\"可先了解、无压力\"，突出划算，语气不催，≤130字。\n   - 细致型：把减免价格、优惠期、保持条件、提速带宽逐项说清，再引导办理，≤140字。\n   - 敏感型：先认同用户，再轻柔带出优惠，完全不施压，≤120字。\n6. 语气：口语化、礼貌、贴合用户痛点，结尾带办理引导（效率型可更简短）。\n7. 忠实：只使用给定字段值，不虚构任何套餐名称、价格或权益。",
       "prompt_template": "",
-      "linked_apis": [],
+      "linked_apis": [
+        "ceshi"
+      ],
       "status": "online",
       "created_by": "admin",
       "template_id": "tpl_guangdong_1782094165400_9abf44",
       "created_at": "2026-06-22 10:09:25",
-      "updated_by": "demo"
+      "updated_by": "admin"
     },
     {
       "province": "guangdong",
       "intent": "营销活动",
       "template_name": "营销活动",
-      "template_content": "顺便跟您讲一下，我们特地推出了一款套餐优惠，现在连续**（recommend_preferential_period）个月每月只需要**（recommend_actual_price）元，可享受套内**GB（recommend_base_flow）国内流量+**（recommend_voice_minutes）分钟国内通话，另**（recommend_preferential_period）月内每月多享受xxGB（recommend_bonus_flow）国内流量，相当于**个月（recommend_preferential_period）内每月共**GB（recommend_total_flow）流量，现在给您办理使用好吗？",
+      "template_content": "顺便跟您讲一下，我们特地推出了一款套餐优惠：连续 {recommend_preferential_period} 个月，每月只需 {recommend_actual_price} 元，可享套内 {recommend_base_flow}GB 国内流量和 {recommend_voice_minutes} 分钟国内通话；另在优惠期内每月再送 {recommend_bonus_flow}GB 流量，相当于每月共 {recommend_total_flow}GB。现在给您办理使用好吗？",
       "product_id": "套餐",
       "scene": "开口话术",
       "stage": "个人市场",
       "linked_vars": [
         "current_package",
-        "usage",
-        "tags",
-        "user_profile",
-        "recommend_package_name",
-        "recommend_actual_price",
-        "recommend_original_price",
-        "recommend_discount_amount",
-        "recommend_preferential_period",
-        "recommend_base_flow",
-        "recommend_bonus_flow",
-        "recommend_total_flow",
-        "recommend_voice_minutes",
-        "recommend_equity"
+        "recommended_packages",
+        "domain_ext"
       ],
-      "script_requirement": "你是广东移动营销坐席，把【话术模板】改写成贴合这位客户的开口话术，可直接对客播报。\n① 数据准确（填槽）：话术里的价格、优惠期、流量、语音等数字，必须来自【上下文数据】中以 recommend_ 开头的产品字段真实值；缺失或为 0 的字段所在表述整句跳过，严禁编造或用当前套餐数值顶替。\n② 千人千面（按沟通风格改写语气与详略）：\n   · 细致型 → 条理清晰、把原价→现价、优惠期、流量构成一项项讲透，语气稳妥可信；\n   · 豪爽型 → 直奔核心优惠（每月省多少、流量翻多少），短句、干脆、有行动号召；\n   · 长辈耐心型 → 语速慢、称呼亲切、用大白话打比方，避免专业术语，多给安全感；\n   · 活泼型 → 轻松热情，可用适度语气词，突出“划算/超值”的惊喜感。\n   未标注风格时用自然亲切的默认语气。风格名/字段名一律不得出现在话术里。\n③ 结合用户真实用量与标签选择卖点侧重：流量偏高/月底限速→强调流量升级与够用；语音偏高→强调通话；价格敏感→强调省钱与性价比；只借用来定卖点顺序，不得把用量数字之外的标签原文念出。\n④ 口语化、无前缀、无占位符残留；全文 120 字以内。",
+      "script_requirement": "你是电信套餐营销坐席。请把【话术模板】中所有 {变量名} 用上下文数据 的同名字段值精确替换后，仅做口语化润色，输出一句自然话术。严格遵守：\n\n1. 占位符与取值来源：模板中 {xxx} 必须全部替换为 final_recommendations 下的同名真实数值；只允许使用同名字段，禁止用 diff、current_package 等其它字段或任何差异化字段来\"补位\"或估算。最终话术禁止出现 **、xx、XX、{}、字段英文名或任何占位残留。\n2. 套内资源缺失（关键）：当 recommend_base_flow 、 recommend_voice_minutes 都为空/缺失/为 0 时，视为\"读不到套内资源\"，必须整句删除\"可享套内…国内流量和…分钟国内通话\"这一分句，绝不提及流量或通话，也绝不用其它字段的数值来填充；此时只保留优惠期、价格、赠送流量等能取到的信息。若两者中仅一项为 0/空，则只删除为 0/空的那一项（如仅无语音，则说\"可享套内 X GB 国内流量\"，不提通话）。\n3. 优惠期为 0/空：recommend_preferential_period 为 0 或空时改说\"连续包月\"，不得出现\"0 个月/连续0个月\"。\n4. 其它数值字段为 0/空：recommend_bonus_flow 等为 0 或空时，删除包含该字段的整个分句（如无赠送则不说\"另在优惠期内每月再送…\"），不保留占位、不编造数字。\n5. 计算规则：recommend_total_flow 缺失时按 recommend_base_flow + recommend_bonus_flow 求和；若求和结果为 0 或两者皆空，则省略\"相当于每月共…GB\"这句。\n6. 数字规范：金额带\"元\"、流量带\"GB\"、语音带\"分钟\"、优惠期带\"个月\"，不改变给定数值大小。\n7. 个性化（按上下文 communication_style 调整语气与字数，缺省按“平和型”；business_conte 为商机总结，用于一句点出用户痛点，为空则跳过，不编造）：\n   - 效率型：直奔优惠与办理，砍掉铺垫，≤90字。\n   - 直接型：卖点清晰不绕弯，先价格再权益，≤110字。\n   - 平和型：礼貌自然、软引导，≤120字。\n   - 谨慎型：强调“可先了解、无压力”，少催办，突出划算与可对比点，≤130字。\n   - 细致型：把流量/语音/优惠期讲清楚再引导，结构完整，≤140字。\n   - 敏感型：先认同再推荐，语气更柔、避免施压措辞，≤120字。\n8. 语气：口语化、礼貌、贴合用户痛点，结尾带办理引导（效率型可更简短）。\n9. 忠实：只使用给定字段值，不虚构套餐名、价格或权益。",
       "prompt_template": "",
       "linked_apis": [
-        "cc"
+        "ceshi"
       ],
       "status": "online",
       "created_by": "admin",
       "template_id": "tpl_guangdong_1782094602756_803401",
       "created_at": "2026-06-22 10:16:42",
-      "updated_by": "demo"
+      "updated_by": "admin"
     },
     {
       "province": "guangdong",
       "intent": "营销活动",
       "template_name": "营销活动",
-      "template_content": "顺便跟您讲一下，我们特地推出了一款套餐优惠，现在连续**（recommend_preferential_period）个月每月只需要**（recommend_actual_price）元，可享受套内**GB（recommend_base_flow）国内流量+**（recommend_voice_minutes）分钟国内通话，另**（recommend_preferential_period）月内每月多享受xxGB（recommend_bonus_flow）国内流量，相当于**个月（recommend_preferential_period）内每月共**GB（recommend_total_flow）流量，现在给您办理使用好吗？",
-      "product_id": "升",
-      "scene": "开口话术",
-      "stage": "个人市场",
-      "linked_vars": [
-        "current_package",
-        "usage",
-        "tags",
-        "user_profile",
-        "recommend_package_name",
-        "recommend_actual_price",
-        "recommend_original_price",
-        "recommend_discount_amount",
-        "recommend_preferential_period",
-        "recommend_base_flow",
-        "recommend_bonus_flow",
-        "recommend_total_flow",
-        "recommend_voice_minutes",
-        "recommend_equity"
-      ],
-      "script_requirement": "你是广东移动营销坐席，把【话术模板】改写成贴合这位客户的开口话术，可直接对客播报。\n① 数据准确（填槽）：话术里的价格、优惠期、流量、语音等数字，必须来自【上下文数据】中以 recommend_ 开头的产品字段真实值；缺失或为 0 的字段所在表述整句跳过，严禁编造或用当前套餐数值顶替。\n② 千人千面（按沟通风格改写语气与详略）：\n   · 细致型 → 条理清晰、把原价→现价、优惠期、流量构成一项项讲透，语气稳妥可信；\n   · 豪爽型 → 直奔核心优惠（每月省多少、流量翻多少），短句、干脆、有行动号召；\n   · 长辈耐心型 → 语速慢、称呼亲切、用大白话打比方，避免专业术语，多给安全感；\n   · 活泼型 → 轻松热情，可用适度语气词，突出“划算/超值”的惊喜感。\n   未标注风格时用自然亲切的默认语气。风格名/字段名一律不得出现在话术里。\n③ 结合用户真实用量与标签选择卖点侧重：流量偏高/月底限速→强调流量升级与够用；语音偏高→强调通话；价格敏感→强调省钱与性价比；只借用来定卖点顺序，不得把用量数字之外的标签原文念出。\n④ 口语化、无前缀、无占位符残留；全文 120 字以内。",
-      "prompt_template": "",
-      "linked_apis": [
-        "cc"
-      ],
-      "status": "online",
-      "created_by": "admin",
-      "template_id": "tpl_guangdong_1782094602768_06a3f2",
-      "created_at": "2026-06-22 10:16:42",
-      "updated_by": "demo"
-    },
-    {
-      "province": "guangdong",
-      "intent": "营销活动",
-      "template_name": "营销活动",
-      "template_content": "顺便跟您讲一下，我们特地推出了一款套餐优惠，现在连续**（recommend_preferential_period）个月每月只需要**（recommend_actual_price）元，可享受套内**GB（recommend_base_flow）国内流量+**（recommend_voice_minutes）分钟国内通话，另**（recommend_preferential_period）月内每月多享受xxGB（recommend_bonus_flow）国内流量，相当于**个月（recommend_preferential_period）内每月共**GB（recommend_total_flow）流量，现在给您办理使用好吗？",
+      "template_content": "顺便跟您讲一下，我们特地推出了一款套餐优惠：连续 {recommend_preferential_period} 个月，每月只需 {recommend_actual_price} 元，可享套内 {recommend_base_flow}GB 国内流量和 {recommend_voice_minutes} 分钟国内通话；另在优惠期内每月再送 {recommend_bonus_flow}GB 流量，相当于每月共 {recommend_total_flow}GB。现在给您办理使用好吗？",
       "product_id": "体验",
       "scene": "开口话术",
       "stage": "个人市场",
       "linked_vars": [
         "current_package",
-        "usage",
-        "tags",
-        "user_profile",
-        "recommend_package_name",
-        "recommend_actual_price",
-        "recommend_original_price",
-        "recommend_discount_amount",
-        "recommend_preferential_period",
-        "recommend_base_flow",
-        "recommend_bonus_flow",
-        "recommend_total_flow",
-        "recommend_voice_minutes",
-        "recommend_equity"
+        "recommended_packages",
+        "domain_ext"
       ],
-      "script_requirement": "你是广东移动营销坐席，把【话术模板】改写成贴合这位客户的开口话术，可直接对客播报。\n① 数据准确（填槽）：话术里的价格、优惠期、流量、语音等数字，必须来自【上下文数据】中以 recommend_ 开头的产品字段真实值；缺失或为 0 的字段所在表述整句跳过，严禁编造或用当前套餐数值顶替。\n② 千人千面（按沟通风格改写语气与详略）：\n   · 细致型 → 条理清晰、把原价→现价、优惠期、流量构成一项项讲透，语气稳妥可信；\n   · 豪爽型 → 直奔核心优惠（每月省多少、流量翻多少），短句、干脆、有行动号召；\n   · 长辈耐心型 → 语速慢、称呼亲切、用大白话打比方，避免专业术语，多给安全感；\n   · 活泼型 → 轻松热情，可用适度语气词，突出“划算/超值”的惊喜感。\n   未标注风格时用自然亲切的默认语气。风格名/字段名一律不得出现在话术里。\n③ 结合用户真实用量与标签选择卖点侧重：流量偏高/月底限速→强调流量升级与够用；语音偏高→强调通话；价格敏感→强调省钱与性价比；只借用来定卖点顺序，不得把用量数字之外的标签原文念出。\n④ 口语化、无前缀、无占位符残留；全文 120 字以内。",
+      "script_requirement": "你是电信套餐营销坐席。请把【话术模板】中所有 {变量名} 用上下文数据 的同名字段值精确替换后，仅做口语化润色，输出一句自然话术。严格遵守：\n\n1. 占位符与取值来源：模板中 {xxx} 必须全部替换为 final_recommendations 下的同名真实数值；只允许使用同名字段，禁止用 diff、current_package 等其它字段或任何差异化字段来\"补位\"或估算。最终话术禁止出现 **、xx、XX、{}、字段英文名或任何占位残留。\n2. 套内资源缺失（关键）：当 recommend_base_flow 、 recommend_voice_minutes 都为空/缺失/为 0 时，视为\"读不到套内资源\"，必须整句删除\"可享套内…国内流量和…分钟国内通话\"这一分句，绝不提及流量或通话，也绝不用其它字段的数值来填充；此时只保留优惠期、价格、赠送流量等能取到的信息。若两者中仅一项为 0/空，则只删除为 0/空的那一项（如仅无语音，则说\"可享套内 X GB 国内流量\"，不提通话）。\n3. 优惠期为 0/空：recommend_preferential_period 为 0 或空时改说\"连续包月\"，不得出现\"0 个月/连续0个月\"。\n4. 其它数值字段为 0/空：recommend_bonus_flow 等为 0 或空时，删除包含该字段的整个分句（如无赠送则不说\"另在优惠期内每月再送…\"），不保留占位、不编造数字。\n5. 计算规则：recommend_total_flow 缺失时按 recommend_base_flow + recommend_bonus_flow 求和；若求和结果为 0 或两者皆空，则省略\"相当于每月共…GB\"这句。\n6. 数字规范：金额带\"元\"、流量带\"GB\"、语音带\"分钟\"、优惠期带\"个月\"，不改变给定数值大小。\n7. 个性化（按上下文 communication_style 调整语气与字数，缺省按“平和型”；business_conte 为商机总结，用于一句点出用户痛点，为空则跳过，不编造）：\n   - 效率型：直奔优惠与办理，砍掉铺垫，≤90字。\n   - 直接型：卖点清晰不绕弯，先价格再权益，≤110字。\n   - 平和型：礼貌自然、软引导，≤120字。\n   - 谨慎型：强调“可先了解、无压力”，少催办，突出划算与可对比点，≤130字。\n   - 细致型：把流量/语音/优惠期讲清楚再引导，结构完整，≤140字。\n   - 敏感型：先认同再推荐，语气更柔、避免施压措辞，≤120字。\n8. 语气：口语化、礼貌、贴合用户痛点，结尾带办理引导（效率型可更简短）。\n9. 忠实：只使用给定字段值，不虚构套餐名、价格或权益。",
       "prompt_template": "",
       "linked_apis": [
-        "cc"
+        "ceshi"
       ],
       "status": "online",
       "created_by": "admin",
       "template_id": "tpl_guangdong_1782094602777_940333",
       "created_at": "2026-06-22 10:16:42",
-      "updated_by": "demo"
+      "updated_by": "admin"
+    },
+    {
+      "province": "guangdong",
+      "intent": "营销活动",
+      "template_name": "营销活动",
+      "template_content": "顺便跟您讲一下，我们特地推出了一款流量优惠：连续 {recommend_preferential_period} 个月，每月只需 {recommend_actual_price} 元，可享套内 {recommend_base_flow}GB 国内流量；另在优惠期内每月再送 {recommend_bonus_flow}GB 流量，相当于每月共 {recommend_total_flow}GB。现在给您办理使用好吗？",
+      "product_id": "扩容",
+      "scene": "开口话术",
+      "stage": "个人市场",
+      "linked_vars": [
+        "current_package",
+        "recommended_packages",
+        "domain_ext"
+      ],
+      "script_requirement": "你是电信套餐营销坐席。请把【话术模板】中所有{变量名}用【上下文数据】里的同名字段值精确替换后，仅做口语化润色，输出一句可直接对客播报的话术。\n\n严格遵守：\n1. 占位符：{xxx}必须全部替换为真实数值；话术禁止出现 *、**、x、xx、XX、字段英文名，以及「0个月/0GB/0元/0分钟」。\n2. 空值/零值：字段为空、缺失或为0时——recommend_preferential_period 改说「连续包月」（禁止「连续0个月」）；其它数值字段（流量/语音/赠送）删除包含它的整个分句，不保留占位、不编造。\n3. 计算：recommend_total_flow 缺失时用 recommend_base_flow + recommend_bonus_flow；结果为0或空则省略「再送/共」表述。\n4. 数字规范：金额带「元」、流量带「GB」、优惠期带「个月」，不改变数值大小。\n5. 个性化（按上下文 communication_style，缺省按平和型；business_conte 为商机总结，用于一句点痛点，为空则跳过，不编造）：\n   效率型：直奔优惠与办理，砍铺垫，≤90字。\n   直接型：卖点清晰不绕弯，先价格再权益，≤110字。\n   平和型：礼貌自然、软引导，≤120字。\n   谨慎型：强调「可先了解、无压力」，少催办，突出划算，≤130字。\n   细致型：把流量/语音/优惠期讲清再引导，结构完整，≤140字。\n   敏感型：先认同再推荐，语气更柔、避免施压，≤120字。\n6. 忠实：只用给定字段值，不虚构套餐名、价格或权益；结尾自然引导办理（效率型可更简短）。",
+      "prompt_template": "",
+      "linked_apis": [
+        "ceshi"
+      ],
+      "status": "online",
+      "created_by": "15001236081",
+      "template_id": "tpl_guangdong_1783429180082_ca82c0",
+      "created_at": "2026-07-07 20:59:40",
+      "updated_by": "admin"
+    },
+    {
+      "province": "guangdong",
+      "intent": "营销活动",
+      "template_name": "营销活动",
+      "template_content": "顺便跟您讲一下，我们特地推出了一款流量优惠：连续 {recommend_preferential_period} 个月，每月只需 {recommend_actual_price} 元，可享套内 {recommend_base_flow}GB 国内流量；另在优惠期内每月再送 {recommend_bonus_flow}GB 流量，相当于每月共 {recommend_total_flow}GB。现在给您办理使用好吗？",
+      "product_id": "升",
+      "scene": "开口话术",
+      "stage": "个人市场",
+      "linked_vars": [
+        "current_package",
+        "recommended_packages",
+        "domain_ext"
+      ],
+      "script_requirement": "你是电信套餐营销坐席。请把【话术模板】中所有{变量名}用【上下文数据】里的同名字段值精确替换后，仅做口语化润色，输出一句可直接对客播报的话术。\n\n严格遵守：\n1. 占位符：{xxx}必须全部替换为真实数值；话术禁止出现 *、**、x、xx、XX、字段英文名，以及「0个月/0GB/0元/0分钟」。\n2. 空值/零值：字段为空、缺失或为0时——recommend_preferential_period 改说「连续包月」（禁止「连续0个月」）；其它数值字段（流量/语音/赠送）删除包含它的整个分句，不保留占位、不编造。\n3. 计算：recommend_total_flow 缺失时用 recommend_base_flow + recommend_bonus_flow；结果为0或空则省略「再送/共」表述。\n4. 数字规范：金额带「元」、流量带「GB」、优惠期带「个月」，不改变数值大小。\n5. 个性化（按上下文 communication_style，缺省按平和型；business_conte 为商机总结，用于一句点痛点，为空则跳过，不编造）：\n   效率型：直奔优惠与办理，砍铺垫，≤90字。\n   直接型：卖点清晰不绕弯，先价格再权益，≤110字。\n   平和型：礼貌自然、软引导，≤120字。\n   谨慎型：强调「可先了解、无压力」，少催办，突出划算，≤130字。\n   细致型：把流量/语音/优惠期讲清再引导，结构完整，≤140字。\n   敏感型：先认同再推荐，语气更柔、避免施压，≤120字。\n6. 忠实：只用给定字段值，不虚构套餐名、价格或权益；结尾自然引导办理（效率型可更简短）。",
+      "prompt_template": "",
+      "linked_apis": [
+        "ceshi"
+      ],
+      "status": "online",
+      "created_by": "15001236081",
+      "template_id": "tpl_guangdong_1784615860764_7eaf37",
+      "created_at": "2026-07-21 14:37:40"
+    },
+    {
+      "province": "guangdong",
+      "intent": "营销活动",
+      "template_name": "营销活动",
+      "template_content": "顺便跟您讲一下，我们特地推出了一款流量优惠：连续 {recommend_preferential_period} 个月，每月只需 {recommend_actual_price} 元，可享套内 {recommend_base_flow}GB 国内流量；另在优惠期内每月再送 {recommend_bonus_flow}GB 流量，相当于每月共 {recommend_total_flow}GB。现在给您办理使用好吗？\\n",
+      "product_id": "",
+      "scene": "开口话术",
+      "stage": "个人市场",
+      "linked_vars": [
+        "pkg_brief",
+        "diff_str",
+        "recommended_packages",
+        "current_package"
+      ],
+      "script_requirement": "你是电信套餐营销坐席。请把【话术模板】中所有 {变量名} 用\\\"主服务补充信息(extra_info)\\\"里的同名字段值精确替换后，仅做口语化润色，输出一句自然话术。严格遵守：\\n1. 占位符：模板中 {xxx} 必须全部替换为真实数值；最终话术禁止出现 *、**、x、xx、XX、{} 或字段英文名。\\n2. 空值/零值处理：字段值为空、缺失或为 0 时，不得直接说\\\"0 个月/0GB/0 元/0 分钟\\\"。其中优惠期 recommend_preferential_period 为 0 或空时改说\\\"连续包月\\\"（不要出现\\\"0 个月/连续0个月\\\"）；其它数值字段（流量/语音/赠送等）为 0 或空时，删除包含该字段的整个分句，不保留占位、不编造数字。\\n3. 计算规则：recommend_total_flow 缺失时按 recommend_base_flow + recommend_bonus_flow 求和；结果为 0 或空则省略\\\"再送/共\\\"相关表述。\\n4. 数字规范：金额带\\\"元\\\"、流量带\\\"GB\\\"、优惠期带\\\"个月\\\"，不改变给定数值大小。\\n5. 个性化（按上下文 communication_style 调整语气与字数，缺省按“平和型”；business_conte 为商机总结，用于一句点出用户痛点，为空则跳过，不编造）：\\n   - 效率型：直奔优惠与办理，砍掉铺垫，≤90字。\\n   - 直接型：卖点清晰不绕弯，先价格再权益，≤110字。\\n   - 平和型：礼貌自然、软引导，≤120字。\\n   - 谨慎型：强调“可先了解、无压力”，少催办，突出划算与可对比点，≤130字。\\n   - 细致型：把流量/语音/优惠期讲清楚再引导，结构完整，≤140字。\\n   - 敏感型：先认同再推荐，语气更柔、避免施压措辞，≤120字。\\n6. 语气：口语化、礼貌、贴合用户痛点，结尾带办理引导（效率型可更简短）。\\n7. 忠实：只使用给定字段值，不虚构套餐名、价格或权益。",
+      "prompt_template": "",
+      "linked_apis": [
+        "ceshi"
+      ],
+      "status": "online",
+      "created_by": "13811601301",
+      "created_at": "2026-08-04 16:14:13",
+      "template_id": "tpl_guangdong_1785831253585_a6bf9b"
     }
   ],
   "template_match": {

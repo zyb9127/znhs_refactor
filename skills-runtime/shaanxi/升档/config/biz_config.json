@@ -1,0 +1,61 @@
+{
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 3,
+    "intent_strategies": {},
+    "max_script_length": 150,
+    "max_parallel_scripts": 3
+  },
+  "field_aliases": {
+    "_comment": "套餐字段别名（按优先级从高到低列出），ScriptStep 按此映射取值，无需硬编码字段名",
+    "pkg_name": [
+      "offerName",
+      "package_name",
+      "productName",
+      "name"
+    ],
+    "pkg_fee": [
+      "initFee",
+      "monthly_fee",
+      "price",
+      "fee"
+    ],
+    "pkg_flow": [
+      "offerFlow",
+      "data_quota",
+      "dataGB",
+      "flow"
+    ],
+    "pkg_voice": [
+      "offerVoice",
+      "voice_quota",
+      "voiceMinutes",
+      "voice"
+    ]
+  },
+  "script_templates_v2": [
+    {
+      "province": "shaanxi",
+      "intent": "升档",
+      "template_name": "升档",
+      "template_content": "看到您现在使用的是{ }元套餐，里面包含{ }流量。我们近期推出了套餐升级优惠，每月只需多加{diff_str}元，也就是{pkg_fee}元，您的流量就能从{ }直接提升到{pkg_flow}，相当于每月多出{ }流量，刷视频、看直播都更尽兴。另外，根据您的使用习惯，平时通话不多，我们特意将套餐内的通话时长优化为{pkg_voice}分钟，把更多资源集中在流量上，这样也更贴合您的实际需要。",
+      "product_id": "96351441",
+      "scene": "",
+      "stage": "",
+      "linked_vars": [
+        "pkg_brief",
+        "diff_str",
+        "pkg_fee",
+        "pkg_flow",
+        "pkg_voice"
+      ],
+      "script_requirement": "结合【上下文数据】中的当前套餐、历史用量与用户标签，先点出最突出的用户痛点，再用推荐套餐对应字段的真实值说明如何解决；只讲有数据支撑的卖点，口语化、可直接对客播报，150字以内，结尾自然引导办理。",
+      "prompt_template": "",
+      "linked_apis": [],
+      "status": "online",
+      "created_by": "19567539304",
+      "created_at": "2026-07-30 18:30:32",
+      "template_id": "tpl_shaanxi_1785407432442_62fc94"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "name": "对对对",
+      "payload": {
+        "callId": "test_20260721143956",
+        "intent": "营销推荐",
+        "province": "shandong",
+        "phone": "15010470528",
+        "topN": 2,
+        "extra_data": {},
+        "extra_info": {},
+        "batch_contexts": [
+          {
+            "product_id": "prod001",
+            "stage": "推荐环节",
+            "scence": "套餐升级"
+          }
+        ]
+      },
+      "updated_at": "2026-07-21T06:40:15.476Z"
+    }
+  ]
+}

@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional
 
 from engine.prompt_builder import (
     VAR_LABELS,
+    _SLOT_ONLY_PIN,
     append_prompt_extra_suffix,
     build_prompt,
     preview_prompt,
@@ -42,10 +43,12 @@ from engine.prompt_builder import (
 # 调优持续演进（防串填、模板为主体框架、字数约束…）。若把正文抄成字面量，
 # 每次调 Prompt 文案都会假失败一片，掩盖真正的拼装回归。
 from prompt.script_generation import (
+    DEFAULT_SLOT_PLACEHOLDER,
     SCRIPT_GEN_RULES,
     SCRIPT_LENGTH_RULE,
     SCRIPT_OUTPUT_SUFFIX,
     SCRIPT_PERSONA_RULE,
+    build_gen_rules,
     build_missing_facts_tail,
 )
 
@@ -336,7 +339,31 @@ class _OraclePromptStep(ScriptStep):  # type: ignore[misc]
             if template_text:
                 lines.append("【话术模板】")
                 lines.append(template_text)
-            lines.append(SCRIPT_GEN_RULES)
+            # 零槽位模板口径（镜像 engine.prompt_builder 的 _has_slots 判定）：
+            # 模板无任何槽位、也没有关联变量/透传事实时，整套填槽规则（含
+            # 「例如月均消费无数据时输出“您月均消费**元”」这条字面示例）会被小模型
+            # 当范本照抄出凭空数值，故改用零槽位规则。有槽位时仍为 SCRIPT_GEN_RULES。
+            _o_body_slots = (
+                bool(tpl_token_set)
+                or bool(template_text and re.search(r"\{(\w+)((?:\[[^\[\]]+\])+)\}",
+                                                    template_text))
+            )
+            _o_has_slots = (
+                _o_body_slots
+                or bool(linked_vars)
+                or bool(passthrough_ctx)
+            )
+            if _o_has_slots:
+                # 正文有 {} 槽位时追加「只按槽位取值、不得拿其它字段补数值」约束（有意的行为变更）
+                lines.append(
+                    SCRIPT_GEN_RULES.rstrip() + _SLOT_ONLY_PIN if _o_body_slots
+                    else SCRIPT_GEN_RULES
+                )
+            else:
+                lines.append(build_gen_rules(
+                    has_slots=False,
+                    template_has_placeholder=DEFAULT_SLOT_PLACEHOLDER in (template_text or ""),
+                ))
             # 个性化润色规则（镜像 engine.prompt_builder._has_persona_context）
             _persona_vars = {"tags", "user_tags", "user_profile"}
             _persona_hints = ("style", "persona", "portrait", "性格", "画像", "风格", "偏好")
@@ -637,7 +664,7 @@ class TestNewFormatLinkedVars(EquivalenceBase):
         self.assertIn("推荐套餐语音(分钟) {pkg_voice}：1000", out)
 
     def test_persona_rule_injection_and_numbering(self) -> None:
-        """规则 5 恒为字数规则；含用户标签/画像上下文时追加「个性化约束」为第 6 条、
+        """规则 5 恒为字数规则；含用户标签/画像上下文时追加「个性化润色」为第 6 条、
         话术要求顺延为第 7 条；无标签/画像则不追加、话术要求为第 6 条。"""
         pkg = dict(_SAMPLE_PKG)
         # ① 有 tags：追加润色规则
@@ -650,9 +677,7 @@ class TestNewFormatLinkedVars(EquivalenceBase):
             field_aliases=_FIELD_ALIASES,
         )
         self.assertIn("5. 字数控制", out)
-        self.assertIn("6. 个性化约束", out)
-        self.assertIn("不得据此调整【话术模板】的文字、句式、句序", out)
-        self.assertNotIn("调整称呼、语气与卖点顺序", out)
+        self.assertIn("6. 个性化润色", out)
         self.assertIn("7. 话术要求：150字以内", out)
         # ② 无标签/画像：不追加
         ctx2 = make_ctx(tags={}, user_profile={}, extra_info={}, extra_context={})
@@ -664,15 +689,16 @@ class TestNewFormatLinkedVars(EquivalenceBase):
             script_requirement="简洁",
             field_aliases=_FIELD_ALIASES,
         )
-        self.assertNotIn("个性化约束", out2)
+        self.assertNotIn("个性化润色", out2)
         self.assertIn("5. 字数控制", out2)
         self.assertIn("6. 话术要求：简洁", out2)
-        # ③ 多指标事实也必须按同名槽位原样填入，不允许模型自行提炼或扩写
-        self.assertIn("仍须按模板中的同名槽位原样填入", out)
-        self.assertIn("不得自行提炼、摘要、扩写", out)
+        # ③ 多指标提炼规则文案存在
+        self.assertIn("提炼其中最能支撑推荐理由的 1-3 个要点", out)
 
     def test_template_is_the_backbone_rule(self) -> None:
-        """规则 4 必须锁定模板原文，只允许填槽和修复填槽后的语法。"""
+        """规则 4：以话术模板为「内容蓝本」——环节/卖点/事实必须全覆盖且不新增，
+        但允许用自己的口语重新表达（换措辞/句式/语序）以获得每次生成的泛化差异，
+        同时事实值（数字/金额/套餐名/方括号数值）须严格照第 2、3 条原样填入。"""
         out = self.assert_same_prompt(
             ctx=make_ctx(),
             pkg=_SAMPLE_PKG,
@@ -680,12 +706,14 @@ class TestNewFormatLinkedVars(EquivalenceBase):
             linked_vars=["cur_brief", "pkg_brief"],
             field_aliases=_FIELD_ALIASES,
         )
-        self.assertIn("4. 以【话术模板】为话术主体框架", out)
-        self.assertIn("沿用它的句子顺序", out)
-        self.assertIn("不得改写成自己的行文", out)
-        self.assertIn("不得调整句序", out)
-        self.assertNotIn("不要逐字复述模板", out)
-        self.assertNotIn("适度调整句子顺序", out)
+        self.assertIn("4. 以【话术模板】为内容蓝本", out)
+        # 必须完整覆盖模板环节/要点、不得新增模板没有的卖点
+        self.assertIn("逐一覆盖、不遗漏也不新增", out)
+        # 允许换措辞/句式/语序以产生泛化差异（不再逐字复述）
+        self.assertIn("不要逐字复述模板", out)
+        self.assertIn("适度调整句子顺序", out)
+        # 但事实值须严格原样填入
+        self.assertIn("须严格照第 2、3 条原样填入、不得改动", out)
 
     def test_length_rule_uses_max_length_and_defers_to_requirement(self) -> None:
         """字数规则按 max_length 实时渲染，并显式让位于运营写的「话术要求」。"""
@@ -752,8 +780,8 @@ class TestNewFormatLinkedVars(EquivalenceBase):
             linked_vars=[], field_aliases=_FIELD_ALIASES,
         )
         self.assertIn("{usage[近6月平均流量(GB)]}：25", out2)
-        # tags 子字段触发个性化约束规则
-        self.assertIn("个性化约束", out)
+        # tags 子字段触发个性化润色规则
+        self.assertIn("个性化润色", out)
 
     def test_subfield_bracket_fuzzy_match(self) -> None:
         """回归（北京「用户消费信息未生效」）：映射 field_rename 产出畸形键名
@@ -1846,13 +1874,14 @@ class TestProductFieldPalette(unittest.TestCase):
         ctx2 = make_ctx(extra_info=raw)
         ctx2.final_recommendations = raw["recommended_packages"]
         ctx2.product_field_allow = ["recommend_actual_price"]
-        # 模板不引用产品字段 → 走多产品逐字段兜底注入（白名单在此生效）
+        # 模板不引用产品字段 → 走多产品逐字段兜底注入（白名单在此生效）。
+        # 注入只发生在「有槽位」口径（此处靠勾选关联变量触发）；零槽位模板不灌事实（见文末断言）。
         _pkg = raw["recommended_packages"][0]
         _tpl = "您好，给您介绍一个优惠。"
         txt = build_prompt(
             user_prompt_tpl="", template_text=_tpl,
             ctx=ctx2, pkg=_pkg, diff=PackageDiff(ctx2.current_package, _pkg),
-            linked_vars=[],
+            linked_vars=["usage"],
         )
         self.assertIn("{recommend_actual_price}：169元", txt)
         self.assertNotIn("{recommend_base_flow}：", txt, "未勾选的产品字段不应注入")
@@ -1864,11 +1893,22 @@ class TestProductFieldPalette(unittest.TestCase):
         txt3 = build_prompt(
             user_prompt_tpl="", template_text=_tpl,
             ctx=ctx3, pkg=_pkg, diff=PackageDiff(ctx3.current_package, _pkg),
-            linked_vars=[],
+            linked_vars=["usage"],
         )
         self.assertIn("{recommend_actual_price}：169元", txt3)
         self.assertIn("{recommend_base_flow}：40GB/月", txt3)
         self.assertIn("{offerName}：升169", txt3)
+
+        # 零槽位（无槽位、无关联变量、无透传）→ 不注入任何产品字段
+        ctx4 = make_ctx(extra_info=raw)
+        ctx4.final_recommendations = raw["recommended_packages"]
+        txt4 = build_prompt(
+            user_prompt_tpl="", template_text=_tpl,
+            ctx=ctx4, pkg=_pkg, diff=PackageDiff(ctx4.current_package, _pkg),
+            linked_vars=[],
+        )
+        self.assertNotIn("{recommend_actual_price}", txt4)
+        self.assertNotIn("{offerName}", txt4)
 
     def test_cache_key_busts_on_config_change(self) -> None:
         """保存 api_nodes 后配置立即生效：缓存 key 必须随节点配置变化。

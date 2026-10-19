@@ -1,0 +1,55 @@
+{
+  "script_templates_v2": [
+    {
+      "province": "fujian",
+      "intent": "test",
+      "template_name": "test",
+      "template_content": "注意到您当前使用的套餐版本较早，资源配置偏低，很容易出现用量紧张甚至超套扣费的情况",
+      "product_id": "",
+      "scene": "",
+      "stage": "切入环节",
+      "linked_vars": [
+        "pkg_brief",
+        "diff_str"
+      ],
+      "script_requirement": "结合【上下文数据】中的当前套餐、历史用量与用户标签，先点出最突出的用户痛点，再用推荐套餐对应字段的真实值说明如何解决；只讲有数据支撑的卖点，口语化、可直接对客播报，150字以内，结尾自然引导办理。",
+      "prompt_template": "",
+      "linked_apis": [
+        "direct_extra_info"
+      ],
+      "status": "online",
+      "created_by": "15280079654",
+      "template_id": "tpl_fujian_1785210346335_3a766d",
+      "created_at": "2026-07-28 11:45:46",
+      "updated_by": "15280079654"
+    },
+    {
+      "province": "fujian",
+      "intent": "test",
+      "template_name": "test",
+      "template_content": "现在只需额外支付{diff_actual_price}元（即待办套餐与原套餐的资费差额，已享优惠折后价），即可同步提升流量与通话分钟数\n升级后：语音分钟数提升至{voice_minutes_diff}分钟，流量扩容至{total_flow_diff}GB，折后月费仅需{recommend_actual_price}元，比现在多花{diff_actual_price}元\n整体性价比更高，您看没问题的话，我帮您办上吧。",
+      "product_id": "",
+      "scene": "",
+      "stage": "推荐环节",
+      "linked_vars": [
+        "pkg_brief",
+        "diff_str"
+      ],
+      "script_requirement": "结合【上下文数据】中的当前套餐、历史用量与用户标签，先点出最突出的用户痛点，再用推荐套餐对应字段的真实值说明如何解决；只讲有数据支撑的卖点，口语化、可直接对客播报，150字以内，结尾自然引导办理。若参数中出现负数，无需对该资源进行描述，例如“流量扩容至-5GB”，则不对流量进行卖点推荐。\n",
+      "prompt_template": "",
+      "linked_apis": [
+        "direct_extra_info"
+      ],
+      "status": "online",
+      "created_by": "15280079654",
+      "template_id": "tpl_fujian_1785211025268_d44bc5",
+      "created_at": "2026-07-28 11:57:05"
+    }
+  ],
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 3,
+    "max_script_length": 150,
+    "max_parallel_scripts": 3
+  }
+}

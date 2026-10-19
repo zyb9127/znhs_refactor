@@ -1,36 +1,23 @@
 {
   "cases": [
     {
-      "name": "123",
+      "name": "山东测试",
       "payload": {
-        "callId": "123",
-        "uid": "qryRecommendAgent",
-        "extra_info": {
-          "uniProdGrade": "30",
-          "shareFlow": "50",
-          "totalFlow": "68",
-          "giftFlow": "80",
-          "origPrice": "99",
-          "discountPrice": "0",
-          "internetAge": "18",
-          "flowGiftFlowTf": "32",
-          "flowGiftFlow": "100",
-          "reducePrice": "99",
-          "flow": "20"
-        },
+        "phone": "13811601301",
         "province": "shandong",
-        "phone": "136****7815",
         "intent": "套餐升档",
+        "callId": "20260915170240984",
+        "topN": 1,
+        "extra_info": {},
         "batch_contexts": [
           {
             "stage": "营销挽留",
             "scence": "仅当月不小心超出，以后不会",
-            "product_id": "20240902586449"
+            "product_id": "20220817116982"
           }
-        ],
-        "topn": "1"
+        ]
       },
-      "updated_at": "2026-09-08T02:10:36.972Z"
+      "updated_at": "2026-09-16T02:55:07.707Z"
     }
   ]
 }

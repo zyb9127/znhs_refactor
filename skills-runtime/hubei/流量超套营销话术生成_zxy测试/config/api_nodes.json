@@ -1,0 +1,38 @@
+{
+  "testapi": {
+    "_comment": "",
+    "url": "",
+    "method": "POST",
+    "enabled": true,
+    "created_by": "13554543174",
+    "request_template": {},
+    "response_extract": {},
+    "field_transform": {},
+    "mock_mode": false,
+    "mock_response": {
+      "params": {
+        "phone": "{{PHONE}}",
+        "ioId": "{{extra_data.ioId}}",
+        "intent": "{{INTENT}}",
+        "currentMainOffer": {
+          "curOfferName": "{{curOfferName}}",
+          "curOfferId": "{{extra_data.currentMainOffer.curOfferId}}",
+          "curOfferFee": "{{extra_data.currentMainOffer.curOfferFee}}",
+          "userbegintime": "{{extra_data.currentMainOffer.userbegintime}}",
+          "threemonthfee": "{{extra_data.currentMainOffer.threemonthfee}}",
+          "threemonthflow": "{{extra_data.currentMainOffer.threemonthflow}}",
+          "threemonthcommunication": "{{extra_data.currentMainOffer.threemonthcommunication}}",
+          "feechange": "{{extra_data.currentMainOffer.threemonthcommunication}}",
+          "dataflow": "{{extra_data.currentMainOffer.threemonthcommunication}}"
+        },
+        "iop_products": "{{extra_data.iop_products}}"
+      }
+    },
+    "created_at": "2026-07-31 16:55:37",
+    "updated_by": "13554543174",
+    "updated_at": "2026-07-31 17:36:07",
+    "source_type": "direct",
+    "direct_mode": "passthrough",
+    "passthrough_fields": []
+  }
+}

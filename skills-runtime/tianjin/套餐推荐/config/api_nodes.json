@@ -1,0 +1,138 @@
+{
+  "main_api": {
+    "enabled": true,
+    "_comment": "天津套餐推荐接口",
+    "url": "",
+    "method": "POST",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "timeout": 30,
+    "max_retries": 2,
+    "mock_mode": false,
+    "created_by": "auto_config_agent",
+    "created_at": "2026-08-12 17:14",
+    "source_type": "direct",
+    "direct_mode": "passthrough",
+    "passthrough_fields": [
+      "userinfo",
+      "userinfo.currentPackageProductId",
+      "userinfo.currentPackageProductName",
+      "userinfo.currPrice",
+      "userinfo.currDomesticTraffic",
+      "userinfo.currDescribe",
+      "userinfo.currDirectedTraffic",
+      "userinfo.currDomesticVoice",
+      "userinfo.currBroadband",
+      "userinfo.is_sub_card",
+      "userinfo.userExtra",
+      "userinfo.userExtra.last3mFlowSaturation",
+      "userinfo.userExtra.last3mVoiceSaturation",
+      "products",
+      "products.activityId",
+      "products.productId",
+      "products.price",
+      "products.discount_price",
+      "products.Cmn_flow",
+      "products.voice",
+      "products.direct_flow",
+      "products.business_type",
+      "products.gift_cmn_flow",
+      "products.product_desc",
+      "products.marketingProductFlag",
+      "products.marketingActivityFlag",
+      "products.productName",
+      "products.activityTypeCode",
+      "products.activityTypeName",
+      "userinfo_json",
+      "userinfo_json.timeType",
+      "userinfo_json.over_cmn_flow",
+      "userinfo_json.over_voice",
+      "userinfo_json.user_consume",
+      "userinfo_json.over_flow_fee",
+      "userinfo_json.over_voice_fee"
+    ],
+    "mock_response": {
+      "params": {
+        "systemId": "NGRC",
+        "optType": "0",
+        "inputs": {
+          "sequenceNo": "91579d34-1ea8-4635-90d7-76700281a64e",
+          "servNumber": "13800138000",
+          "provinceCode": "371",
+          "callId": "CALL_20230810_0001",
+          "staffId": "A10086",
+          "staffNo": "10086",
+          "touchNumber": "TOUCH_20230810_0001",
+          "userinfo": {
+            "currentPackageProductId": "PKG_123456",
+            "currentPackageProductName": "5G畅享融合套餐129元档",
+            "currPrice": "129",
+            "currDomesticTraffic": "30",
+            "currDescribe": "含30GB通用流量",
+            "currDirectedTraffic": "10",
+            "currDomesticVoice": "500",
+            "currBroadband": "500M",
+            "is_sub_card": "0",
+            "userExtra": {
+              "last3mFlowSaturation": "10",
+              "last3mVoiceSaturation": "10"
+            }
+          },
+          "products": [
+            {
+              "activityId": "ACT_20230801",
+              "productId": "PROD_001",
+              "price": "59",
+              "discount_price": "39.58",
+              "Cmn_flow": "20",
+              "voice": "200",
+              "direct_flow": "30",
+              "business_type": "流量包",
+              "gift_cmn_flow": "0",
+              "product_desc": "高性价比5G套餐，含大流量和语音",
+              "marketingProductFlag": "1",
+              "marketingActivityFlag": "1",
+              "productName": "5G特惠月租卡",
+              "activityTypeCode": "TYPE_01",
+              "activityTypeName": "流量语音包"
+            },
+            {
+              "activityId": "ACT_20230802",
+              "productId": "PROD_002",
+              "price": "30",
+              "discount_price": "19.90",
+              "Cmn_flow": "30",
+              "voice": "0",
+              "direct_flow": "0",
+              "business_type": "流量包",
+              "gift_cmn_flow": "5",
+              "product_desc": "30GB通用流量月包，赠5GB",
+              "marketingProductFlag": "1",
+              "marketingActivityFlag": "0",
+              "productName": "30GB流量畅享包",
+              "activityTypeCode": "TYPE_02",
+              "activityTypeName": "流量包"
+            }
+          ],
+          "userinfo_json": [
+            {
+              "timeType": "0",
+              "over_cmn_flow": "1",
+              "over_voice": "20",
+              "user_consume": "145",
+              "over_flow_fee": "7.5",
+              "over_voice_fee": "4.05"
+            }
+          ]
+        }
+      }
+    },
+    "request_template": {},
+    "response_extract": {},
+    "field_transform": {},
+    "request_variant": "marketing_assistant",
+    "updated_by": "13811601301",
+    "updated_at": "2026-08-14 15:16:56"
+  }
+}

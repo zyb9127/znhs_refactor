@@ -29,6 +29,8 @@
     "expire_time": 3600
   },
   "logging": {
+    "_comment_local_file_enabled": "本地日志文件留存开关：true=落本地文件（app_*.log/error_*.log 及分省 logs/provinces/*.jsonl）；false=不落任何本地日志文件，仅保留 stdout 供容器云采集，用于降低提示词/出参等敏感信息在容器本地磁盘的留存风险。可被环境变量 ZNHS_LOCAL_LOG=1/0 覆盖。",
+    "local_file_enabled": true,
     "level": "DEBUG",
     "format": "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
     "rotation": "100 MB",
@@ -62,9 +64,21 @@
     "_comment_default_intent": "场景 skill 匹配：先按 params.inputs.products.activityTypeName（活动名称）找同名意图的技能包；找不到时回退到该省份唯一勾选营销助手的技能包，再回退到这里的兜底意图，留空表示不兜底（直接告警并丢弃）",
     "default_intent": "",
     "_comment_stage": "回调话术字段与话术模板「应用环节」的对应：推荐环节话术 → words，切入环节话术 → aiPitchMarketingDesc，挽留环节话术 → aiRetentionMarketingDesc。一个产品配了切入/推荐/挽留三行模板时，三条话术各自生成并归并成一条产品话术。各省环节命名不统一，故按候选列表取第一个在该技能包模板里真实存在的；words 未配「推荐」环节时回退到无环节常规话术（始终有值），切入/挽留没配对应环节模板时不生成（对应字段留空，绝不拿其它话术顶替）",
-    "recommend_stage": ["推荐", "推荐环节", "营销推荐"],
-    "pitch_stage": ["切入", "切入环节", "营销切入"],
-    "retention_stage": ["挽留", "挽留环节", "挽留指引"]
+    "recommend_stage": [
+      "推荐",
+      "推荐环节",
+      "营销推荐"
+    ],
+    "pitch_stage": [
+      "切入",
+      "切入环节",
+      "营销切入"
+    ],
+    "retention_stage": [
+      "挽留",
+      "挽留环节",
+      "挽留指引"
+    ]
   },
   "redis_bus": {
     "_comment": "Redis 配置总线（znhs:agent: 前缀隔离，不影响其他服务）",

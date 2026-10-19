@@ -1,0 +1,85 @@
+{
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 3,
+    "intent_strategies": {},
+    "max_script_length": 150,
+    "max_parallel_scripts": 3
+  },
+  "field_aliases": {
+    "_comment": "套餐字段别名（按优先级从高到低列出），ScriptStep 按此映射取值，无需硬编码字段名",
+    "pkg_name": [
+      "offerName",
+      "package_name",
+      "productName",
+      "name"
+    ],
+    "pkg_fee": [
+      "initFee",
+      "monthly_fee",
+      "price",
+      "fee"
+    ],
+    "pkg_flow": [
+      "offerFlow",
+      "data_quota",
+      "dataGB",
+      "flow"
+    ],
+    "pkg_voice": [
+      "offerVoice",
+      "voice_quota",
+      "voiceMinutes",
+      "voice"
+    ]
+  },
+  "script_templates_v2": [
+    {
+      "province": "guangxi",
+      "intent": "资费挽留",
+      "template_name": "资费挽留",
+      "template_content": "您的套餐包括通话基本模组{current_package[actual_price]}，建议您保留。移动网络覆盖广，信号稳定，上网速度快，服务响应迅速，建议您保留原套餐。",
+      "product_id": "prod001",
+      "scene": "流量超套",
+      "stage": "切入环节",
+      "linked_vars": [
+        "pkg_brief",
+        "diff_str",
+        "current_package",
+        "recommended_packages"
+      ],
+      "script_requirement": "以用户专属客户经理的口吻，用自然、口语化、像真人一对一沟通的语气说话，杜绝生硬模板腔与官话套话（如\"尊敬的客户\"\"钜惠来袭\"）。话术骨架以【话术模板】为准：模板已给出环节、卖点与大致顺序时，覆盖其中每个要点、不增删模板没有的卖点，但请用自己的自然口语重新表达（可更换措辞、句式与连接词、适度调整语序），让同一模板每次生成都有合理差异；月费/流量/语音等事实数值照实填、不改动。模板没写明结构时，再按「亲切开场 → 结合【上下文数据】中的当前套餐、历史用量与用户标签点出 1 个最突出的痛点 → 用推荐套餐对应字段的真实值（月费/流量/语音等）说清如何解决、并做前后对比放大获得感 → 一句自然的办理引导」组织。各句衔接顺滑不生硬；只讲有数据支撑的卖点，无数据的点不提、不夸大；有真实的专属/限时权益可点明（无则不编）。控制在 150 字以内，只保留一个明确的行动引导，结尾干脆不啰嗦。",
+      "prompt_template": "",
+      "linked_apis": [
+        "降档原因"
+      ],
+      "status": "online",
+      "created_by": "13737075864",
+      "created_at": "2026-09-14 16:24:31",
+      "template_id": "tpl_guangxi_1789374271655_7972f2"
+    },
+    {
+      "province": "guangxi",
+      "intent": "资费挽留",
+      "template_name": "资费挽留",
+      "template_content": "您的套餐包括{current_package[packageData]}流量和{current_package[packageVoice]}语音通话，建议您保留。移动网络覆盖广，信号稳定，上网速度快，服务响应迅速，建议您保留原套餐。",
+      "product_id": "prod002",
+      "scene": "已办理其他运营商号",
+      "stage": "客户降档原因",
+      "linked_vars": [
+        "pkg_brief",
+        "diff_str",
+        "current_package"
+      ],
+      "script_requirement": "以用户专属客户经理的口吻，用自然、口语化、像真人一对一沟通的语气说话，杜绝生硬模板腔与官话套话（如\"尊敬的客户\"\"钜惠来袭\"）。话术骨架以【话术模板】为准：模板已给出环节、卖点与大致顺序时，覆盖其中每个要点、不增删模板没有的卖点，但请用自己的自然口语重新表达（可更换措辞、句式与连接词、适度调整语序），让同一模板每次生成都有合理差异；月费/流量/语音等事实数值照实填、不改动。模板没写明结构时，再按「亲切开场 → 结合【上下文数据】中的当前套餐、历史用量与用户标签点出 1 个最突出的痛点 → 用推荐套餐对应字段的真实值（月费/流量/语音等）说清如何解决、并做前后对比放大获得感 → 一句自然的办理引导」组织。各句衔接顺滑不生硬；只讲有数据支撑的卖点，无数据的点不提、不夸大；有真实的专属/限时权益可点明（无则不编）。控制在 150 字以内，只保留一个明确的行动引导，结尾干脆不啰嗦。",
+      "prompt_template": "",
+      "linked_apis": [
+        "降档原因"
+      ],
+      "status": "online",
+      "created_by": "13737075864",
+      "created_at": "2026-09-14 16:37:06",
+      "template_id": "tpl_guangxi_1789375026389_64b9db"
+    }
+  ]
+}

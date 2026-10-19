@@ -163,6 +163,308 @@ class TestGenRulesVariants(unittest.TestCase):
             self.assertNotIn("<PH>", text)
 
 
+class TestNoSlotGenRules(unittest.TestCase):
+    """零槽位模板口径（build_gen_rules(has_slots=False)）。
+
+    山东生产（千问3-14B / temperature 1.1）：1500 条 online 模板是纯文案、无任何槽位，
+    但规则 2、3 仍把整套填槽机制连同字面示例塞进提示词——包括
+    「例如月均消费无数据时输出“您月均消费**元”」。模板没有槽位、上下文也没有资费数据时，
+    这些示例成了模型唯一的范本，于是稳定造出「您现在的套餐是**，月费是**元」。
+    叠加这些模板的【话术要求】多为推荐场景沿用（仍在索取当前套餐/历史用量/推荐资费），
+    与规则 2「一律不得删句、缺失填 **」直接冲突，小模型无力仲裁。
+
+    守三件事：
+      1. 有槽位模板的规则正文逐字不变（其他省份 1542 条 online 模板零影响）；
+      2. 零槽位时不再出现任何填槽示例，且显式禁止自造数值与占位符；
+      3. 运营在正文里手写了占位记号的零槽位模板，改为「保留自带、禁止新增」。
+    """
+
+    def test_有槽位口径逐字不变(self) -> None:
+        """护栏：has_slots 参数引入后，原有两种口径的产出必须与引入前完全一致。"""
+        self.assertEqual(build_gen_rules(SLOT_FALLBACK_PASSTHROUGH), SCRIPT_GEN_RULES)
+        self.assertEqual(
+            build_gen_rules(SLOT_FALLBACK_PASSTHROUGH, DEFAULT_SLOT_PLACEHOLDER,
+                            has_slots=True),
+            SCRIPT_GEN_RULES,
+        )
+        # template_has_placeholder 对有槽位口径无效（只作用于零槽位分支）
+        self.assertEqual(
+            build_gen_rules(SLOT_FALLBACK_PASSTHROUGH, DEFAULT_SLOT_PLACEHOLDER,
+                            has_slots=True, template_has_placeholder=True),
+            SCRIPT_GEN_RULES,
+        )
+        self.assertEqual(
+            build_gen_rules(SLOT_FALLBACK_DROP, DEFAULT_SLOT_PLACEHOLDER, has_slots=True),
+            build_gen_rules(SLOT_FALLBACK_DROP),
+        )
+
+    def test_零槽位不再出现填槽示例(self) -> None:
+        """根因回归：正是这条字面示例被 14B 照抄成了「月均消费**元」。"""
+        rules = build_gen_rules(has_slots=False)
+        self.assertIn("您月均消费**元", SCRIPT_GEN_RULES)      # 原口径确实带这个示例
+        self.assertNotIn("您月均消费**元", rules)
+        self.assertNotIn("您月均流量已达37GB", rules)
+        self.assertNotIn("保留包含该占位符的那句话/短语", rules)
+
+    def test_零槽位显式禁止自造数值与占位符(self) -> None:
+        rules = build_gen_rules(has_slots=False)
+        self.assertIn("不含任何 {占位符}", rules)
+        self.assertIn("严禁写入模板正文里没有的具体数值", rules)
+        self.assertIn("严禁用 **", rules)
+        self.assertIn("而不是写个占位符", rules)
+
+    def test_零槽位解决话术要求与基础规则的冲突(self) -> None:
+        """1509 条零槽位模板的【话术要求】仍在索取资费/用量数据 —— 明确按「没有就不说」。"""
+        rules = build_gen_rules(has_slots=False)
+        self.assertIn("没有数据就不说", rules)
+        self.assertIn("整句略过该信息点", rules)
+        self.assertIn("不要用占位符顶替", rules)
+
+    def test_零槽位仍保留泛化要求(self) -> None:
+        """换一换要有变化：规则 4 的"换措辞/换句式"必须留着（山东场景6 无变化的另一半原因）。"""
+        rules = build_gen_rules(has_slots=False)
+        self.assertIn("不要逐字复述模板", rules)
+        self.assertIn("更换措辞、句式、连接词与语气", rules)
+        self.assertIn("没有任何槽位", rules)
+
+    def test_模板自带占位记号时改为保留(self) -> None:
+        """山东 24 条零槽位模板正文自带 **（运营预留给坐席口头补充），不能一并删掉。"""
+        keep = build_gen_rules(has_slots=False, template_has_placeholder=True)
+        self.assertIn("必须原样保留在输出里", keep)
+        self.assertIn("不得自己新增模板里原本没有的 **", keep)
+        # 不能再出现一刀切的"严禁用 **"，否则与"保留自带"自相矛盾
+        self.assertNotIn("严禁用 **", keep)
+        # 仍然禁止编造模板外的数值
+        self.assertIn("严禁写入模板正文里没有的具体数值", keep)
+
+    def test_零槽位规则条数与编号衔接(self) -> None:
+        """提示词编号由调用方从第 5 条续接，故三种口径都必须正好 4 条。"""
+        for rules in (
+            SCRIPT_GEN_RULES,
+            build_gen_rules(has_slots=False),
+            build_gen_rules(has_slots=False, template_has_placeholder=True),
+        ):
+            for n in ("1. ", "2. ", "3. ", "4. "):
+                self.assertIn(n, rules)
+            self.assertNotIn("5. ", rules)
+
+    def test_零槽位口径也替换自定义占位符哨兵(self) -> None:
+        for kwargs in ({}, {"template_has_placeholder": True}):
+            text = build_gen_rules(SLOT_FALLBACK_PASSTHROUGH, "▲▲",
+                                   has_slots=False, **kwargs)
+            self.assertNotIn("<PH>", text)
+            self.assertIn("▲▲", text)
+
+    def test_零槽位与mode无关(self) -> None:
+        """没有槽位，填槽/删句两种口径都无从谈起 —— 产出不应随 mode 变化。"""
+        self.assertEqual(
+            build_gen_rules(SLOT_FALLBACK_PASSTHROUGH, has_slots=False),
+            build_gen_rules(SLOT_FALLBACK_DROP, has_slots=False),
+        )
+
+
+class TestNoSlotPromptWiring(unittest.TestCase):
+    """build_prompt 的槽位判定：{token} / {域[子键]} / linked_vars 任一命中即走原口径。"""
+
+    _PROSE = "您现在的套餐用起来还挺合适，各项资源基本够用，建议先保留一段时间看看。"
+
+    def _rules_of(self, template_text: str, linked_vars=None) -> str:
+        ctx = FlowContext(
+            phone="13811601301", intent="套餐升档", province="shandong",
+            current_package={}, usage={}, tags={}, user_info={},
+            user_profile={}, domain_ext={}, extra_info={},
+            extra_context={"stage": "营销挽留", "scence": "仅当月不小心超出，以后不会"},
+        )
+        parts: dict = {}
+        build_prompt(
+            user_prompt_tpl="",
+            template_text=template_text,
+            ctx=ctx,
+            pkg={},
+            diff=PackageDiff(ctx.current_package, {}),
+            linked_vars=linked_vars or [],
+            script_requirement="",
+            parts_out=parts,
+        )
+        return parts.get("other") or ""
+
+    def test_纯文案模板走零槽位口径(self) -> None:
+        rules = self._rules_of(self._PROSE)
+        self.assertIn("不含任何 {占位符}", rules)
+        self.assertNotIn("您月均消费**元", rules)
+
+    def test_含花括号槽位走原口径(self) -> None:
+        rules = self._rules_of("您当前套餐是{current_package}，建议升档。")
+        self.assertIn("您月均消费**元", rules)
+
+    def test_含子字段槽位走原口径(self) -> None:
+        rules = self._rules_of("您近期流量{usage[data_usage][近3月平均流量(GB)]}，建议升档。")
+        self.assertIn("您月均消费**元", rules)
+
+    def test_勾了关联变量的纯文案走原口径(self) -> None:
+        """北京 269 条模板勾了关联变量却不在正文写 {}，靠上下文事实行驱动 —— 不能误判。"""
+        rules = self._rules_of(self._PROSE, linked_vars=["current_package"])
+        self.assertIn("您月均消费**元", rules)
+        self.assertNotIn("不含任何 {占位符}", rules)
+
+    def test_正文自带占位记号的纯文案走保留口径(self) -> None:
+        rules = self._rules_of("我看您这**月流量已用超**元啦，我帮您优化一下。")
+        self.assertIn("必须原样保留在输出里", rules)
+        self.assertNotIn("严禁用 **", rules)
+
+
+class TestGuangxiProseTemplate(unittest.TestCase):
+    """广西纯文案挽留模板：不因 linked_vars / extra_info.current_package 改写成套餐说明书。
+
+    其他省份判定不变：山东/北京勾了关联变量的纯文案仍走原填槽口径。
+    """
+
+    _PROSE = (
+        "移动号码现在是全国通用，您在国内通话费用是一致的，资费不会因为离开本地而变贵，"
+        "号码不改变，重要的朋友也能联系上您，而且很多账号、银行卡都绑定了这个号码，"
+        "建议您保留原套餐。"
+    )
+    _REQ = (
+        "严格只用给定字段的真实值，不虚构数字/套餐名/优惠；"
+        "任一字段缺失或为 0 时不提及该项，也不得用其他字段代替；150 字以内，结尾引导办理。"
+    )
+    _PACKAGE = {
+        "packageBucktime": "2027-04-01",
+        "packageOriginal": "79.00",
+        "packageLastIll": "1.70GB",
+        "packageVoice": "300",
+        "packageJoinage": "7年3个月",
+        "packageData": "79元套餐优惠至39元活动-2年合约",
+        "packageMonthll": "15.00GB",
+        "packageDiscount": "39.00",
+    }
+
+    def _build(self, *, province: str, template_text: str, linked_vars=None):
+        ctx = FlowContext(
+            phone="13800000000", intent="资费挽留", province=province,
+            current_package=dict(self._PACKAGE), usage={}, tags={}, user_info={},
+            user_profile={}, domain_ext={},
+            extra_info={"current_package": dict(self._PACKAGE)},
+            extra_context={"stage": "客户降档原因", "scence": "生活变化/工作地点变更"},
+        )
+        ctx.passthrough_context = {"current_package": dict(self._PACKAGE)}
+        parts: dict = {}
+        prompt = build_prompt(
+            user_prompt_tpl="",
+            template_text=template_text,
+            ctx=ctx,
+            pkg={"product_id": "prod009"},
+            diff=PackageDiff(ctx.current_package, {}),
+            linked_vars=linked_vars or ["pkg_brief", "current_package"],
+            script_requirement=self._REQ,
+            parts_out=parts,
+        )
+        return prompt, parts
+
+    def test_广西纯文案走零槽位且不灌套餐事实(self) -> None:
+        prompt, parts = self._build(province="guangxi", template_text=self._PROSE)
+        self.assertIn("不含任何 {占位符}", parts.get("other") or "")
+        self.assertIn("禁止把套餐名、月费、流量", parts.get("other") or "")
+        ctx = parts.get("context_data") or ""
+        self.assertNotIn("79元套餐优惠至39元", ctx)
+        self.assertNotIn("2027-04-01", ctx)
+        self.assertNotIn("{current_package}", ctx)
+        self.assertNotIn("您月均消费**元", prompt)
+        self.assertIn(self._PROSE, prompt)
+
+    def test_广西有槽位模板仍填真实值(self) -> None:
+        """prod001/prod002 这类带 {current_package[…]} 的模板不受影响。"""
+        tpl = "您的套餐包括{current_package[packageData]}流量，建议您保留原套餐。"
+        prompt, parts = self._build(province="guangxi", template_text=tpl)
+        self.assertIn("您月均消费**元", parts.get("other") or "")
+        self.assertNotIn("不含任何 {占位符}", parts.get("other") or "")
+        self.assertIn("packageData", parts.get("context_data") or prompt)
+
+    _SLOTTED = (
+        "您的套餐包含{current_package[packageMonthll]}流量和{current_package[packageVoice]}语音通话，"
+        "通话和流量都够好够用，建议您保留原套餐。"
+    )
+
+    def test_广西有槽位模板上下文只含被引用的槽位(self) -> None:
+        """回归：整行 {current_package}/{pkg_brief} 里的原价、折扣、活动会被模型编成「原价×现价×」。"""
+        prompt, parts = self._build(province="guangxi", template_text=self._SLOTTED)
+        ctx = parts.get("context_data") or ""
+        self.assertIn("{current_package[packageMonthll]}：15.00GB", ctx)
+        self.assertIn("{current_package[packageVoice]}：300", ctx)
+        for leaked in ("79.00", "39.00", "79元套餐优惠至39元", "2027-04-01", "prod009",
+                       "{current_package}：", "{pkg_brief}"):
+            self.assertNotIn(leaked, ctx, leaked)
+        self.assertIn("模板没有写到的套餐名", parts.get("other") or "")
+
+    def test_广西模板引用整块变量时仍注入(self) -> None:
+        prompt, parts = self._build(
+            province="guangxi", template_text="您当前套餐：{current_package}，建议保留。")
+        self.assertIn("{current_package}：packageBucktime", parts.get("context_data") or "")
+
+    def test_其他省份有槽位模板仍注入关联变量(self) -> None:
+        """北京/山东靠关联变量事实行驱动，不得被广西收窄误伤。"""
+        prompt, parts = self._build(province="shandong", template_text=self._SLOTTED)
+        ctx = parts.get("context_data") or ""
+        self.assertIn("{current_package}：packageBucktime", ctx)
+        # 规则收紧对所有省份生效（上下文不收窄，约束填槽）
+        self.assertIn("模板没有写到的套餐名", parts.get("other") or "")
+
+    def test_无花括号槽位的模板不加槽位约束(self) -> None:
+        """北京关联变量驱动、广东 ** 填槽的模板正文没有 {}，规则保持原样。"""
+        prompt, parts = self._build(province="shandong", template_text=self._PROSE)
+        self.assertNotIn("模板没有写到的套餐名", parts.get("other") or "")
+
+    def test_其他省份勾关联变量的纯文案仍走原口径(self) -> None:
+        """北京/山东护栏：同一模板在 shandong 下不得被广西例外误伤。"""
+        prompt, parts = self._build(province="shandong", template_text=self._PROSE)
+        self.assertIn("您月均消费**元", parts.get("other") or "")
+        self.assertNotIn("不含任何 {占位符}", parts.get("other") or "")
+        self.assertNotIn("禁止把套餐名、月费、流量", parts.get("other") or "")
+
+
+@unittest.skipUnless(_BASELINE_AVAILABLE, f"script_step 导入失败: {_BASELINE_IMPORT_ERROR}")
+class TestZeroSlotContextHasNoFacts(unittest.TestCase):
+    """零槽位模板（非广西）：规则禁止写入模板外数值，上下文也不得再递数字。
+
+    回归：此前规则切到零槽位口径，却仍把整包 extra_info / 多产品字段灌进上下文，自相矛盾。
+    """
+
+    _PROSE = "移动号码全国通用，资费不会因离开本地而变化，号码不改变，建议您保留原套餐。"
+    _PKG = {"packageOriginal": "79.00", "packageDiscount": "39.00"}
+    _REC = {"product_id": "p1", "offerName": "5G畅享129", "recommend_actual_price": "129"}
+
+    def _ctx_of(self, *, province="shandong", linked=None, extra=None,
+                passthrough=None, recs=1, template=None):
+        ctx = FlowContext(
+            phone="1", intent="资费挽留", province=province,
+            current_package=dict(self._PKG), usage={}, tags={}, user_info={},
+            user_profile={}, domain_ext={}, extra_info=extra or {},
+            extra_context={"stage": "x", "scence": "y"},
+        )
+        if passthrough:
+            ctx.passthrough_context = passthrough
+        ctx.final_recommendations = [self._REC] * recs
+        parts: dict = {}
+        build_prompt(
+            user_prompt_tpl="", template_text=template or self._PROSE, ctx=ctx,
+            pkg=dict(self._REC), diff=PackageDiff(ctx.current_package, {}),
+            linked_vars=linked or [], script_requirement="", parts_out=parts,
+        )
+        return parts.get("context_data") or "", parts.get("other") or ""
+
+    def test_零槽位不灌extra_info整包(self) -> None:
+        for province in ("shandong", "beijing"):
+            ctx, other = self._ctx_of(province=province, extra={"current_package": self._PKG})
+            self.assertIn("不含任何 {占位符}", other)
+            self.assertNotIn("79.00", ctx, province)
+            self.assertNotIn("{extra_info}", ctx, province)
+
+    def test_有槽位仍灌extra_info(self) -> None:
+        """对照：关联变量驱动的模板（北京）行为不变。"""
+        ctx, _ = self._ctx_of(extra={"current_package": self._PKG}, linked=["usage"])
+        self.assertIn("{extra_info}", ctx)
+
+
 class TestDropMaskedValues(unittest.TestCase):
     """掩码归一的边界：只吃「整值等于掩码」的条目，不动正文。"""
 
@@ -247,24 +549,6 @@ class TestBuildPromptMaskNormalization(unittest.TestCase):
         self.assertIn("一律不得删句", prompt)
         self.assertNotIn("<PH>", prompt)
 
-    def test_masked_direct_field_is_explicitly_listed_as_missing(self) -> None:
-        """直传自定义槽位被掩码后，也要进入缺失事实约束，不能静默消失。"""
-        ctx = FlowContext(
-            phone="13800000000", intent="套餐推荐", province="shandong",
-            current_package={}, usage={}, tags={}, user_info={},
-            user_profile={}, domain_ext={},
-            extra_info={"uniProdGrade": "**"}, extra_context={},
-        )
-        parts = {}
-        prompt = build_prompt(
-            user_prompt_tpl="", template_text="当前是{uniProdGrade}元套餐。",
-            ctx=ctx, pkg={}, diff=PackageDiff(ctx.current_package, {}),
-            linked_vars=[], parts_out=parts,
-        )
-        self.assertIn("【缺失事实】", prompt)
-        self.assertIn("{uniProdGrade}", prompt)
-        self.assertIn("把槽位本身写成 **", prompt)
-
 
 @unittest.skipUnless(_BASELINE_AVAILABLE, f"script_step 导入失败: {_BASELINE_IMPORT_ERROR}")
 class TestPostProcessResidualPlaceholders(unittest.TestCase):
@@ -307,20 +591,22 @@ class TestPostProcessResidualPlaceholders(unittest.TestCase):
         clean = "您好，推荐5G畅享套餐，月费59元。"
         self.assertEqual(ScriptStep._post_process(clean), clean)
 
-    def test_strict_template_does_not_insert_context_facts(self) -> None:
-        """模板没有槽位时，模型上下文里的资费/流量不能被自行插入正文。"""
-        template = "费用上没有增加太多，但有了更多的流量，以后出门更方便。"
-        out = ScriptStep._render_strict_template(
-            template, {"pkg_flow": "20", "recommend_actual_price": "128"})
-        self.assertEqual(out, template)
-        self.assertNotIn("20", out)
-        self.assertNotIn("128", out)
+    def test_digit_leading_token_filled(self) -> None:
+        """数字开头字段名 {3MonthsOutFlowFee} 也要被识别为残留占位符、换成 **，
+        不能泄漏到成品话术（放宽正则前会原样残留）。"""
+        out = ScriptStep._post_process("您近三月超套费用{3MonthsOutFlowFee}元。")
+        self.assertEqual(out, "您近三月超套费用**元。")
 
-    def test_strict_template_fills_only_named_slots(self) -> None:
-        template = "新套餐原价{origPrice}元，流量{flow}GB，网龄{internetAge}年。"
-        out = ScriptStep._render_strict_template(
-            template, {"origPrice": "99", "flow": "0"})
-        self.assertEqual(out, "新套餐原价99元，流量0GB，网龄**年。")
+    def test_chinese_and_dotpath_token_filled(self) -> None:
+        """中文名 / 点路径占位符（{用户标签.星级}）同样被清理，不残留花括号。"""
+        out = ScriptStep._post_process("您是{用户标签.星级}客户，专享权益。")
+        self.assertNotIn("{", out)
+        self.assertIn("**", out)
+
+    def test_normal_text_braces_not_over_matched(self) -> None:
+        """正文里带空格/标点的花括号不是占位符，不应被误删（正则限定字符集）。"""
+        text = "活动说明：满 {100 元, 减 20} 元。"
+        self.assertEqual(ScriptStep._post_process(text), text)
 
 
 if __name__ == "__main__":

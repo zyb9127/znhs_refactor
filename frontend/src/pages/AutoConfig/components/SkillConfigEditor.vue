@@ -570,6 +570,8 @@
                         <b>① 字段计算</b>（产出数据值）<br />
                         · <b>数组选元素</b>：按条件从数组里选出第一个匹配元素<br />
                         　例：<code>userinfo_json</code> 中 <code>timeType=0</code> → 当月账期<br />
+                        · <b>数组逐项渲染</b>：命中的每个元素各渲染一行再拼成一段文本，行数随数据变化<br />
+                        　例：账期数组里<b>有几个月超套就展示几行</b>，逐月带提示<br />
                         · <b>求和</b>：多个路径相加（带单位的串也能算，如 "3元"）<br /><br />
                         <b>② 逻辑判断</b>（产出结论）<br />
                         · <b>比大小</b>：拿「判断依据」跟阈值比，如 合计 &lt; 1 → 场景一<br />
@@ -606,15 +608,23 @@
                         <div class="df-item-head">
                           <el-input v-model="row.name" size="small" class="df-name"
                             placeholder="字段名，如 当月资源" @input="commitDfRows" />
-                          <el-select v-model="row.type" size="small" class="df-type"
+                          <el-select v-if="!row.advanced" v-model="row.type" size="small" class="df-type"
                             @change="onDfTypeChange(row)">
                             <el-option label="数组选元素" value="array_find" />
+                            <el-option label="数组逐项渲染" value="array_render" />
                             <el-option label="求和" value="sum" />
                           </el-select>
+                          <el-tag v-else size="small" type="warning">高级规则 · {{ row.type }}</el-tag>
                           <el-button link type="danger" size="small" @click="removeDfRow(row)">删除</el-button>
                         </div>
 
-                        <template v-if="row.type === 'array_find'">
+                        <!-- 表格放不下的写法（未知算子 / match·sort_by·比较符等）：只提示，原样保留不动 -->
+                        <div v-if="row.advanced" class="df-advanced-note">
+                          这条的写法表格放不下（算子类型或参数超出表格能表达的范围），已<b>原样保留</b>，
+                          不会被表格改写。需要修改请切到「高级 JSON」。
+                        </div>
+
+                        <template v-else-if="row.type === 'array_find'">
                           <div class="df-line">
                             <span class="df-label">从哪个数组</span>
                             <el-select v-model="row.from" size="small" filterable allow-create
@@ -644,7 +654,167 @@
                           </div>
                         </template>
 
-                        <template v-else>
+                        <!-- 数组逐项渲染：过滤/排序后每个元素套一行模板再拼成一段多行文本（行数随数据变化） -->
+                        <template v-else-if="row.type === 'array_render'">
+                          <div class="df-line">
+                            <span class="df-label">从哪个数组</span>
+                            <el-select v-model="row.from" size="small" filterable allow-create
+                              default-first-option placeholder="数组字段名，如 userinfo_json"
+                              @change="commitDfRows">
+                              <el-option v-for="p in dfPathCandidates" :key="p" :label="p" :value="p" />
+                            </el-select>
+                          </div>
+                          <div class="df-line df-line-top">
+                            <span class="df-label">选取条件</span>
+                            <div class="df-where-list">
+                              <div v-for="(w, j) in row.rWheres" :key="j" class="df-cond-row">
+                                <el-input v-model="w.k" size="small" placeholder="元素字段，如 over_flow"
+                                  @input="commitDfRows" />
+                                <el-select v-model="w.op" size="small" class="df-op" @change="commitDfRows">
+                                  <el-option v-for="o in DF_CMP_OPTIONS" :key="o.value"
+                                    :label="o.label" :value="o.value" />
+                                </el-select>
+                                <el-input v-model="w.v" size="small" class="df-operand" placeholder="值"
+                                  @input="commitDfRows" />
+                                <el-button link type="danger" size="small"
+                                  @click="row.rWheres.splice(j, 1); commitDfRows()">删除</el-button>
+                              </div>
+                              <el-button size="small" plain
+                                @click="row.rWheres.push({ k: '', op: 'gt', v: '' }); commitDfRows()">
+                                + 添加条件
+                              </el-button>
+                              <el-radio-group v-if="row.rWheres.length > 1" v-model="row.match" size="small"
+                                @change="commitDfRows">
+                                <el-radio-button value="any">任一满足</el-radio-button>
+                                <el-radio-button value="all">全部满足</el-radio-button>
+                              </el-radio-group>
+                              <div class="df-sub-hint">
+                                命中的元素<b>每个都会渲染一行</b>（有几个月超套就几行）。留空则渲染数组全部元素。
+                                取不到值的条件判否，不会把「没数据」当命中。
+                              </div>
+                            </div>
+                          </div>
+                          <div class="df-line">
+                            <span class="df-label">排序</span>
+                            <el-input v-model="row.sortBy" size="small"
+                              placeholder="按哪个元素字段的数值排序，如 timeType（留空保持原序）"
+                              @input="commitDfRows" />
+                            <el-select v-model="row.order" size="small" class="df-op" @change="commitDfRows">
+                              <el-option label="升序" value="asc" />
+                              <el-option label="降序" value="desc" />
+                            </el-select>
+                          </div>
+                          <div class="df-line df-line-top">
+                            <span class="df-label">标签映射</span>
+                            <div class="df-where-list">
+                              <el-input v-model="row.labelField" size="small"
+                                placeholder="取哪个元素字段的值做标签，如 timeType（可选）"
+                                @input="commitDfRows" />
+                              <div v-for="(m, j) in row.labelMap" :key="j" class="df-where-row"
+                                style="margin-top:5px;">
+                                <el-input v-model="m.k" size="small" placeholder="字段值，如 0"
+                                  @input="commitDfRows" />
+                                <span class="df-arrow">→</span>
+                                <el-input v-model="m.v" size="small" placeholder="标签，如 本月"
+                                  @input="commitDfRows" />
+                                <el-button link type="danger" size="small"
+                                  @click="row.labelMap.splice(j, 1); commitDfRows()">删除</el-button>
+                              </div>
+                              <el-button v-if="row.labelField" size="small" plain style="margin-top:5px;"
+                                @click="row.labelMap.push({ k: '', v: '' }); commitDfRows()">
+                                + 添加映射
+                              </el-button>
+                              <div class="df-sub-hint">
+                                每行模板里用 <code>{label}</code> 引用；字段值没配映射时直接显示原值。
+                              </div>
+                            </div>
+                          </div>
+                          <div class="df-line df-line-top">
+                            <span class="df-label">逐行提示</span>
+                            <div class="df-where-list">
+                              <el-input v-model="row.hintField" size="small"
+                                placeholder="提示的引用名，如 账单提示（可选）" @input="commitDfRows" />
+                              <template v-if="row.hintField">
+                                <div v-for="(r, j) in row.hintRules" :key="j" class="df-rule-block"
+                                  style="margin-top:5px;">
+                                  <div class="df-rule-top">
+                                    <el-select v-model="r.mode" size="small" class="df-mode"
+                                      @change="onDfRuleModeChange(r)">
+                                      <el-option label="多字段条件" value="when" />
+                                      <el-option label="兜底" value="fallback" />
+                                    </el-select>
+                                    <span v-if="r.mode === 'when'" class="df-dash">本行下列条件全部满足</span>
+                                    <span v-else class="df-dash">前面都没命中时</span>
+                                    <span class="df-arrow">→</span>
+                                    <el-input v-model="r.value" size="small" class="df-val"
+                                      placeholder="提示文案（留空=本行不追加）" @input="commitDfRows" />
+                                    <el-button link type="danger" size="small"
+                                      @click="row.hintRules.splice(j, 1); commitDfRows()">删除</el-button>
+                                  </div>
+                                  <div v-if="r.mode === 'when'" class="df-cond-list">
+                                    <div v-for="(c, k) in r.conds" :key="k" class="df-cond-row">
+                                      <el-input v-model="c.path" size="small"
+                                        placeholder="本行元素字段，如 over_flow_fee" @input="commitDfRows" />
+                                      <el-select v-model="c.op" size="small" class="df-op"
+                                        @change="commitDfRows">
+                                        <el-option v-for="o in DF_CMP_OPTIONS" :key="o.value"
+                                          :label="o.label" :value="o.value" />
+                                      </el-select>
+                                      <el-input v-model="c.operand" size="small" class="df-operand"
+                                        placeholder="值" @input="commitDfRows" />
+                                      <el-button link type="danger" size="small"
+                                        @click="r.conds.splice(k, 1); commitDfRows()">删除</el-button>
+                                    </div>
+                                    <el-button size="small" plain
+                                      @click="r.conds.push({ path: '', op: 'ne', operand: '' }); commitDfRows()">
+                                      + 添加条件（且）
+                                    </el-button>
+                                  </div>
+                                </div>
+                                <el-button size="small" plain style="margin-top:5px;"
+                                  @click="addDfHintRule(row)">+ 添加提示规则</el-button>
+                              </template>
+                              <div class="df-sub-hint">
+                                按<b>每个元素就地判断</b>，自上而下取第一个命中的规则；提示只落在命中的那一行。
+                                每行模板里用 <code>{提示名}</code> 引用。
+                              </div>
+                            </div>
+                          </div>
+                          <div class="df-line df-line-top">
+                            <span class="df-label">每行模板</span>
+                            <div class="df-where-list">
+                              <el-input v-model="row.itemTemplate" type="textarea" size="small"
+                                :autosize="{ minRows: 2, maxRows: 6 }" spellcheck="false"
+                                placeholder="例：{label}流量超出{over_flow}，超套费用{over_flow_fee}元，{账单提示}"
+                                @input="commitDfRows" />
+                              <div class="df-sub-hint">
+                                <code>{字段名}</code> 取该元素自己的字段，空值填空串；
+                                <code>{label}</code>=标签，<code>{提示名}</code>=逐行提示。
+                              </div>
+                            </div>
+                          </div>
+                          <div class="df-line">
+                            <span class="df-label">行连接符</span>
+                            <el-select v-model="row.join" size="small" filterable allow-create
+                              default-first-option @change="commitDfRows">
+                              <el-option v-for="o in DF_JOIN_OPTIONS" :key="o.value"
+                                :label="o.label" :value="o.value" />
+                            </el-select>
+                          </div>
+                          <div class="df-line">
+                            <span class="df-label">生成后替换</span>
+                            <el-checkbox v-model="row.verbatim" size="small" @change="commitDfRows">
+                              成品原样替换（推荐）
+                            </el-checkbox>
+                          </div>
+                          <div class="df-sub-hint df-sub-indent">
+                            勾选后模型只在话术里保留 <code>{{ '{' + ((row.name || '').trim() || '派生名') + '}' }}</code>
+                            占位符，生成后由系统整块替换成上面渲染好的文本——不会被改写、合并或漏行；
+                            没勾选则把渲染结果当普通事实交给模型自己表述。
+                          </div>
+                        </template>
+
+                        <template v-else-if="row.type === 'sum'">
                           <div class="df-line">
                             <span class="df-label">相加的路径</span>
                             <el-select v-model="row.sumFrom" size="small" multiple filterable allow-create
@@ -1455,8 +1625,8 @@
 
               <div class="gen-param-item">
                 <div class="gen-param-label">
-                  话术字数上限
-                  <span class="gen-param-tip">单条话术最大字符数，超出会被截断。营销话术一般 150 字内。</span>
+                  话术建议字数
+                  <span class="gen-param-tip">写进提示词的软约束（"整段话术控制在 X 字以内"），引导模型控制篇幅；不会硬截断、也不会因超出而失败。若模板【话术要求】另写了字数，以话术要求为准。营销话术一般 150 字内。</span>
                 </div>
                 <div class="gen-param-ctrl">
                   <el-input-number
@@ -2424,8 +2594,22 @@ watch([passthroughSampleFields, isPassthrough], () => {
 // 否则运营点开一次弹窗就会把这类配置擦掉。
 const dfVisualMode = ref(true)
 const dfRows = ref([])
-const DF_TYPES = ['array_find', 'sum', 'bucket']
+const DF_TYPES = ['array_find', 'array_render', 'sum', 'bucket']
 const DF_OPS = ['lt', 'lte', 'gt', 'gte', 'eq', 'ne']
+// 各算子表格能表达的顶层键；出现其他键（match/sort_by/verbatim/未来新增…）整条转高级原样保留，
+// 否则表格回写会把这些配置擦掉。下划线开头的注释键走 row.meta 原样带回，不算「放不下」。
+const DF_FIND_KEYS   = ['type', 'from', 'where']
+const DF_SUM_KEYS    = ['type', 'from']
+const DF_BUCKET_KEYS = ['type', 'from', 'rules']
+const DF_RENDER_KEYS = ['type', 'from', 'where', 'match', 'sort_by', 'order', 'label_field',
+  'label_map', 'hint_field', 'hint_rules', 'item_template', 'join', 'verbatim']
+// 行连接符：值是真实字符（换行就是 "\n"），下拉可自定义
+const DF_JOIN_OPTIONS = [
+  { value: '\n', label: '换行' },
+  { value: ' ',  label: '空格' },
+  { value: '；', label: '分号 ；' },
+  { value: '、', label: '顿号 、' },
+]
 // 比较运算符（不含「兜底」——兜底是规则的一种模式，不是运算符，混在一起会让人以为要选运算符）
 const DF_CMP_OPTIONS = [
   { value: 'lt',  label: '小于' },
@@ -2502,6 +2686,120 @@ function _dfParseWhenConds(when) {
   return conds
 }
 
+/** 规格里有表格表达不了的顶层键（下划线开头的注释键除外）*/
+function _dfHasUnknownKeys(spec, allowed) {
+  return Object.keys(spec).some(k => !k.startsWith('_') && !allowed.includes(k))
+}
+
+/** array_render 专属字段的默认值（所有行都带上，换算子时不用再补结构）*/
+function dfRenderDefaults() {
+  return {
+    rWheres: [], match: 'all', sortBy: '', order: 'asc',
+    labelField: '', labelMap: [], hintField: '', hintRules: [],
+    itemTemplate: '', join: '\n', verbatim: false,
+  }
+}
+
+/** array_render 规格 → 表格字段；有表格放不下的写法返回 null（调用方整条转高级保原样）。 */
+function _dfParseRender(spec) {
+  if (_dfHasUnknownKeys(spec, DF_RENDER_KEYS)) return null
+  const out = dfRenderDefaults()
+  if (spec.where != null) {
+    if (typeof spec.where !== 'object' || Array.isArray(spec.where)) return null
+    for (const [k, cond] of Object.entries(spec.where)) {
+      const c = _dfParseWhenConds({ [k]: cond })
+      if (!c || !c.length) return null
+      out.rWheres.push({ k, op: c[0].op, v: c[0].operand })
+    }
+  }
+  const match = String(spec.match ?? 'all').toLowerCase()
+  const order = String(spec.order ?? 'asc').toLowerCase()
+  if (!['all', 'any'].includes(match) || !['asc', 'desc'].includes(order)) return null
+  out.match = match
+  out.order = order
+  if (spec.sort_by != null && typeof spec.sort_by !== 'string') return null
+  out.sortBy = spec.sort_by || ''
+  out.labelField = spec.label_field == null ? '' : String(spec.label_field)
+  if (spec.label_map != null) {
+    if (typeof spec.label_map !== 'object' || Array.isArray(spec.label_map)) return null
+    for (const [k, v] of Object.entries(spec.label_map)) {
+      if (v !== null && typeof v === 'object') return null
+      out.labelMap.push({ k, v: v == null ? '' : String(v) })
+    }
+  }
+  out.hintField = spec.hint_field == null ? '' : String(spec.hint_field)
+  if (spec.hint_rules != null) {
+    if (!Array.isArray(spec.hint_rules)) return null
+    for (const r of spec.hint_rules) {
+      if (!r || typeof r !== 'object' || Array.isArray(r)) return null
+      if (Object.keys(r).some(k => k !== 'when' && k !== 'value')) return null
+      const value = r.value == null ? '' : String(r.value)
+      if (r.when && typeof r.when === 'object' && Object.keys(r.when).length) {
+        const conds = _dfParseWhenConds(r.when)
+        if (!conds || !conds.length) return null
+        out.hintRules.push({ mode: 'when', conds, value })
+      } else {
+        out.hintRules.push({ mode: 'fallback', conds: [], value })
+      }
+    }
+  }
+  if (spec.item_template != null && typeof spec.item_template !== 'string') return null
+  if (spec.join != null && typeof spec.join !== 'string') return null
+  if (spec.verbatim != null && typeof spec.verbatim !== 'boolean') return null
+  out.itemTemplate = spec.item_template || ''
+  out.join = spec.join == null ? '\n' : spec.join
+  out.verbatim = spec.verbatim === true
+  return out
+}
+
+/** array_render 表格行 → 标准 spec。空的可选块（排序/标签/提示）不落库，配置保持干净。 */
+function _dfBuildRender(row) {
+  const spec = { ...(row.meta || {}), type: 'array_render' }
+  if (row.verbatim) spec.verbatim = true
+  spec.from = (row.from || '').trim()
+  const where = {}
+  for (const w of (row.rWheres || [])) {
+    const k = (w.k || '').trim()
+    if (k) where[k] = { [w.op || 'eq']: _dfOperand(w.v) }
+  }
+  if (Object.keys(where).length) {
+    spec.where = where
+    if (row.match === 'any') spec.match = 'any'
+  }
+  const sortBy = (row.sortBy || '').trim()
+  if (sortBy) {
+    spec.sort_by = sortBy
+    spec.order = row.order === 'desc' ? 'desc' : 'asc'
+  }
+  const labelField = (row.labelField || '').trim()
+  if (labelField) {
+    spec.label_field = labelField
+    const lm = {}
+    for (const m of (row.labelMap || [])) {
+      const k = String(m.k ?? '').trim()
+      if (k) lm[k] = String(m.v ?? '')
+    }
+    if (Object.keys(lm).length) spec.label_map = lm
+  }
+  const hintField = (row.hintField || '').trim()
+  if (hintField) {
+    spec.hint_field = hintField
+    spec.hint_rules = (row.hintRules || []).map(r => {
+      const value = String(r.value ?? '')
+      if (r.mode !== 'when') return { value }
+      const when = {}
+      for (const c of (r.conds || [])) {
+        const p = (c.path || '').trim()
+        if (p) when[p] = { [c.op || 'eq']: _dfOperand(c.operand) }
+      }
+      return { ...(Object.keys(when).length ? { when } : {}), value }
+    })
+  }
+  spec.item_template = row.itemTemplate ?? ''
+  spec.join = row.join ?? '\n'
+  return spec
+}
+
 function parseDfToRows() {
   let obj = {}
   try { obj = JSON.parse(ifcEditForm.derived_fields || '{}') } catch { dfRows.value = []; return }
@@ -2512,7 +2810,8 @@ function parseDfToRows() {
     const row = {
       uid: ++_dfUid,
       name,
-      type: DF_TYPES.includes(type) ? type : 'array_find',
+      // 未知算子保留原名（不再偷偷当成 array_find 渲染），整条转高级原样保留
+      type: DF_TYPES.includes(type) ? type : (type || '(空)'),
       from: Array.isArray(spec.from) ? '' : String(spec.from ?? ''),
       sumFrom: Array.isArray(spec.from)
         ? spec.from.map(String)
@@ -2521,8 +2820,30 @@ function parseDfToRows() {
       rules: [],
       advanced: false,
       raw: null,
+      meta: Object.fromEntries(Object.entries(spec).filter(([k]) => k.startsWith('_'))),
+      ...dfRenderDefaults(),
     }
-    if (row.type === 'bucket') {
+    // 先判「表格放得下吗」：放不下（未知算子 / 带表格没有的键 / 比较符等）整条原样保留，
+    // 否则编辑一次就会把 match/sort_by/比较符/新算子的配置擦掉并写回库。
+    const _whereVals = Object.values(
+      spec.where && typeof spec.where === 'object' ? spec.where : {})
+    if (!DF_TYPES.includes(type)) {
+      row.advanced = true
+      row.raw = spec
+    } else if (
+      (type === 'array_find' && (_dfHasUnknownKeys(spec, DF_FIND_KEYS)
+        || _whereVals.some(v => v !== null && typeof v === 'object')))
+      || (type === 'sum' && _dfHasUnknownKeys(spec, DF_SUM_KEYS))
+      || (type === 'bucket' && _dfHasUnknownKeys(spec, DF_BUCKET_KEYS))
+    ) {
+      row.advanced = true
+      row.raw = spec
+    } else if (type === 'array_render') {
+      const f = Array.isArray(spec.from) ? null : _dfParseRender(spec)
+      if (f) Object.assign(row, f)
+      else { row.advanced = true; row.raw = spec }
+    }
+    if (row.type === 'bucket' && !row.advanced) {
       const rs = Array.isArray(spec.rules) ? spec.rules : []
       let unsupported = false
       for (const r of rs) {
@@ -2563,18 +2884,23 @@ function commitDfRows() {
         if (k) where[k] = String(w.v ?? '')
       }
       out[name] = {
+        ...(row.meta || {}),
         type: 'array_find',
         from: (row.from || '').trim(),
         ...(Object.keys(where).length ? { where } : {}),
       }
+    } else if (row.type === 'array_render') {
+      out[name] = _dfBuildRender(row)
     } else if (row.type === 'sum') {
       out[name] = {
+        ...(row.meta || {}),
         type: 'sum',
         from: (row.sumFrom || []).map(s => String(s).trim()).filter(Boolean),
       }
     } else {
       const from = (row.from || '').trim()
       out[name] = {
+        ...(row.meta || {}),
         type: 'bucket',
         // 纯「多字段条件」的判断没有单一判断依据，不写空 from，配置更干净
         ...(from ? { from } : {}),
@@ -2605,7 +2931,8 @@ function dfNeedsFrom(row) {
 function addDfRow(kind) {
   const row = {
     uid: ++_dfUid, name: '', from: '', sumFrom: [],
-    wheres: [], rules: [], advanced: false, raw: null,
+    wheres: [], rules: [], advanced: false, raw: null, meta: {},
+    ...dfRenderDefaults(),
   }
   if (kind === 'judge') {
     row.type = 'bucket'
@@ -2631,6 +2958,11 @@ function addDfRule(row) {
   row.rules.push({ mode: 'threshold', op: 'lt', operand: '', conds: [], value: '' })
   commitDfRows()
 }
+/** array_render 逐行提示：新增一条「多字段条件」规则（带一行空条件，免得是空白一片）*/
+function addDfHintRule(row) {
+  row.hintRules.push({ mode: 'when', conds: [{ path: '', op: 'ne', operand: '' }], value: '' })
+  commitDfRows()
+}
 /** 切换规则模式时补上该模式必需的子结构，避免切过去是空白一片 */
 function onDfRuleModeChange(r) {
   if (r.mode === 'when' && !(r.conds || []).length) r.conds = [{ path: '', op: 'ne', operand: '' }]
@@ -2653,7 +2985,7 @@ function validateDerivedFields(obj) {
     if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return `「${name}」的规则必须是对象`
     const type = String(spec.type || '')
     if (!DF_TYPES.includes(type)) {
-      return `「${name}」的类型 ${type || '(空)'} 不支持，只能是数组选元素/求和/阈值分档`
+      return `「${name}」的类型 ${type || '(空)'} 不支持，只能是数组选元素/数组逐项渲染/求和/阈值分档`
     }
     if (DF_RESERVED_NAMES.includes(name)) return `「${name}」与标准域同名，运行时会被跳过，请改名`
     if (type === 'sum') {
@@ -2661,6 +2993,9 @@ function validateDerivedFields(obj) {
       if (!paths.filter(p => String(p ?? '').trim()).length) return `「${name}」求和至少要填一个路径`
     } else if (type === 'array_find' && !String(spec.from ?? '').trim()) {
       return `「${name}」要填从哪个数组取`
+    } else if (type === 'array_render') {
+      if (!String(spec.from ?? '').trim()) return `「${name}」要填从哪个数组取`
+      if (!String(spec.item_template ?? '').trim()) return `「${name}」要填每行的渲染模板`
     }
     if (type === 'bucket') {
       const rules = Array.isArray(spec.rules) ? spec.rules : []
@@ -8383,6 +8718,8 @@ async function removeTemplate(idx) {
 }
 .df-cond-row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
 .df-cond-row > .el-select:first-child { flex: 1; min-width: 0; }
+.df-cond-row > .el-input:first-child { flex: 1; min-width: 0; }
+.df-line > .el-select.df-op { flex: 0 0 100px; }
 .df-cond-row .df-op { width: 100px; flex-shrink: 0; }
 .df-cond-row .df-operand { width: 88px; flex-shrink: 0; }
 .df-eq, .df-arrow { font-size: 12px; color: #adb5bd; flex-shrink: 0; }

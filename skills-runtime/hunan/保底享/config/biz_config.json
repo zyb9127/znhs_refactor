@@ -1,0 +1,59 @@
+{
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 3,
+    "intent_strategies": {},
+    "max_script_length": 150,
+    "max_parallel_scripts": 3
+  },
+  "field_aliases": {
+    "_comment": "套餐字段别名（按优先级从高到低列出），ScriptStep 按此映射取值，无需硬编码字段名",
+    "pkg_name": [
+      "offerName",
+      "package_name",
+      "productName",
+      "name"
+    ],
+    "pkg_fee": [
+      "initFee",
+      "monthly_fee",
+      "price",
+      "fee"
+    ],
+    "pkg_flow": [
+      "offerFlow",
+      "data_quota",
+      "dataGB",
+      "flow"
+    ],
+    "pkg_voice": [
+      "offerVoice",
+      "voice_quota",
+      "voiceMinutes",
+      "voice"
+    ]
+  },
+  "script_templates_v2": [
+    {
+      "province": "hunan",
+      "intent": "保底享",
+      "template_name": "保底享",
+      "template_content": "对了，有个福利想跟您说现在每月可增加{base_flow_diff}GB国内通用流量，上述流量中有5GB可共享，只需要在您上个月{current_package[actual_price]}元消费的基础上加{diff_actual_price}元（通过“保底专属查询”查看客户可包含在保底内的费用），每个月保底消费达到{recommend_actual_price}元就可以了。不少客户都办了，我也帮您加上吧？",
+      "product_id": "prod001",
+      "scene": "套餐升级",
+      "stage": "推荐环节",
+      "linked_vars": [
+        "current_package"
+      ],
+      "script_requirement": "结合【上下文数据】中的当前套餐、历史用量与用户标签，先点出最突出的用户痛点，再用推荐套餐对应字段的真实值说明如何解决；只讲有数据支撑的卖点，口语化、可直接对客播报，150字以内，结尾自然引导办理。",
+      "prompt_template": "",
+      "linked_apis": [
+        "main_api"
+      ],
+      "status": "online",
+      "created_by": "15974205488",
+      "created_at": "2026-08-05 16:52:35",
+      "template_id": "tpl_hunan_1785919955689_6aaafe"
+    }
+  ]
+}

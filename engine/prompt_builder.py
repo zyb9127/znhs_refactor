@@ -49,6 +49,7 @@ from prompt.script_generation import (
     build_missing_facts_tail,
     canon_slot_fallback_mode,
 )
+from plugins.derived_fields import VERBATIM_SLOTS_KEY
 from utils.field_naming import canon_key, dict_fuzzy_get
 from utils.placeholder import dig_subfield
 
@@ -288,6 +289,37 @@ def _script_step_cls():
 _PERSONA_VAR_KEYS = frozenset({"tags", "user_tags", "user_profile"})
 # 直传透传字段名中的性格/画像特征词（如 communication_style / portrait_style 展开的子字段）
 _PERSONA_KEY_HINTS = ("style", "persona", "portrait", "性格", "画像", "风格", "偏好")
+
+
+# 广西无槽位挽留模板：只认正文 {占位符}，不因 linked_vars / 透传非空升成填槽口径。
+# 其他省份保持原判定——北京 269 条靠关联变量驱动个性化，广东用 **（字段名）+ 透传填槽。
+_STRICT_BODY_SLOT_PROVINCES = frozenset({"guangxi", "广西"})
+# 纯文案模板即使【话术要求】写了「用给定字段真实值」，也不许把套餐说明书盖掉模板卖点。
+_GX_PROSE_PIN = (
+    "本条优先于下方【话术要求】：模板正文没有槽位，禁止把套餐名、月费、流量、语音额度、"
+    "合约期、到期日等资费数字写进话术；【话术要求】里「用给定字段真实值」只适用于"
+    "模板里实际出现的信息点，不得据此改写成套餐说明书。"
+)
+
+# 模板正文有 {} 槽位（所有省份）：上下文可以带全部入参，但只能按模板里的槽位取值，
+# 不得拿上下文里其它字段的数值补充话术。
+_SLOT_ONLY_PIN = (
+    "本条优先于下方【话术要求】：模板里的 {} 槽位只能用【上下文数据】中同名占位符对应的值填写；"
+    "话术里的数字与优惠信息只能来自模板原文或这些槽位值，模板没有写到的套餐名、月费、"
+    "原价/现价、折扣、优惠活动、到期时间等一律不得写入，也不得用上下文里的其它字段补充或自行推算。"
+)
+
+# 成品块槽位（派生字段 verbatim:true）：内容由系统生成后确定性替换，模型只需原样保留占位符。
+_VERBATIM_PIN = (
+    "本条优先于第 2、3 条：下列占位符的内容是系统已拼好的成品明细，生成后由系统自动替换。"
+    "话术里必须原样保留这些占位符（含花括号；不要展开、改写、拆分、删除，也不要加粗或加引号）：{names}。"
+)
+
+
+def _strict_body_slots_only(ctx: Any) -> bool:
+    """当前请求是否采用「只看模板正文有没有槽位」的判定（目前仅广西）。"""
+    p = str(getattr(ctx, "province", "") or "").strip().lower()
+    return p in _STRICT_BODY_SLOT_PROVINCES
 
 
 def _has_persona_context(emitted: set, passthrough_ctx: Dict[str, Any]) -> bool:
@@ -603,6 +635,13 @@ def build_prompt(
         # 模板实际使用的占位符 token（锚点对齐依据）
         tpl_tokens: List[str] = re.findall(r"\{(\w+)\}", template_text or "")
         tpl_token_set = set(tpl_tokens)
+        _body_has_slots = bool(tpl_token_set) or bool(
+            template_text and _SUBFIELD_TOKEN_RE.search(template_text)
+        )
+        # 广西纯文案挽留模板：勾了关联变量 / 入参带了整包 current_package 时，
+        # 仍按「模板没有槽位」处理，避免模型把套餐说明书盖掉模板卖点（全国通用/号码不改）。
+        _gx_strict = _strict_body_slots_only(ctx)
+        _gx_prose = _gx_strict and not _body_has_slots
 
         def _anchor_for(var_key: str) -> str:
             """选择上下文行锚点：优先用模板中实际出现的同组占位符名。
@@ -630,33 +669,56 @@ def build_prompt(
             if t and v.strip():
                 slot_facts_out[t] = v
 
-        for var_key in linked_vars or []:
-            if var_key == "table":
-                continue   # 差异表格不进 LLM，在前端另行展示
-            if var_key == "recommended_packages":
-                continue   # 已下线：不再向 Prompt 注入候选条数摘要（兼容旧模板 linked_vars）
-            if var_key in emitted:
-                continue   # 同义组已注入（如 cur_brief 与 current_package 同时勾选时只出一行）
-            var_val = _unmask(_resolve_var(var_key))
-            if var_val.strip() == "":
-                continue   # 空事实不展示（防止“标签：”空槽诱导编造）
-            # 行首标注该事实对应的模板占位符 {anchor}，给模型精确的字符串锚点；
-            # 锚点对齐模板实际用名，避免 linked_vars 与模板占位符别名错位导致槽位被跳过
-            anchor = _anchor_for(var_key)
-            label = (
-                _DERIVED_PKG_VAR_LABELS.get(anchor) or VAR_LABELS.get(anchor)
-                or _DERIVED_PKG_VAR_LABELS.get(var_key) or VAR_LABELS.get(var_key, var_key)
+        if not _gx_prose:
+            for var_key in linked_vars or []:
+                if var_key == "table":
+                    continue   # 差异表格不进 LLM，在前端另行展示
+                if var_key == "recommended_packages":
+                    continue   # 已下线：不再向 Prompt 注入候选条数摘要（兼容旧模板 linked_vars）
+                if var_key in emitted:
+                    continue   # 同义组已注入（如 cur_brief 与 current_package 同时勾选时只出一行）
+                var_val = _unmask(_resolve_var(var_key))
+                if var_val.strip() == "":
+                    continue   # 空事实不展示（防止“标签：”空槽诱导编造）
+                # 行首标注该事实对应的模板占位符 {anchor}，给模型精确的字符串锚点；
+                # 锚点对齐模板实际用名，避免 linked_vars 与模板占位符别名错位导致槽位被跳过
+                anchor = _anchor_for(var_key)
+                if _gx_strict and anchor not in tpl_token_set:
+                    continue   # strict: only slots the template body references
+                label = (
+                    _DERIVED_PKG_VAR_LABELS.get(anchor) or VAR_LABELS.get(anchor)
+                    or _DERIVED_PKG_VAR_LABELS.get(var_key) or VAR_LABELS.get(var_key, var_key)
+                )
+                context_lines.append(f"{label} {{{anchor}}}：{var_val}")
+                _record_slot_fact(anchor, var_val)
+                emitted.update(_var_alias_group(var_key))
+                emitted.add(var_key)
+                emitted.add(anchor)
+        elif linked_vars:
+            logger.info(
+                f"[build_prompt] {getattr(ctx, 'province', '')}/{getattr(ctx, 'intent', '')} "
+                "纯文案模板跳过关联变量注入（避免套餐事实覆盖模板卖点）"
             )
-            context_lines.append(f"{label} {{{anchor}}}：{var_val}")
-            _record_slot_fact(anchor, var_val)
-            emitted.update(_var_alias_group(var_key))
-            emitted.add(var_key)
-            emitted.add(anchor)
         # 直传透传通道：把接口配置（direct_mode=passthrough）选定的入参字段逐条注入，
         # 不依赖模板占位符风格（{xx} 或 **（xx）均可），确保【上下文数据】完整展示透传入参。
         passthrough_ctx = getattr(ctx, "passthrough_context", None) or {}
         passthrough_ctx = _drop_masked_values(passthrough_ctx, _sf_masks)
-        if isinstance(passthrough_ctx, dict):
+        # 零槽位口径判定（判定依据见下方生成规则处的注释）：提前算出，
+        # 好让零槽位模板在构造上下文时就不灌入模板之外的事实，与「禁止写入模板外数值」的规则一致。
+        if _gx_strict:
+            _has_slots = _body_has_slots
+        else:
+            _has_slots = (
+                _body_has_slots
+                or bool(linked_vars)
+                or bool(passthrough_ctx)
+            )
+        # 成品块槽位：仅当本模板正文真的引用了 {名} 才有意义（模板没用到的块不进上下文，免得干扰模型）
+        _verbatim_names = [
+            n for n in ((passthrough_ctx or {}).get(VERBATIM_SLOTS_KEY) or [])
+            if isinstance(n, str) and template_text and ("{" + n + "}") in template_text
+        ] if isinstance(passthrough_ctx, dict) else []
+        if isinstance(passthrough_ctx, dict) and not _gx_prose:
             # 被父级大变量整块体现的子字段：如 portrait_style 已渲染成
             # 「communication_style：…；business_conte：…」，其被提升为独立透传键的同名子字段
             # 就不必再单列一行（避免与父级重复）；仅当模板显式引用 {子字段} 时才单列以保证可填。
@@ -667,8 +729,10 @@ def build_prompt(
                         if isinstance(_ck, str) and _ck in passthrough_ctx:
                             _parent_covered.add(_ck)
             for pk, pv in passthrough_ctx.items():
-                if pk in emitted:
+                if pk in emitted or pk == VERBATIM_SLOTS_KEY:
                     continue
+                if _gx_strict and pk not in tpl_token_set:
+                    continue   # strict: only slots the template body references
                 if (pk in _parent_covered
                         and not (template_text and ("{" + pk + "}") in template_text)):
                     continue
@@ -676,7 +740,14 @@ def build_prompt(
                 if val.strip() == "":
                     continue
                 label = VAR_LABELS.get(pk, pk)
-                context_lines.append(f"{label} {{{pk}}}：{val}")
+                if pk in _verbatim_names:
+                    # 事实行的值就是占位符本身：规则 2「原样填入该行的值」自然得到保留占位符，
+                    # 真实成品文本只记进确定性填槽字典，生成后由系统替换。
+                    context_lines.append(f"{label} {{{pk}}}：{{{pk}}}")
+                elif (pk in (passthrough_ctx.get(VERBATIM_SLOTS_KEY) or [])):
+                    continue          # 成品块但本模板没引用：不入上下文
+                else:
+                    context_lines.append(f"{label} {{{pk}}}：{val}")
                 _record_slot_fact(pk, val)
                 emitted.add(pk)
         # 模板引用但未注入的占位符自动补齐（两类，均只注入真实存在的非空事实，安全且不臆造）：
@@ -769,7 +840,8 @@ def build_prompt(
         # `**（recommend_actual_price）` 这类非花括号占位符风格：模板写什么字段名，
         # 上下文里就有同名事实行。
         # 仅多产品时触发：单产品沿用原有「linked_vars 驱动」语义，提示词逐字节不变。
-        if (len(getattr(ctx, "final_recommendations", None) or []) > 1
+        if (not _gx_strict and _has_slots
+                and len(getattr(ctx, "final_recommendations", None) or []) > 1
                 and isinstance(pkg, dict) and pkg and not _pkg_fact_in(emitted, pkg)):
             _injected_pkg: List[str] = []
             # 摘要行仅在模板确实引用 {pkg_brief}/{pkg_name} 时注入：逐字段行已覆盖同样的
@@ -805,7 +877,8 @@ def build_prompt(
 
         # 主服务直传：未在关联变量中显式勾选时，仍注入非空的 extra_info / extra_context
         # 透传模式（passthrough_ctx 非空）下已逐字段展示，跳过整包 JSON 以免冗余。
-        if "extra_info" not in emitted and ei_txt and not passthrough_ctx:
+        if (_has_slots and (not _gx_strict or "extra_info" in tpl_token_set)
+                and "extra_info" not in emitted and ei_txt and not passthrough_ctx):
             context_lines.append(f"{VAR_LABELS['extra_info']} {{extra_info}}：{ei_txt}")
             _record_slot_fact("extra_info", ei_txt)
         if "extra_context" not in emitted and ec_txt:
@@ -818,13 +891,8 @@ def build_prompt(
         # 套餐的 128 元/30GB/200 分钟当成月均消费/流量/通话播报）。除了告警定位，
         # 还把缺口显式列进 Prompt——负向约束比让模型自行推断"哪些信息不存在"可靠得多。
         _missing_slots: List[str] = []
-        # 模板中的裸占位符本身就是事实槽位，即使它不是标准域变量（例如
-        # 直传 extra_info 里的 uniProdGrade / telNumStar），也必须显式列入
-        #「缺失事实」。否则掩码值 ** 被清掉后，模型只看到模板里一个没有
-        # 任何负向约束的陌生占位符，容易直接把整处内容改写或删掉。
-        _non_fact_tokens = {"template", "template_content", "max_length", "intent"}
         for token in sorted(tpl_token_set):
-            if token in emitted or token in _non_fact_tokens:
+            if token in emitted or token not in _INJECTABLE_KNOWN:
                 continue
             _missing_slots.append(token)
         if template_text and "[" in template_text:
@@ -872,7 +940,52 @@ def build_prompt(
         if template_text:
             lines.append(SCRIPT_TEMPLATE_HEADER)
             lines.append(template_text)
-        gen_rules = build_gen_rules(_sf_mode, _sf_ph)
+        # 模板一个槽位都没有时走零槽位口径：整套填槽规则（含 ** 占位符的字面示例）
+        # 对纯文案模板不仅无用，还会被小模型当范本照抄出「月费**元」这类凭空数值
+        # （山东 1500 条 online 模板是纯文案，千问3-14B/temp1.1 下稳定复现）。
+        #
+        # 判定四路，任一命中即按「有槽位」走原口径，提示词逐字不变：
+        #   ① 正文含 {token}；② 正文含 {域[子键]}；
+        #   ③ 运营勾了 linked_vars；④ 直传透传通道有事实（passthrough_context 非空）。
+        # ③ 不可省：北京 269 条模板勾了关联变量却不在正文写 {}，靠上下文事实行驱动，
+        #   若误判为纯文案，新规则会禁止它们写入资费数据，打掉北京话术的个性化内容。
+        # ④ 不可省：直传省份用 **（字段名）而非 {字段名} 作槽位
+        #   （如「连续**（recommend_preferential_period）个月每月只需要**（…）元」），
+        #   正文没有 {} 且 linked_vars 为空，但 passthrough_context 里有真实值要填进去；
+        #   误判为纯文案会让模型原样留着 ** 不填，广东直传话术直接失效。
+        # 判定四路，任一命中即按「有槽位」走原口径，提示词逐字不变：
+        #   ① 正文含 {token}；② 正文含 {域[子键]}；
+        #   ③ 运营勾了 linked_vars；④ 直传透传通道有事实（passthrough_context 非空）。
+        # ③ 不可省：北京 269 条模板勾了关联变量却不在正文写 {}，靠上下文事实行驱动，
+        #   若误判为纯文案，新规则会禁止它们写入资费数据，打掉北京话术的个性化内容。
+        # ④ 不可省：直传省份用 **（字段名）而非 {字段名} 作槽位
+        #   （如「连续**（recommend_preferential_period）个月每月只需要**（…）元」），
+        #   正文没有 {} 且 linked_vars 为空，但 passthrough_context 里有真实值要填进去；
+        #   误判为纯文案会让模型原样留着 ** 不填，广东直传话术直接失效。
+        # 广西例外：只认 ①②。纯文案挽留模板即使勾了关联变量、入参带了整包 current_package，
+        # 也不得升成填槽口径，否则模型会把套餐说明书盖掉「全国通用/号码不改」这类卖点。
+        # （_has_slots 在上方构造上下文前已算出：零槽位模板不得往上下文里灌事实。）
+        # 运营在正文里手写的占位记号（山东 25 条 online 模板如此）要原样保留，
+        # 否则零槽位那条"严禁占位符"会把坐席口头补充的位置一起删掉。
+        _tpl_has_ph = bool(_sf_ph and template_text and _sf_ph in template_text)
+        gen_rules = build_gen_rules(
+            _sf_mode, _sf_ph,
+            has_slots=_has_slots,
+            template_has_placeholder=_tpl_has_ph,
+        )
+        if _gx_prose:
+            gen_rules = gen_rules.rstrip() + _GX_PROSE_PIN
+        elif _body_has_slots:
+            gen_rules = gen_rules.rstrip() + _SLOT_ONLY_PIN
+        if _verbatim_names:
+            gen_rules = gen_rules.rstrip() + _VERBATIM_PIN.format(
+                names="、".join("{" + n + "}" for n in _verbatim_names)
+            )
+        if not _has_slots and template_text:
+            logger.info(
+                f"[build_prompt] {getattr(ctx, 'province', '')}/{getattr(ctx, 'intent', '')} "
+                "话术模板无槽位 → 采用零槽位生成规则（禁止写入模板外的数值与占位符）"
+            )
         other_parts: List[str] = [SCRIPT_SYSTEM_HEADER, gen_rules]
         lines.append(gen_rules)
         # 字数规则：紧跟固定规则 1-4，排在「话术要求」之前 —— 运营在模板里写的字数要求
@@ -884,8 +997,7 @@ def build_prompt(
         lines.append(length_line)
         other_parts.append(length_line)
         rule_no += 1
-        # 个性化约束：上下文含用户标签/画像/性格类信息时自动追加（编号顺延）；
-        # 这里只允许核对事实，不能再给模型任何改写模板的自由度。
+        # 个性化润色规则：上下文含用户标签/画像/性格类信息时自动追加（编号顺延）
         if _has_persona_context(emitted, passthrough_ctx):
             persona_line = f"{rule_no}. {SCRIPT_PERSONA_RULE}"
             lines.append(persona_line)

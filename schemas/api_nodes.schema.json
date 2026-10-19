@@ -38,8 +38,8 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["array_find", "sum", "bucket"],
-          "description": "array_find=数组按 where 条件选出第一个匹配元素（返回整个 dict）；sum=多路径求和；bucket=按阈值/多字段条件分档取 value"
+          "enum": ["array_find", "array_render", "sum", "bucket"],
+          "description": "array_find=数组按 where 条件选出第一个匹配元素（返回整个 dict）；array_render=数组逐元素套 item_template 渲染再拼接成一段多行文本（命中几条渲几行，用于行数不定的分月明细）；sum=多路径求和；bucket=按阈值/多字段条件分档取 value"
         },
         "from": {
           "description": "取值点路径。array_find/bucket 为字符串，sum 可为字符串数组。根名先查已算出的派生字段再查原始报文；路径支持 dict 键与 list 数字下标",
@@ -48,7 +48,50 @@
         },
         "where": {
           "type": "object",
-          "description": "仅 array_find：{字段名: 期望值}，按字符串比较（兼容 \"0\" 与 0），需全部相等才算命中"
+          "description": "array_find/array_render：{字段名: 期望值}。期望值可为裸值（精确相等，兼容 \"0\" 与 0），或 {比较算子: 操作数}（eq/ne/gt/gte/lt/lte）。默认需全部满足，配合 match=any 时任一满足即命中。空值判否（不把没数据当命中）"
+        },
+        "match": {
+          "type": "string",
+          "enum": ["all", "any"],
+          "description": "array_find/array_render：where 多条件的组合方式，all=全部满足（默认），any=任一满足"
+        },
+        "sort_by": {
+          "type": "string",
+          "description": "array_find/array_render：先按该键的数值对数组元素排序（如 timeType 升序取最近账期）。缺失/非数值排到最后；不配则保持数组原序"
+        },
+        "order": {
+          "type": "string",
+          "enum": ["asc", "desc"],
+          "description": "配合 sort_by 的排序方向，asc 升序（默认）/ desc 降序"
+        },
+        "verbatim": {
+          "type": "boolean",
+          "description": "任意算子可配：true=该派生值是定稿的成品文本（如 array_render 逐月明细），上下文里只给占位符，模型在话术中原样保留 {派生名}，生成后由系统确定性替换；模板没引用该派生名时不进上下文"
+        },
+        "item_template": {
+          "type": "string",
+          "description": "仅 array_render：逐元素渲染模板，{字段名} 用元素自身字段填充（缺失/空值填空串），{label} 取 label_map 映射后的标签，{hint_field 名} 取 hint_rules 逐元素判定结果"
+        },
+        "label_field": {
+          "type": "string",
+          "description": "仅 array_render：取该字段值经 label_map 映射成可读标签，供 item_template 的 {label} 引用（如 timeType→本月/上月）"
+        },
+        "label_map": {
+          "type": "object",
+          "description": "仅 array_render：{字段原值: 标签}。label_field 的值按此映射；未命中则回退原值。键为字符串（JSON 对象键，如 \"0\"/\"1\"）"
+        },
+        "hint_field": {
+          "type": "string",
+          "description": "仅 array_render：逐元素按 hint_rules 判定出的提示写入该名，供 item_template 以 {该名} 引用（如逐月账单提示）"
+        },
+        "hint_rules": {
+          "type": "array",
+          "description": "仅 array_render：与 bucket 的 rules 同构（when/兜底档），但按当前数组元素就地求值，取第一个命中档的 value 作为 hint_field 的值；全不命中取空串",
+          "items": {"type": "object"}
+        },
+        "join": {
+          "type": "string",
+          "description": "仅 array_render：各行连接符，默认换行 \\n"
         },
         "rules": {
           "type": "array",

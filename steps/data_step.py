@@ -35,7 +35,11 @@ from typing import Any, Callable, Dict, List, Optional
 from loguru import logger
 
 from core.context import FlowContext
-from plugins.derived_fields import compute_derived_fields
+from plugins.derived_fields import (
+    VERBATIM_SLOTS_KEY,
+    compute_derived_fields,
+    verbatim_derived_names,
+)
 from plugins.unit_converter import UnitConverterRegistry
 from services.api_client import api_client
 from services.cache_service import cache_service
@@ -560,9 +564,8 @@ class DataStep:
                 # 结果与普通透传字段同权注入【上下文数据】，可用 {派生名}、{派生名[子键]} 引用，
                 # 也可被 biz_config.template_match.*_from 当作取值字段消费。
                 # 放在透传字段收集之后：派生名与入参重名时以派生配置为准（显式配置意图优先）。
-                for dk, dv in compute_derived_fields(
-                    raw, api_cfg.get("derived_fields")
-                ).items():
+                _derived_cfg = api_cfg.get("derived_fields")
+                for dk, dv in compute_derived_fields(raw, _derived_cfg).items():
                     if dk in _NODE_TO_CTX_FIELD:
                         logger.warning(
                             f"[DataStep] 直传节点 {api_name} 派生字段 {dk!r} 与标准域同名，"
@@ -575,6 +578,11 @@ class DataStep:
                             f"已按派生值覆盖（如非预期请给派生字段改名）"
                         )
                     passthrough[dk] = dv
+                # 声明了 verbatim 的派生字段（成品块）：名单随 passthrough 一起走，
+                # 缓存命中时同样可用；仅记录实际产出的，没值的槽位谈不上后填。
+                _verbatim = [n for n in verbatim_derived_names(_derived_cfg) if n in passthrough]
+                if _verbatim:
+                    passthrough[VERBATIM_SLOTS_KEY] = _verbatim
                 logger.info(
                     f"[DataStep] 直传节点 {api_name} 透传模式：同名域={list(resources.keys())}，"
                     f"透传字段={list(passthrough.keys())}"

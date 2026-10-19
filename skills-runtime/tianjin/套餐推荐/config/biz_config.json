@@ -1,0 +1,106 @@
+{
+  "strategy": {
+    "default_strategy": "direct",
+    "top_n": 3,
+    "intent_strategies": {},
+    "max_script_length": 150,
+    "max_parallel_scripts": 3
+  },
+  "field_aliases": {
+    "_comment": "套餐字段别名（按优先级从高到低列出），ScriptStep 按此映射取值，无需硬编码字段名",
+    "pkg_name": [
+      "offerName",
+      "package_name",
+      "productName",
+      "name"
+    ],
+    "pkg_fee": [
+      "initFee",
+      "monthly_fee",
+      "price",
+      "fee"
+    ],
+    "pkg_flow": [
+      "offerFlow",
+      "data_quota",
+      "dataGB",
+      "flow"
+    ],
+    "pkg_voice": [
+      "offerVoice",
+      "voice_quota",
+      "voiceMinutes",
+      "voice"
+    ]
+  },
+  "script_templates_v2": [
+    {
+      "province": "tianjin",
+      "intent": "套餐推荐",
+      "template_name": "套餐推荐",
+      "template_content": "您好！您当前套餐为{userinfo}，根据您近6个月的通信消费和使用情况,{userinfo_json}。我为您推荐{products}，您只需在现有月均消费的基础上少许增加，即可享受更多权益。",
+      "product_id": "PROD_001",
+      "scene": "",
+      "stage": "挽留",
+      "linked_vars": [
+        "pkg_brief",
+        "diff_str"
+      ],
+      "script_requirement": "以用户专属客户经理的口吻，用自然、口语化、像真人一对一沟通的语气说话，杜绝生硬模板腔与官话套话（如\"尊敬的客户\"\"钜惠来袭\"）。建议按「亲切开场 → 结合【上下文数据】中的当前套餐、历史用量与用户标签点出 1 个最突出的痛点 → 用推荐套餐对应字段的真实值（月费/流量/语音等）说清如何解决、并做前后对比放大获得感 → 一句自然的办理引导」组织，各句衔接顺滑不生硬；只讲有数据支撑的卖点，无数据的点不提、不夸大；有真实的专属/限时权益可点明（无则不编）。控制在 150 字以内，只保留一个明确的行动引导，结尾干脆不啰嗦。",
+      "prompt_template": "",
+      "linked_apis": [
+        "main_api"
+      ],
+      "status": "online",
+      "created_by": "13811601301",
+      "created_at": "2026-08-14 09:25:09",
+      "template_id": "tpl_tianjin_1786670709477_13172b"
+    },
+    {
+      "province": "tianjin",
+      "intent": "套餐推荐",
+      "template_name": "套餐推荐",
+      "template_content": "dddd",
+      "product_id": "PROD_001",
+      "scene": "",
+      "stage": "切入",
+      "linked_vars": [
+        "pkg_brief",
+        "diff_str"
+      ],
+      "script_requirement": "以用户专属客户经理的口吻，用自然、口语化、像真人一对一沟通的语气说话，杜绝生硬模板腔与官话套话（如\"尊敬的客户\"\"钜惠来袭\"）。建议按「亲切开场 → 结合【上下文数据】中的当前套餐、历史用量与用户标签点出 1 个最突出的痛点 → 用推荐套餐对应字段的真实值（月费/流量/语音等）说清如何解决、并做前后对比放大获得感 → 一句自然的办理引导」组织，各句衔接顺滑不生硬；只讲有数据支撑的卖点，无数据的点不提、不夸大；有真实的专属/限时权益可点明（无则不编）。控制在 150 字以内，只保留一个明确的行动引导，结尾干脆不啰嗦。",
+      "prompt_template": "",
+      "linked_apis": [
+        "main_api"
+      ],
+      "status": "online",
+      "created_by": "13811601301",
+      "created_at": "2026-08-14 09:25:15",
+      "template_id": "tpl_tianjin_1786670715986_16ef3c"
+    },
+    {
+      "province": "tianjin",
+      "intent": "套餐推荐",
+      "template_name": "套餐推荐",
+      "template_content": "您好！您当前套餐为{userinfo}，根据您近6个月的通信消费和使用情况,{userinfo_json}。我为您推荐{products}，您只需在现有月均消费的基础上少许增加，即可享受更多权益。",
+      "product_id": "PROD_001",
+      "scene": "",
+      "stage": "推荐",
+      "linked_vars": [
+        "pkg_brief",
+        "diff_str",
+        "user_info",
+        "user_profile"
+      ],
+      "script_requirement": "以用户专属客户经理的口吻，用自然、口语化、像真人一对一沟通的语气说话，杜绝生硬模板腔与官话套话（如\"尊敬的客户\"\"钜惠来袭\"）。建议按「亲切开场 → 结合【上下文数据】中的当前套餐、历史用量与用户标签点出 1 个最突出的痛点 → 用推荐套餐对应字段的真实值（月费/流量/语音等）说清如何解决、并做前后对比放大获得感 → 一句自然的办理引导」组织，各句衔接顺滑不生硬；只讲有数据支撑的卖点，无数据的点不提、不夸大；有真实的专属/限时权益可点明（无则不编）。控制在 150 字以内，只保留一个明确的行动引导，结尾干脆不啰嗦。",
+      "prompt_template": "",
+      "linked_apis": [
+        "main_api"
+      ],
+      "status": "online",
+      "created_by": "13811601301",
+      "created_at": "2026-08-14 09:25:21",
+      "template_id": "tpl_tianjin_1786670721924_586374"
+    }
+  ]
+}

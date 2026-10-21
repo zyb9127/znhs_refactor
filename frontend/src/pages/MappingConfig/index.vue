@@ -603,6 +603,7 @@
 </template>
 
 <script setup>
+import { encodePathSegments } from '@/utils/apiPath'
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { apiUrl, apiFetch } from '@/utils/apiUrl'
 import { useAuthStore } from '@/stores/authStore'
@@ -1354,7 +1355,7 @@ function openManualCreateModal() {
 async function openEditInterface(item) {
   editApiName.value = item.api_name; activeTab.value = 'basic'
   try {
-    const res = await apiFetch(`/api/interfaces/${item.province}/${item.intent}/${item.api_name}`)
+    const res = await apiFetch(`/api/interfaces/${encodePathSegments(item.province, item.intent, item.api_name)}`)
     const json = await res.json()
     const cfg = json.data || {}
     editIntents.value = [...new Set(skillsList.value.filter(s => s.province === item.province).map(s => s.intent))]
@@ -1387,7 +1388,7 @@ async function saveInterface() {
   // 开发环境自动开启 mock，灰度/生产环境使用真实接口
   const body = { _comment: editForm.description, url: editForm.url, method: editForm.method, enabled: editForm.enabled, created_by: editForm.created_by, request_template: req_tpl, response_extract: res_ext, field_transform: fld_tr, mock_mode: IS_DEV, mock_response: mock_res }
   try {
-    const res = await apiFetch(`/api/interfaces/${editForm.province}/${editForm.intent}/${editForm.api_name}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
+    const res = await apiFetch(`/api/interfaces/${encodePathSegments(editForm.province, editForm.intent, editForm.api_name)}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
     if (res.status === 403) {
       const json = await res.json().catch(() => ({}))
       showEdit.value = false
@@ -1435,7 +1436,7 @@ async function confirmDelete() {
   if (!delItem.value) return
   const { province, intent, api_name } = delItem.value
   try {
-    const res = await apiFetch(`/api/interfaces/${province}/${intent}/${api_name}`, { method:'DELETE' })
+    const res = await apiFetch(`/api/interfaces/${encodePathSegments(province, intent, api_name)}`, { method:'DELETE' })
     if (res.status === 403) {
       const json = await res.json().catch(() => ({}))
       showDel.value = false
@@ -1450,7 +1451,7 @@ async function confirmDelete() {
 
 async function toggleEnabled(item, checked) {
   try {
-    const res = await apiFetch(`/api/interfaces/${item.province}/${item.intent}/${item.api_name}/status`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ enabled: checked }) })
+    const res = await apiFetch(`/api/interfaces/${encodePathSegments(item.province, item.intent, item.api_name)}/status`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ enabled: checked }) })
     if (res.status === 403) {
       const json = await res.json().catch(() => ({}))
       showPermDeniedDialog(json.detail || '您没有权限修改其他省份的接口状态。')
@@ -1684,7 +1685,7 @@ async function applyAutoMap() {
   try { resExt = JSON.parse(autoMapExtractStr.value || '{}') } catch { showToast('response_extract JSON 格式错误', false); return }
   try { fldTr = JSON.parse(autoMapTransformStr.value || '{}') } catch { showToast('field_transform JSON 格式错误', false); return }
   try {
-    const res = await apiFetch(`/api/interfaces/${province}/${intent}/${api_name}`, {
+    const res = await apiFetch(`/api/interfaces/${encodePathSegments(province, intent, api_name)}`, {
       method:'PUT', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ response_extract: resExt, field_transform: fldTr })
     })

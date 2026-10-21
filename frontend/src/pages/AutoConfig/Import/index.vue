@@ -69,7 +69,7 @@
                   <el-tag v-if="!authStore.isHQ" size="small" type="info" style="margin-left:8px;">已锁定</el-tag>
                 </el-form-item>
                 <el-form-item label="场景分类" required
-                  :error="intentDup.exists ? `该省份下已存在场景分类「${wizardData.intent.trim()}」，请改用其他名称` : ''">
+                  :error="(wizardData.intent && intentNameError) || intentCheckError || (intentDup.exists ? `该省份下已存在场景分类「${wizardData.intent.trim()}」，请改用其他名称` : '')">
                   <el-input
                     v-model="wizardData.intent"
                     placeholder="如：套餐推荐"
@@ -81,9 +81,10 @@
                     <el-icon class="is-loading"><Loading /></el-icon> 校验中…
                   </span>
                   <el-tag
-                    v-else-if="intentDupChecked && !intentDup.exists && wizardData.intent.trim()"
+                    v-else-if="intentDupChecked && !intentDup.exists && !intentNameError && intentDup.key === `${wizardData.province}::${wizardData.intent.trim()}`"
                     size="small" type="success" style="margin-left:8px;"
                   >✓ 名称可用</el-tag>
+                  <div style="width:100%;font-size:12px;color:var(--muted);line-height:1.6;margin-top:4px;">{{ skillNameHint }}</div>
                 </el-form-item>
                 <el-form-item label="描述">
                   <el-input v-model="wizardData.description" placeholder="配置功能描述" style="width:320px;" />
@@ -101,7 +102,7 @@
                 <el-button
                   type="success" plain
                   :loading="quickCreating"
-                  :disabled="!wizardData.province || !wizardData.intent || intentChecking || intentDup.exists"
+                  :disabled="!wizardData.province || !!intentNameError || intentChecking || intentDup.exists"
                   @click="quickCreate"
                 >⚡ 快速创建（暂不配置接口 / 话术，稍后再补）</el-button>
                 <span class="quick-create-hint">
@@ -131,7 +132,7 @@
                   <el-button
                     type="primary" size="large"
                     :loading="generating"
-                    :disabled="intentChecking || intentDup.exists"
+                    :disabled="!!intentNameError || intentChecking || intentDup.exists"
                     @click="goPreviewFromWizard"
                   >下一步：生成预览 →</el-button>
                   <div v-if="intentDup.exists" style="margin-top:8px;font-size:12px;color:var(--danger);">
@@ -288,6 +289,7 @@ import {
 } from '@/api/autoConfig.js'
 import { $msg } from '@/utils/msg'
 import { PROVINCES, provinceNameOf } from '@/utils/provinces'
+import { skillNameError, skillNameHint } from '@/utils/skillName'
 import EnvBanner from '@/components/EnvBanner.vue'
 import SkillConfigEditor from '../components/SkillConfigEditor.vue'
 
@@ -320,10 +322,8 @@ async function quickCreate() {
     ElMessage.error(`当前账号无权在省份 ${wizardData.province} 下创建配置`); return
   }
   // 重名前置拦截：确保用最新名称校验一次（防抖期间直接点按钮）
-  await checkIntentDuplicate()
-  if (intentDup.exists) {
-    ElMessage.error(`该省份下已存在场景分类「${wizardData.intent.trim()}」，请改用其他名称`); return
-  }
+  if (intentNameError.value) { ElMessage.error(intentNameError.value); return }
+  if (!(await checkIntentDuplicate())) return
   const tpl = {
     meta: {
       province:      wizardData.province,
@@ -421,12 +421,18 @@ const allSkills = ref([])
 const intentChecking   = ref(false)   // 正在向后端校验
 const intentDupChecked  = ref(false)  // 是否已完成一次校验（用于展示「✓ 名称可用」）
 const intentDup = reactive({ exists: false, source: '', key: '' })  // 最近一次校验结果
+const intentNameError = computed(() => skillNameError(wizardData.intent))
+const intentCheckError = ref('')
 let _intentCheckTimer = null
+let _intentCheckSerial = 0
 
 /** 输入变化：清空上次校验结论并防抖触发（避免边打字边报重名） */
 function onIntentInput() {
+  _intentCheckSerial++  // 输入变化立即使在途校验失效
   intentDup.exists = false
   intentDupChecked.value = false
+  intentCheckError.value = ''
+  intentChecking.value = false
   if (_intentCheckTimer) clearTimeout(_intentCheckTimer)
   _intentCheckTimer = setTimeout(checkIntentDuplicate, 500)
 }
@@ -434,17 +440,22 @@ function onIntentInput() {
 /** 校验「省份 + 场景分类」是否已存在（后端以 registry/ES 为准，本地目录兜底）。 */
 async function checkIntentDuplicate() {
   if (_intentCheckTimer) { clearTimeout(_intentCheckTimer); _intentCheckTimer = null }
+  const serial = ++_intentCheckSerial
+  intentDup.exists = false
+  intentDupChecked.value = false
+  intentCheckError.value = ''
   const province = wizardData.province
   const intent = (wizardData.intent || '').trim()
-  if (!province || !intent) {
-    intentDup.exists = false; intentDupChecked.value = false; return
+  if (!province || skillNameError(intent)) {
+    intentChecking.value = false
+    return false
   }
   const key = `${province}::${intent}`
   intentChecking.value = true
   try {
     const data = await skillExists(province, intent)
     // 校验期间用户可能又改了名，结果过期则丢弃
-    if (`${wizardData.province}::${(wizardData.intent || '').trim()}` !== key) return
+    if (serial !== _intentCheckSerial || `${wizardData.province}::${(wizardData.intent || '').trim()}` !== key) return false
     intentDup.exists = !!data?.exists
     intentDup.source = data?.source || ''
     intentDup.key = key
@@ -452,11 +463,14 @@ async function checkIntentDuplicate() {
     if (intentDup.exists) {
       ElMessage.warning(`该省份下已存在场景分类「${intent}」，请改用其他名称`)
     }
+    return !intentDup.exists
   } catch (_) {
-    // 校验接口异常时不阻断（发布端 overwrite=false 仍会最终兜底拦截）
-    intentDup.exists = false; intentDupChecked.value = false
+    if (serial === _intentCheckSerial) {
+      intentCheckError.value = '名称校验失败，请重试后再创建'
+    }
+    return false
   } finally {
-    intentChecking.value = false
+    if (serial === _intentCheckSerial) intentChecking.value = false
   }
 }
 
@@ -466,11 +480,8 @@ async function goPreviewFromWizard() {
     return
   }
   // 重名前置拦截：进入预览前用最新名称再校验一次
-  await checkIntentDuplicate()
-  if (intentDup.exists) {
-    ElMessage.error(`该省份下已存在场景分类「${wizardData.intent.trim()}」，请改用其他名称后再继续`)
-    return
-  }
+  if (intentNameError.value) { ElMessage.error(intentNameError.value); return }
+  if (!(await checkIntentDuplicate())) return
   // 从 SkillConfigEditor 双向绑定数据中提取首个接口节点 + 模板列表
   // 接口与话术模板均可留空（快速创建/稍后补配），不再强制拦截。
   const apiNodes = wizardConfig.value?.api_nodes || {}
@@ -482,7 +493,7 @@ async function goPreviewFromWizard() {
     meta: {
       province:      wizardData.province,
       province_name: wizardData.province_name || wizardData.province,
-      intent:        wizardData.intent,
+      intent:        wizardData.intent.trim(),
       description:   wizardData.description,
       version:       wizardData.version,
       author:        wizardData.author || authStore.username,
@@ -539,11 +550,13 @@ const doneStages = computed(() => ({
 // 进入预览后即可发布（校验环节已移除；重名在发布步骤单独拦截）
 const canPublish = computed(() => !!previewData.value)
 // 优化4：省份+意图齐全后才进入三 Tab 编辑器
-const wizardReady = computed(() => !!wizardData.province && !!wizardData.intent)
+const wizardReady = computed(() => !!wizardData.province && !intentNameError.value)
 
 // ── 生成预览 ──────────────────────────────────────────
 async function goPreview() {
   if (!parsedTemplate.value) { ElMessage.warning('请先上传配置文件或选择模板'); return }
+  const nameError = skillNameError(parsedTemplate.value.meta?.intent)
+  if (nameError) { ElMessage.error(nameError); return }
   generating.value = true
   try {
     const data = await generatePreview(parsedTemplate.value)
@@ -629,6 +642,8 @@ async function doPublish() {
   // 重名已在第一步「场景分类」填写后即时校验拦截；此处不再重复校验。
   // 发布端 overwrite=false 仍会对已存在配置返回 409，作为最终兜底（错误会在 catch 中透出）。
   parsedTemplate.value = buildMergedTemplate()
+  const nameError = skillNameError(parsedTemplate.value.meta?.intent)
+  if (nameError) { ElMessage.error(nameError); return }
   publishProgress.value = [
     { key: 'validate', label: '校验配置模板',    state: 'done' },
     { key: 'generate', label: '生成配置代码', state: 'doing' },
@@ -685,6 +700,9 @@ function resetAll() {
   publishResult.value   = null; publishProgress.value  = []
   intentDup.exists = false; intentDup.source = ''; intentDup.key = ''
   intentDupChecked.value = false; intentChecking.value = false
+  intentCheckError.value = ''
+  _intentCheckSerial++
+  if (_intentCheckTimer) { clearTimeout(_intentCheckTimer); _intentCheckTimer = null }
 }
 
 // ── 初始化 ────────────────────────────────────────────

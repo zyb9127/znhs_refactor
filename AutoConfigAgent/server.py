@@ -48,6 +48,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from code_generator import EXAMPLE_TEMPLATE, SkillPackageGenerator, validate_template
+from utils.skill_names import skill_name_error
 from excel_parser import build_template_workbook, get_template_doc, parse_excel
 from template_library import get_template, list_templates
 
@@ -211,6 +212,10 @@ def _write_skill_package(generated: Dict[str, Any], overwrite: bool = False) -> 
     """
     province = generated["province"]
     intent = generated["intent"]
+    name_error = skill_name_error(intent)
+    if name_error:
+        raise HTTPException(status_code=422, detail=name_error)
+    intent = intent.strip()
     skill_dir = SKILLS_RUNTIME / province / intent
 
     if skill_dir.exists() and not overwrite:
@@ -1198,8 +1203,11 @@ async def skill_exists(province: str = "", intent: str = ""):
     """
     province = (province or "").strip()
     intent = (intent or "").strip()
-    if not province or not intent:
-        return {"exists": False, "province": province, "intent": intent, "source": ""}
+    name_error = skill_name_error(intent)
+    if name_error:
+        raise HTTPException(status_code=422, detail=name_error)
+    if not province:
+        raise HTTPException(status_code=422, detail="请选择目标省份")
     # 1) 运行时 registry —— 反映 ES/Redis 生效配置（生产权威来源）
     try:
         from utils.skill_runtime import skill_registry
@@ -1837,6 +1845,13 @@ async def import_all_skills(req: SkillsImportRequest, request: Request):
             fail_count += 1
             results.append({"index": idx, "status": "failed",
                             "error": "缺少 province/intent"})
+            continue
+
+        name_error = skill_name_error(intent)
+        if name_error:
+            fail_count += 1
+            results.append({"province": province, "intent": intent,
+                            "status": "failed", "error": name_error})
             continue
 
         # 省份写权限：无权限只跳过该技能包，不影响其余

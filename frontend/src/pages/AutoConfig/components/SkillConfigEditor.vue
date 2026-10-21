@@ -2010,6 +2010,7 @@
         mode="skill"
         :multi-product="true"
         :available-apis="availableApisForTpl"
+        :draft-api-nodes="props.province && props.intent ? null : (props.modelValue?.api_nodes || {})"
         :product-id-candidates="templateProductIdCandidates"
         @save="handleTemplateSave"
       />
@@ -2107,6 +2108,7 @@
 </template>
 
 <script setup>
+import { encodePathSegments } from '@/utils/apiPath'
 import { ref, reactive, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { $msg, useLock } from '@/utils/msg'
@@ -3936,7 +3938,7 @@ async function openIfcEdit(item) {
   ifcEditIsNew.value = false
   ifcEditTab.value   = 'basic'
   try {
-    const res  = await apiFetch(`/api/interfaces/${item.province}/${item.intent}/${item.api_name}`)
+    const res  = await apiFetch(`/api/interfaces/${encodePathSegments(item.province, item.intent, item.api_name)}`)
     const json = await res.json()
     const cfg  = json.data || {}
     Object.assign(ifcEditForm, {
@@ -4111,7 +4113,7 @@ async function saveIfcEdit() {
   ifcSaving.value = true
   try {
     const res  = await apiFetch(
-      `/api/interfaces/${props.province}/${props.intent}/${ifcEditForm.api_name}`,
+      `/api/interfaces/${encodePathSegments(props.province, props.intent, ifcEditForm.api_name)}`,
       { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
     )
     const json = await res.json()
@@ -4174,7 +4176,7 @@ async function runIfcAutoMap() {
 async function toggleIfcEnabled(item, checked) {
   try {
     const res  = await apiFetch(
-      `/api/interfaces/${item.province}/${item.intent}/${item.api_name}/status`,
+      `/api/interfaces/${encodePathSegments(item.province, item.intent, item.api_name)}/status`,
       { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: checked }) }
     )
     const json = await res.json()
@@ -4330,7 +4332,7 @@ async function applyIfcMap() {
   catch { ElMessage.error('field_transform JSON 格式错误'); return }
   ifcSaving.value = true
   try {
-    const res  = await apiFetch(`/api/interfaces/${province}/${intent}/${api_name}`, {
+    const res  = await apiFetch(`/api/interfaces/${encodePathSegments(province, intent, api_name)}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ response_extract: resExt, field_transform: fldTr })
     })
@@ -4359,7 +4361,7 @@ async function confirmIfcDel() {
   const { province, intent, api_name } = ifcDelItem.value
   ifcDeleting.value = true
   try {
-    const res  = await apiFetch(`/api/interfaces/${province}/${intent}/${api_name}`, { method: 'DELETE' })
+    const res  = await apiFetch(`/api/interfaces/${encodePathSegments(province, intent, api_name)}`, { method: 'DELETE' })
     const json = await res.json()
     if (json.code === 200) {
       ifcDelVisible.value = false
@@ -5257,7 +5259,7 @@ async function ensureIfcDetails() {
     if (ifcDetailsCache[it.api_name]) continue
     tasks.push((async () => {
       try {
-        const res = await apiFetch(`/api/interfaces/${it.province}/${it.intent}/${it.api_name}`)
+        const res = await apiFetch(`/api/interfaces/${encodePathSegments(it.province, it.intent, it.api_name)}`)
         const json = await res.json()
         ifcDetailsCache[it.api_name] = json.data || {}
       } catch { ifcDetailsCache[it.api_name] = {} }
@@ -6076,7 +6078,7 @@ async function saveDataflowChanges() {
       if (!cfg) return
       const body = { field_transform: cfg.field_transform || {} }
       const res = await apiFetch(
-        `/api/interfaces/${props.province}/${props.intent}/${apiName}`,
+        `/api/interfaces/${encodePathSegments(props.province, props.intent, apiName)}`,
         { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
       )
       const json = await res.json()

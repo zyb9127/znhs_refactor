@@ -283,7 +283,7 @@ async def get_api_nodes(province: str, intent: str):
     return {"code": 200, "data": pkg.config.get("api_nodes", {})}
 
 
-def _computed_var_availability(province: str, intent: str) -> Dict[str, bool]:
+def _computed_var_availability(province: str, intent: str, api_nodes: Optional[Dict[str, Any]] = None) -> Dict[str, bool]:
     """基于技能 mock 样例判断「计算生成变量」在该技能下是否会有值。
 
     计算变量（pkg_brief/diff_str/pkg_fee/pkg_flow/pkg_voice/table）由 PackageDiff 从推荐条
@@ -293,7 +293,7 @@ def _computed_var_availability(province: str, intent: str) -> Dict[str, bool]:
     """
     avail = {k: True for k in ("pkg_brief", "diff_str", "pkg_fee", "pkg_flow", "pkg_voice", "table")}
     try:
-        sample = _build_sample_ctx_from_skill(province, intent)
+        sample = _build_sample_ctx_from_skill(province, intent, api_nodes=api_nodes)
         if not sample:
             return avail
         from plugins.package_diff import PackageDiff
@@ -366,14 +366,14 @@ def _flatten_domain_subfields(
     return out
 
 
-def _compute_domain_subfields(province: str, intent: str) -> Dict[str, List[Dict[str, Any]]]:
+def _compute_domain_subfields(province: str, intent: str, api_nodes: Optional[Dict[str, Any]] = None) -> Dict[str, List[Dict[str, Any]]]:
     """按该技能的接口 mock 映射样例，推导各标准域可选子字段（供调色板展开）。
 
     复用 _build_sample_ctx_from_skill：其产出已过 response_extract/field_transform（含单位换算、
     字段重命名），故子字段键名 = 运行态映射后名，保证「调色板可选项 == 运行时可取值」精准一致。
     无技能 / 无 mock 时返回空 dict，前端仅展示整块域（向后兼容）。
     """
-    sample = _build_sample_ctx_from_skill(province, intent)
+    sample = _build_sample_ctx_from_skill(province, intent, api_nodes=api_nodes)
     if not isinstance(sample, dict) or not sample:
         return {}
     result: Dict[str, List[Dict[str, Any]]] = {}
@@ -415,6 +415,21 @@ async def get_context_vars(province: str, intent: str):
 
     api_nodes = pkg.config.get("api_nodes", {})
 
+    return _build_context_vars(api_nodes, province, intent)
+
+
+class ContextVarsPreviewRequest(BaseModel):
+    api_nodes: Dict[str, Any]
+
+
+@router.post("/api/skills/context_vars/preview")
+async def preview_context_vars(body: ContextVarsPreviewRequest):
+    """从未发布接口配置推导模板参数；只读计算，不调用外部接口、不写配置。"""
+    # 显式传入草稿（包括空字典），避免回查 registry 而混入已保存配置的字段。
+    return _build_context_vars(body.api_nodes, "preview", "preview")
+
+
+def _build_context_vars(api_nodes: Dict[str, Any], province: str, intent: str):
     # 收集来自接口配置的变量
     api_derived: Dict[str, str] = {}  # key → source 说明
     api_producers: Dict[str, List[str]] = {}  # key → 产出该变量的接口名列表（供前端联动展示/过滤）
@@ -542,7 +557,7 @@ async def get_context_vars(province: str, intent: str):
     }
 
     # 各标准域可选子字段（{域[子键]}），按接口 mock 映射样例推导，供调色板展开精确匹配
-    subfields_map = _compute_domain_subfields(province, intent)
+    subfields_map = _compute_domain_subfields(province, intent, api_nodes=api_nodes)
 
     # 推荐产品字段是否来自「直传透传节点」：决定 recommended_packages 的呈现口径——
     #   透传节点产出（无接口映射产出 recommended_packages）→ 按「直传大变量」呈现：
@@ -687,7 +702,7 @@ async def get_context_vars(province: str, intent: str):
 
     # pkg_brief / diff_str / pkg_fee 等是话术生成层计算产出；附 available 标志，
     # 供前端隐藏「该技能样例下注定取不到值」的计算变量（避免拖入后生成 xx/空值）
-    computed_avail = _computed_var_availability(province, intent)
+    computed_avail = _computed_var_availability(province, intent, api_nodes=api_nodes)
     for key in ("pkg_brief", "diff_str", "pkg_fee", "pkg_flow", "pkg_voice", "table"):
         # 直传口径：产品信息只用透传的 {recommended_packages}（展开选字段）呈现，不再另出
         # 计算生成的 {pkg_brief}——二者都指向推荐产品，同列会让运营误以为重复/需映射。
@@ -1647,22 +1662,23 @@ def _skill_slot_fallback(province: str, intent: str) -> Optional[Dict[str, Any]]
     return cfg if isinstance(cfg, dict) else None
 
 
-def _build_sample_ctx_from_skill(province: str, intent: str) -> Optional[Dict[str, Any]]:
+def _build_sample_ctx_from_skill(province: str, intent: str, api_nodes: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """用技能包 api_nodes 的 mock_response 跑一遍真实映射（response_extract / field_transform），
     产出贴合该技能实际配置的 resource_context 示例，供 Prompt 预览动态填充。
 
     这样预览里的【上下文数据】取值来自该技能「接口映射规则 + 出参示例」，而非写死的通用样例，
     与运行态 build_prompt 的字段结构一致；无技能/无 mock 时返回 None，回退内置默认样例。
     """
-    if not province or not intent:
-        return None
-    try:
-        pkg = skill_registry.get(province, intent)
-    except Exception:
-        pkg = None
-    if pkg is None:
-        return None
-    api_nodes = pkg.config.get("api_nodes", {}) if isinstance(pkg.config, dict) else {}
+    if api_nodes is None:
+        if not province or not intent:
+            return None
+        try:
+            pkg = skill_registry.get(province, intent)
+        except Exception:
+            pkg = None
+        if pkg is None:
+            return None
+        api_nodes = pkg.config.get("api_nodes", {}) if isinstance(pkg.config, dict) else {}
     if not isinstance(api_nodes, dict) or not api_nodes:
         return None
 

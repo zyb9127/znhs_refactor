@@ -9,6 +9,7 @@
  */
 import http from '@/api/index.js'
 import { apiUrl } from '@/utils/apiUrl'
+import { encodePathSegments } from '@/utils/apiPath'
 
 const P = '/api/auto-config'
 
@@ -17,7 +18,7 @@ export const acGetProvinces       = ()    => http.get(`${P}/provinces`)
 export const acGetExampleTemplate = ()    => http.get(`${P}/template/example`)
 export const acGetExcelDoc        = ()    => http.get(`${P}/template/excel-doc`)
 export const acGetTemplateLibrary = ()    => http.get(`${P}/templates/library`)
-export const acGetTemplateDetail  = (id)  => http.get(`${P}/templates/library/${id}`)
+export const acGetTemplateDetail  = (id)  => http.get(`${P}/templates/library/${encodePathSegments(id)}`)
 
 /** Excel 模板下载直链（带环境前缀） */
 export const acExcelTemplateUrl = () => apiUrl(`${P}/template/excel`)
@@ -43,17 +44,17 @@ export const acExportAllSkills = (params = {}) =>
 export const acImportAllSkills = (payload) =>
   http.post(`${P}/skills/import`, payload)
 export const acSkillAsTemplate = (province, intent) =>
-  http.get(`${P}/skills/${province}/${intent}/as-template`)
+  http.get(`${P}/skills/${encodePathSegments(province, intent)}/as-template`)
 export const acGetSkillConfig = (province, intent) =>
-  http.get(`${P}/skills/${province}/${intent}/config`)
+  http.get(`${P}/skills/${encodePathSegments(province, intent)}/config`)
 /** 只读审计 Context 工程链路（接口→固定域→模板槽位） */
 export const acContextAudit = (province, intent) =>
-  http.get(`${P}/skills/${province}/${intent}/context-audit`)
+  http.get(`${P}/skills/${encodePathSegments(province, intent)}/context-audit`)
 export const acUpdateSkillConfig = (province, intent, config_type, content) =>
-  http.put(`${P}/skills/${province}/${intent}/config/${config_type}`, { config_type, content })
+  http.put(`${P}/skills/${encodePathSegments(province, intent)}/config/${encodePathSegments(config_type)}`, { config_type, content })
 export const acDeleteSkill = (province, intent) =>
-  http.delete(`${P}/skills/${province}/${intent}`)
+  http.delete(`${P}/skills/${encodePathSegments(province, intent)}`)
 export const acReloadSkill = (province, intent) =>
-  http.post(`${P}/skills/${province}/${intent}/reload`)
+  http.post(`${P}/skills/${encodePathSegments(province, intent)}/reload`)
 export const acUpdateSkillStatus = (province, intent, status) =>
-  http.patch(`${P}/skills/${province}/${intent}/status`, { status })
+  http.patch(`${P}/skills/${encodePathSegments(province, intent)}/status`, { status })

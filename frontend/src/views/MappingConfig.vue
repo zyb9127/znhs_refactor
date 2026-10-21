@@ -159,6 +159,7 @@
 </template>
 
 <script setup>
+import { encodePathSegments } from '@/utils/apiPath'
 import { ref, reactive, computed, onMounted } from 'vue'
 import { apiFetch } from '@/utils/apiUrl'
 
@@ -258,7 +259,7 @@ function openEdit(item) {
     description: item.description || '', params_raw: ''
   })
   // 加载完整配置
-  apiFetch(`/api/interfaces/${item.province}/${item.intent}/${item.api_name}`)
+  apiFetch(`/api/interfaces/${encodePathSegments(item.province, item.intent, item.api_name)}`)
     .then(r => r.json()).then(j => {
       if (j.code === 200) {
         const d = j.data
@@ -287,7 +288,7 @@ async function saveInterface() {
       description: form.description,
       ...(params ? { params } : {})
     }
-    const res = await apiFetch(`/api/interfaces/${form.province}/${form.intent}/${form.api_name}`, {
+    const res = await apiFetch(`/api/interfaces/${encodePathSegments(form.province, form.intent, form.api_name)}`, {
       method: 'PUT', body: JSON.stringify(body)
     })
     const json = await res.json()
@@ -308,7 +309,7 @@ async function saveInterface() {
 // ── 状态切换 ─────────────────────────────────────────────────
 async function toggleStatus(item) {
   try {
-    const res = await apiFetch(`/api/interfaces/${item.province}/${item.intent}/${item.api_name}/status`, {
+    const res = await apiFetch(`/api/interfaces/${encodePathSegments(item.province, item.intent, item.api_name)}/status`, {
       method: 'PATCH', body: JSON.stringify({ enabled: !item.enabled })
     })
     const json = await res.json()

@@ -66,6 +66,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from prompt.script_defaults import DEFAULT_PROMPT_TEMPLATE
+from utils.skill_names import skill_name_error
 
 
 # ── 默认字段别名（与 话术智能体-生产 保持一致）──
@@ -102,6 +103,8 @@ class SkillPackageGenerator:
         self.province = self.meta.get("province", "unknown")
         self.province_name = self.meta.get("province_name", self.province)
         self.intent = self.meta.get("intent", "套餐推荐")
+        if isinstance(self.intent, str):
+            self.intent = self.intent.strip()
         self.description = self.meta.get("description", f"{self.province_name}{self.intent}")
         self.version = self.meta.get("version", "1.0.0")
         self.author = self.meta.get("author", "auto-config-agent")
@@ -282,8 +285,9 @@ def validate_template(tpl: Dict[str, Any]) -> List[str]:
     else:
         if not meta.get("province"):
             errors.append("meta.province 不能为空（省份代码，如 shandong）")
-        if not meta.get("intent"):
-            errors.append("meta.intent 不能为空（业务意图，如 套餐推荐）")
+        name_error = skill_name_error(meta.get("intent"))
+        if name_error:
+            errors.append(name_error)
 
     # api —— 可选；若填了 url/mock 之外的接口查询模式才提示补 url（不阻断快速创建）
     api = tpl.get("api", {})

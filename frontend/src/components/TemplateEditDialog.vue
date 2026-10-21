@@ -445,6 +445,8 @@ const props = defineProps({
    * produced_slots 由父组件根据 field_transform / response_extract 推断
    */
   availableApis: { type: Array, default: () => [] },
+  /** 创建页当前未发布的接口配置；null 表示读取已发布技能。 */
+  draftApiNodes: { type: Object, default: null },
   /**
    * 多产品分组编辑模式：与 TemplateConfig 的"编辑模板（多产品）"行为一致。
    *  - 产品 ID 改为 textarea 多产品输入（逗号/换行分隔）
@@ -624,6 +626,8 @@ const FALLBACK_DYN_VARS = [
 ]
 const dynamicVarList = ref([...FALLBACK_DYN_VARS])
 const _loadedVarKey = ref('')
+let _loadingVarKey = ''
+let _contextVarsRequest = 0
 
 // 当前技能是否为「纯直传透传」数据源：生效接口全是直传透传（含营销助手统一接口）。
 // 这种模式下话术只引用**原字段名**（{products}/{userinfo}/{userinfo_json}/{recommended_packages}
@@ -658,23 +662,43 @@ const productVars = computed(() =>
   dynamicVarList.value.filter(v => v.source === 'recommended_product'))
 
 async function loadContextVars(province, intent) {
-  const key = `${province}:${intent}`
-  if (!province || !intent || _loadedVarKey.value === key) return
+  const draft = props.draftApiNodes
+  const key = draft !== null ? `draft:${JSON.stringify(draft)}` : `${province}:${intent}`
+  if (draft === null && (!province || !intent)) return
+  if (_loadedVarKey.value === key || _loadingVarKey === key) return
+  const request = ++_contextVarsRequest
+  _loadingVarKey = key
+  _loadedVarKey.value = ''
+  dynamicVarList.value = [...FALLBACK_DYN_VARS]
   try {
-    const res = await apiFetch(`/api/skills/${encodeURIComponent(province)}/${encodeURIComponent(intent)}/context_vars`)
+    const res = draft !== null
+      ? await apiFetch('/api/skills/context_vars/preview', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_nodes: draft }),
+      })
+      : await apiFetch(`/api/skills/${encodeURIComponent(province)}/${encodeURIComponent(intent)}/context_vars`)
     const json = await res.json()
-    if (json.code === 200 && Array.isArray(json.data) && json.data.length) {
+    // 切换接口或关闭弹窗后，较早返回的请求不能覆盖当前草稿字段。
+    if (request !== _contextVarsRequest) return
+    if (res.ok && json.code === 200 && Array.isArray(json.data)) {
       dynamicVarList.value = json.data
       _loadedVarKey.value = key
     }
-  } catch (_) { /* 静默降级 */ }
+  } catch (_) { /* 保留基础变量，不沿用上一份接口配置的字段 */ }
+  finally { if (request === _contextVarsRequest) _loadingVarKey = '' }
 }
 
-// (province, intent) 变化时重新加载动态变量
-watch(() => [form.province, form.intent || form.template_name, props.multiProduct, props.modelValue], ([p, i, mp, open]) => {
-  if (!mp || !open) return
-  if (p && i) loadContextVars(p, i)
-})
+// 创建页跟随当前接口配置变化；已发布配置每次打开弹窗重新取数。
+watch(() => [form.province, form.intent || form.template_name, props.multiProduct, props.modelValue, props.draftApiNodes], ([p, i, mp, open]) => {
+  if (!mp || !open) {
+    _contextVarsRequest++
+    _loadingVarKey = ''
+    _loadedVarKey.value = ''
+    dynamicVarList.value = [...FALLBACK_DYN_VARS]
+    return
+  }
+  loadContextVars(p, i)
+}, { deep: true })
 
 // 当前已勾选接口产出的所有 slot 集合
 const providedSlotKeys = computed(() => {
@@ -1245,7 +1269,7 @@ watch(
     })
     customVarInput.value = ''
     // 触发动态变量加载（multiProduct 模式）
-    if (props.multiProduct && form.province && (form.intent || form.template_name)) {
+    if (props.multiProduct && (props.draftApiNodes !== null || (form.province && (form.intent || form.template_name)))) {
       loadContextVars(form.province, form.intent || form.template_name)
     }
   },

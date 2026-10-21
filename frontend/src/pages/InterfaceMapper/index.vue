@@ -113,6 +113,7 @@
 </template>
 
 <script setup>
+import { encodePathSegments } from '@/utils/apiPath'
 import { ref, reactive, onMounted } from 'vue'
 import { apiUrl, apiFetch } from '@/utils/apiUrl'
 
@@ -182,7 +183,7 @@ async function saveAll() {
     try { tr = JSON.parse(api._tr_str || '{}') } catch { showToast(`${api.api_name}: field_transform JSON 错误`, false); saving.value = false; return }
     const body = { _comment: api._comment, url: api.url, method: api.method, enabled: true, request_template: req, response_extract: ext, field_transform: tr }
     try {
-      const res = await apiFetch(`/api/interfaces/${wizard.province}/${wizard.intent}/${api.api_name}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const res = await apiFetch(`/api/interfaces/${encodePathSegments(wizard.province, wizard.intent, api.api_name)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const json = await res.json()
       if (json.code === 200) {
         ok++

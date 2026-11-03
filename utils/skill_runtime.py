@@ -81,6 +81,11 @@ class SkillRuntimeLoader:
     def __init__(self, root: Optional[Path] = None) -> None:
         self.root = root or self.SKILLS_ROOT
 
+    @staticmethod
+    def is_intent_name(name: str) -> bool:
+        """备份和内部目录不作为正式技能包加载。"""
+        return not name.startswith((".", "__")) and ".bak." not in name and name != "config"
+
     def list_provinces(self) -> List[str]:
         return [
             d.name for d in self.root.iterdir()
@@ -93,7 +98,7 @@ class SkillRuntimeLoader:
             return []
         return [
             d.name for d in pdir.iterdir()
-            if d.is_dir() and not d.name.startswith(".") and d.name != "config"
+            if d.is_dir() and self.is_intent_name(d.name)
         ]
 
     def load_package(
@@ -117,6 +122,8 @@ class SkillRuntimeLoader:
         本地目录不存在时不再直接失败：production 模式下若 ES/Redis 中
         存在该技能包的已发布配置（含仅存于 ES 的技能包），仍可正常加载。
         """
+        if not self.is_intent_name(intent):
+            return None
         base = self.root / province / intent
         local_exists = base.exists()
         if not local_exists and (force_local or IS_DEV):
@@ -217,6 +224,8 @@ class SkillRuntimeLoader:
                     for key in es_bulk.keys():
                         if key not in seen and ":" in key:
                             province, intent = key.split(":", 1)
+                            if not self.is_intent_name(intent):
+                                continue
                             keys.append((province, intent))
                             seen.add(key)
                             logger.info(f"[SkillLoader] 发现仅存于 ES 的技能包: {key}")

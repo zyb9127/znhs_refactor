@@ -219,79 +219,14 @@
     "response_extract": {},
     "field_transform": {},
     "request_variant": "marketing_assistant",
-    "updated_by": "13811601301",
-    "updated_at": "2026-08-25 10:57:45",
+    "updated_by": "admin",
+    "updated_at": "2026-10-23 15:58:39",
     "derived_fields": {
-      "当月资源": {
-        "type": "array_find",
-        "from": "userinfo_json",
-        "where": {
-          "timeType": "0"
-        }
-      },
-      "上月资源": {
-        "type": "array_find",
-        "from": "userinfo_json",
-        "where": {
-          "timeType": "1"
-        }
-      },
-      "超套费用合计": {
-        "type": "sum",
-        "from": [
-          "当月资源.over_flow_fee",
-          "当月资源.over_voice_fee"
-        ]
-      },
-      "推荐场景": {
-        "type": "bucket",
-        "from": "超套费用合计",
-        "rules": [
-          {
-            "lt": 1,
-            "value": "场景一"
-          },
-          {
-            "value": "场景二"
-          }
-        ]
-      },
-      "账单解释提示": {
-        "type": "bucket",
-        "rules": [
-          {
-            "when": {
-              "当月资源.over_flow_fee": {
-                "ne": 0
-              },
-              "当月资源.over_flow": {
-                "eq": 0
-              }
-            },
-            "value": "请结合账单与资源使用情况为客户解释"
-          },
-          {
-            "when": {
-              "当月资源.over_voice_fee": {
-                "ne": 0
-              },
-              "当月资源.over_voice": {
-                "eq": 0
-              }
-            },
-            "value": "请结合账单与资源使用情况为客户解释"
-          },
-          {
-            "value": ""
-          }
-        ]
-      },
       "超套分月明细": {
         "_comment": "有多少个月超套就展示多少个月：按 timeType 升序逐月渲染，量或费任一不为空即视为超套月；逐月追加账单异常提示",
         "type": "array_render",
         "verbatim": true,
         "from": "userinfo_json",
-        "match": "any",
         "where": {
           "over_flow": {
             "gt": 0
@@ -306,6 +241,7 @@
             "ne": 0
           }
         },
+        "match": "any",
         "sort_by": "timeType",
         "order": "asc",
         "label_field": "timeType",
@@ -345,6 +281,28 @@
         ],
         "item_template": "{label}流量超出{over_flow}，超套费用{over_flow_fee}元。分钟超出{over_voice}，超套费用{over_voice_fee}元，{账单提示}",
         "join": "\n"
+      },
+      "总超套费用": {
+        "type": "sum",
+        "from": [
+          "userinfo_json.0.over_flow_fee",
+          "userinfo_json.1.over_flow_fee",
+          "userinfo_json.1.over_voice_fee",
+          "userinfo_json.0.over_voice_fee"
+        ]
+      },
+      "推荐场景": {
+        "type": "bucket",
+        "from": "总超套费用",
+        "rules": [
+          {
+            "lt": 5,
+            "value": "场景一"
+          },
+          {
+            "value": "场景二"
+          }
+        ]
       }
     }
   }

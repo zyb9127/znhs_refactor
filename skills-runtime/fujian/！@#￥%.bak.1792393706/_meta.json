@@ -1,12 +1,12 @@
 {
-  "skill_id": "fujian-测试",
-  "name": "fujian-测试",
-  "description": "测试",
+  "skill_id": "fujian-！@#￥%",
+  "name": "fujian-！@#￥%",
+  "description": "",
   "version": "1.0.0",
-  "status": "published",
+  "status": "offline",
   "type": "scenario",
   "province": "fujian",
-  "scenario_id": "测试",
+  "scenario_id": "！@#￥%",
   "config_files": [
     "api_nodes.json",
     "biz_config.json"
@@ -17,8 +17,8 @@
   ],
   "author": "admin",
   "created_by": "auto_config_agent",
-  "created_at": "2026-08-10 15:59",
-  "updated_at": "2026-08-10 15:59",
+  "created_at": "2026-10-19 11:35",
+  "updated_at": "2026-10-19 11:35",
   "openclaw_compatible": true,
-  "published_at": "2026-08-10 16:07"
+  "offline_at": "2026-10-19 15:08"
 }

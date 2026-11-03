@@ -151,6 +151,72 @@ class ValidateRequest(BaseModel):
 
 # ── 工具函数 ─────────────────────────────────────
 
+def _is_skill_intent(name: str) -> bool:
+    """正式配置目录；与 SkillRuntimeLoader.list_intents 的过滤规则一致。"""
+    return not name.startswith((".", "__")) and ".bak." not in name and name != "config"
+
+
+def _skill_status_is_local() -> bool:
+    try:
+        from utils.skill_runtime import IS_DEV
+        return IS_DEV
+    except ImportError:
+        return True  # 独立启动时以本地文件为准
+
+
+def _read_skill_status(province: str, intent: str, pkg=None) -> str:
+    """列表、删除校验、状态变更统一使用相同的状态来源优先级。"""
+    local_status = None
+    meta_path = SKILLS_RUNTIME / province / intent / "_meta.json"
+    if meta_path.exists():
+        try:
+            local_status = json.loads(meta_path.read_text(encoding="utf-8")).get("status")
+        except Exception as e:
+            logger.warning("读取本地 Skill 状态失败 %s/%s: %s", province, intent, e)
+    runtime_status = (((pkg.meta if pkg else None) or {}).get("skill_meta") or {}).get("status")
+    if _skill_status_is_local():
+        return local_status or runtime_status or "published"
+    return runtime_status or local_status or "published"
+
+
+def _save_skill_status(province: str, intent: str, overrides: Dict[str, Any], pkg=None) -> None:
+    """先持久化到当前环境真源，成功后同步本实例；生产本地文件仅为快照。"""
+    is_local = _skill_status_is_local()
+    if not is_local:
+        from services.skill_meta_service import upsert_skill_meta
+        if not upsert_skill_meta(province, intent, operator="status_change", overrides=overrides):
+            raise HTTPException(status_code=500, detail="状态写入 ES skill_meta 失败，请检查 ES 可用性后重试。")
+
+    skill_dir = SKILLS_RUNTIME / province / intent
+    if is_local and not skill_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"本地 Skill 不存在：{province}/{intent}")
+    if skill_dir.is_dir():
+        meta_path = skill_dir / "_meta.json"
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+            meta.update(overrides)
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:
+            if is_local:
+                raise HTTPException(status_code=500, detail="本地状态保存失败，请检查文件权限或内容后重试。") from e
+            logger.warning("写本地 _meta.json 快照失败（ES 状态已保存）: %s", e)
+
+    if pkg is not None:
+        if pkg.meta is None:
+            pkg.meta = {}
+        sm = dict(pkg.meta.get("skill_meta") or {})
+        sm.update(overrides)
+        pkg.meta["skill_meta"] = sm
+
+    if not is_local:
+        try:
+            from services.redis_config_bus import redis_config_bus
+            if redis_config_bus.enabled:
+                redis_config_bus.publish_change(province, intent)
+        except Exception as e:
+            logger.warning("状态变更广播失败（其他实例可能延迟感知）: %s", e)
+
+
 def _discover_skills() -> Dict[str, Any]:
     """从 skills-runtime 目录自动发现省份和意图。"""
     result: Dict[str, Any] = {}
@@ -179,7 +245,7 @@ def _discover_skills() -> Dict[str, Any]:
 
         intents: List[Dict[str, Any]] = []
         for intent_dir in sorted(province_dir.iterdir()):
-            if not intent_dir.is_dir() or intent_dir.name == "__pycache__":
+            if not intent_dir.is_dir() or not _is_skill_intent(intent_dir.name):
                 continue
             meta_path = intent_dir / "_meta.json"
             intent_info: Dict[str, Any] = {
@@ -1151,28 +1217,7 @@ async def reload_skill(province: str, intent: str):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     overrides = {"status": "published", "published_at": now}
 
-    # 本地 _meta.json 快照（目录存在才写）
-    meta_path = skill_dir / "_meta.json"
-    if meta_path.exists():
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            meta.update(overrides)
-            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            pass
-
-    # 生产模式：状态写入 ES skill_meta（列表页真源）+ 本实例内存
-    try:
-        from utils.skill_runtime import IS_DEV
-        if not IS_DEV:
-            from services.skill_meta_service import upsert_skill_meta
-            if upsert_skill_meta(province, intent, operator="status_change",
-                                 overrides=overrides) and _pkg is not None:
-                sm = dict(((_pkg.meta or {}).get("skill_meta")) or {})
-                sm.update(overrides)
-                _pkg.meta["skill_meta"] = sm
-    except ImportError:
-        pass
+    _save_skill_status(province, intent, overrides, _pkg)
 
     result = await _trigger_reload(province, intent)
     return result
@@ -1272,7 +1317,7 @@ async def list_skills(province: str = "", intent: str = ""):
             # 跳过备份目录（含 .bak.）和非目录
             if not intent_dir.is_dir():
                 continue
-            if ".bak." in intent_dir.name or intent_dir.name.startswith("__"):
+            if not _is_skill_intent(intent_dir.name):
                 continue
             iname = intent_dir.name
             if intent and iname != intent:
@@ -1373,6 +1418,7 @@ async def list_skills(province: str = "", intent: str = ""):
             # 统计字段以 skill_registry 中真正生效的配置为准，
             # 并标注 config_source（es/redis/local），本地文件仅作兜底。
             skill["config_source"] = "local"
+            pkg = None
             if _registry is not None:
                 try:
                     pkg = _registry.get(pcode, iname)
@@ -1384,7 +1430,7 @@ async def list_skills(province: str = "", intent: str = ""):
                     # ES 中的结构化 skill 信息（skill_meta）优先于本地 _meta.json
                     sm = (pkg.meta or {}).get("skill_meta") or {}
                     if sm:
-                        skill["meta_source"] = "es"
+                        skill["meta_source"] = "local" if _skill_status_is_local() else "es"
                         for k in ("skill_id", "skill_name", "version", "status",
                                   "description", "author", "created_by",
                                   "created_at", "updated_at"):
@@ -1405,6 +1451,8 @@ async def list_skills(province: str = "", intent: str = ""):
                     if live_biz:
                         skill["template_count"] = len(live_biz.get("script_templates_v2") or [])
                         skill["top_n"] = (live_biz.get("strategy") or {}).get("top_n", 0)
+
+            skill["status"] = _read_skill_status(pcode, iname, pkg)
 
             # ── 历史备份数 ────────────────────────
             skill["backup_count"] = sum(
@@ -1428,6 +1476,8 @@ async def list_skills(province: str = "", intent: str = ""):
             if key in seen_keys or ":" not in key:
                 continue
             pcode, iname = key.split(":", 1)
+            if not _is_skill_intent(iname):
+                continue
             if (province and pcode != province) or (intent and iname != intent):
                 continue
             pkg = _registry.get(pcode, iname)
@@ -1443,7 +1493,7 @@ async def list_skills(province: str = "", intent: str = ""):
                 "skill_id":        sm.get("skill_id", f"{pcode}-{iname}"),
                 "skill_name":      sm.get("skill_name", f"{pcode} · {iname}"),
                 "version":         sm.get("version", pkg.version),
-                "status":          sm.get("status", "published"),
+                "status":          _read_skill_status(pcode, iname, pkg),
                 "description":     sm.get("description", ""),
                 "author":          sm.get("author", ""),
                 "created_by":      sm.get("created_by", ""),
@@ -1464,7 +1514,7 @@ async def list_skills(province: str = "", intent: str = ""):
                 "backup_count":    0,
                 "config_source":   (pkg.meta or {}).get("config_source", "es"),
                 "config_loaded_at": (pkg.meta or {}).get("loaded_at", ""),
-                "meta_source":     "es" if sm else "runtime",
+                "meta_source":     "local" if _skill_status_is_local() else ("es" if sm else "runtime"),
                 "local_missing":   True,
             })
             logger.info("[list_skills] 并入仅存于 ES 的技能: %s", key)
@@ -2219,16 +2269,7 @@ async def delete_skill(province: str, intent: str, request: Request, backup: boo
         raise HTTPException(status_code=404, detail=f"Skill 不存在：{province}/{intent}")
 
     # 安全机制：已发布的 Skill 不允许直接删除，须先下线。
-    # 状态判定与列表页一致：ES skill_meta 优先，本地 _meta.json 兜底。
-    status_check = (
-        (((_pkg.meta if _pkg else None) or {}).get("skill_meta") or {}).get("status")
-    )
-    meta_path = skill_dir / "_meta.json"
-    if not status_check and meta_path.exists():
-        try:
-            status_check = json.loads(meta_path.read_text(encoding="utf-8")).get("status")
-        except Exception:
-            status_check = None
+    status_check = _read_skill_status(province, intent, _pkg)
     if status_check == "published":
         raise HTTPException(
             status_code=409,
@@ -2481,17 +2522,7 @@ async def update_skill_status(province: str, intent: str, req: SkillStatusReques
     if not skill_dir.exists() and _pkg is None:
         raise HTTPException(status_code=404, detail=f"Skill 不存在：{province}/{intent}")
 
-    # 旧状态：本地 _meta.json → ES skill_meta → unknown
-    meta_path = skill_dir / "_meta.json"
-    meta: Dict[str, Any] = {}
-    if meta_path.exists():
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    old_status = meta.get("status") or (
-        ((_pkg.meta if _pkg else None) or {}).get("skill_meta") or {}
-    ).get("status") or "unknown"
+    old_status = _read_skill_status(province, intent, _pkg)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     overrides: Dict[str, Any] = {"status": req.status}
@@ -2500,43 +2531,7 @@ async def update_skill_status(province: str, intent: str, req: SkillStatusReques
     elif req.status == "offline":
         overrides["offline_at"] = now
 
-    # 本地 _meta.json 快照（目录存在才写，best-effort）
-    if skill_dir.exists():
-        try:
-            meta.update(overrides)
-            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception as e:
-            logger.warning("写本地 _meta.json 失败（不影响状态变更）: %s", e)
-
-    # 生产模式：状态写入 ES skill_meta（列表页真源）+ Redis 缓存 + 广播其他实例
-    try:
-        from utils.skill_runtime import IS_DEV
-        if not IS_DEV:
-            from services.skill_meta_service import upsert_skill_meta
-            if not upsert_skill_meta(province, intent, operator="status_change",
-                                     overrides=overrides):
-                raise HTTPException(
-                    status_code=500,
-                    detail=(
-                        f"状态写入 ES skill_meta 失败（生产列表以 ES 为准，"
-                        f"页面状态将仍显示「{old_status}」）。请检查 ES 可用性后重试。"
-                    ),
-                )
-            # 本实例内存同步（upsert 已写 ES + Redis，其他实例经广播 reload 感知）
-            if _pkg is not None:
-                sm = dict(((_pkg.meta or {}).get("skill_meta")) or {})
-                sm.update(overrides)
-                _pkg.meta["skill_meta"] = sm
-            try:
-                from services.redis_config_bus import redis_config_bus
-                if redis_config_bus.enabled:
-                    redis_config_bus.publish_change(province, intent)
-            except Exception as e:
-                logger.warning("状态变更广播失败（其他实例可能延迟感知）: %s", e)
-    except HTTPException:
-        raise
-    except ImportError:
-        logger.warning("skill_registry/skill_meta_service 不可用（独立启动模式），状态仅写本地文件")
+    _save_skill_status(province, intent, overrides, _pkg)
 
     logger.info("Skill 状态变更: %s/%s  %s → %s", province, intent, old_status, req.status)
 

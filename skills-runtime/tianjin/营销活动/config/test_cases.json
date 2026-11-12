@@ -70,6 +70,69 @@
         }
       },
       "updated_at": "2026-10-22T02:47:01.128Z"
+    },
+    {
+      "name": "13",
+      "payload": {
+        "params": {
+          "systemId": "NGRC",
+          "optType": "0",
+          "inputs": {
+            "sequenceNo": "91579d34-1ea8-4635-90d7-76700281a64e",
+            "servNumber": "13800138000",
+            "provinceCode": "371",
+            "callId": "CALL_20230810_0001",
+            "staffId": "A10086",
+            "staffNo": "10086",
+            "touchNumber": "TOUCH_20230810_0001",
+            "userinfo": {
+              "currentPackageProductId": "PKG_123456",
+              "currentPackageProductName": "5G畅享融合套餐129元档",
+              "currPrice": "129",
+              "currDomesticTraffic": "30",
+              "currDescribe": "含30GB通用流量",
+              "currDirectedTraffic": "10",
+              "currDomesticVoice": "500",
+              "currBroadband": "500M",
+              "is_sub_card": "0",
+              "userExtra": {
+                "last3mFlowSaturation": "10",
+                "last3mVoiceSaturation": "10"
+              }
+            },
+            "products": [
+              {
+                "activityId": "ACT_20230801",
+                "productId": "20266527188432",
+                "price": "59",
+                "discount_price": "39.58",
+                "Cmn_flow": "20",
+                "voice": "200",
+                "direct_flow": "30",
+                "business_type": "流量包",
+                "gift_cmn_flow": "0",
+                "product_desc": "高性价比5G套餐，含大流量和语音",
+                "marketingProductFlag": "1",
+                "marketingActivityFlag": "1",
+                "productName": "5G特惠月租卡",
+                "activityTypeCode": "TYPE_01",
+                "activityTypeName": "营销活动"
+              }
+            ],
+            "userinfo_json": [
+              {
+                "timeType": "0",
+                "over_cmn_flow": "",
+                "over_voice": "0",
+                "user_consume": "0",
+                "over_flow_fee": "0",
+                "over_voice_fee": "0"
+              }
+            ]
+          }
+        }
+      },
+      "updated_at": "2026-11-11T06:26:15.639Z"
     }
   ]
 }
